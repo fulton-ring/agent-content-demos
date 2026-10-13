@@ -29,7 +29,10 @@ document:
 Writes output/<model>/extracted.json in the same shape as extract.py, so
 evaluate.py and report.py work on both. Never reads the answer keys.
 
-    python extract_vlm.py qwen/qwen3-vl-235b-a22b-instruct [file filter ...]
+    python extract_vlm.py qwen/qwen3-vl-235b-a22b-instruct [--prompted] [--model-only] [file filter ...]
+
+--model-only skips the second read and writes output/<model>-alone/: the model's
+own answers, for scoring a model on its own and for pairing two models (pair.py).
 
 Needs OPENROUTER_API_KEY in the environment.
 """
@@ -42,14 +45,14 @@ import os
 import re
 import sys
 import time
+import urllib.request
 from pathlib import Path
 from typing import Literal
 
 import pypdfium2 as pdfium
 from pydantic import BaseModel, Field
-from pydantic_ai import Agent, BinaryContent
-from pydantic_ai.models.openrouter import OpenRouterModel
-from pydantic_ai.settings import ModelSettings
+from pydantic_ai import Agent, BinaryContent, PromptedOutput
+from pydantic_ai.models.openrouter import OpenRouterModel, OpenRouterModelSettings
 
 from extract import Page as TemplatePage
 from extract import (AMOUNT_AREA, B_COLS, BROKER_LINES, BROKER_ROWS, CODED_AREA, HEADER_LABELS, K1_1065, K1_LABELS,
@@ -63,6 +66,7 @@ PT = 300 / 72  # pixel units per PDF point, the same as extract.py so its label 
 IMAGE_DPI = 200  # what the model sees
 CONFIDENCE_MIN = 0.9
 PARALLEL = 6
+REASONING_EFFORT = "low"
 
 
 # ---------------------------------------------------------------- what the model returns
@@ -374,6 +378,12 @@ def k1_fields(reader, form, out, labels, regions):
             fields.append(field(page, key, f"{label}, code {code or '?'}" if coded else label, value, raw, bbox_of(ws), 0,
                                 [f"the second read shows '{raw}' in box {b}, but the model didn't report it"]))
 
+    k1_crosschecks(fields, form)
+    return fields
+
+
+def k1_crosschecks(fields, form):
+    """The same cross-checks as extract.py: qualified dividends against ordinary, and 4a + 4b = 4c."""
     def get(k):
         return next((f for f in fields if f["key"] == k), None)
 
@@ -390,7 +400,6 @@ def k1_fields(reader, form, out, labels, regions):
             for k in ("4a", "4b", "4c"):
                 if get(k):
                     get(k)["reasons"].append("4a + 4b doesn't equal 4c")
-    return fields
 
 
 # ---------------------------------------------------------------- brokerage 1099
@@ -464,16 +473,24 @@ def broker_fields(reader, detail_page, out):
             fields.append(field(page, f"B {term} {col}", f"1099-B {label}: {col}", value, v.printed,
                                 bbox_of([w]) if w else reader.model_box(v), v.confidence, reasons))
 
+    broker_crosschecks(fields, detail_page)
+    return fields
+
+
+def broker_crosschecks(fields, detail_page, check_detail=True):
+    """1b within 1a, each 1099-B row balancing, and (with a read of the detail page) each row matching its lots."""
     def get(k):
-        return next(f for f in fields if f["key"] == k)
+        return next((f for f in fields if f["key"] == k), None)
 
     a, q = get("DIV 1a"), get("DIV 1b")
-    if isinstance(a["value"], (int, float)) and isinstance(q["value"], (int, float)) and q["value"] > a["value"]:
+    if a and q and isinstance(a["value"], (int, float)) and isinstance(q["value"], (int, float)) and q["value"] > a["value"]:
         for f in (a, q):
             f["reasons"].append("qualified dividends (1b) exceed ordinary dividends (1a)")
     detail, detail_ok = detail_totals(detail_page) if detail_page else ({}, False)
     for term in BROKER_ROWS:
         row = [get(f"B {term} {c}") for c in B_COLS]
+        if not all(row):
+            continue
         vals = [f["value"] for f in row]
         if not all(isinstance(v, (int, float)) for v in vals):
             continue
@@ -481,11 +498,61 @@ def broker_fields(reader, detail_page, out):
         if abs(p - c + wsh - g) > 0.011:
             for f in row:
                 f["reasons"].append("proceeds - cost + wash sale doesn't equal gain or loss")
+        if not check_detail:
+            continue
         for f, total in zip(row, detail.get(term, [None] * 4)):
             if not detail_ok:
                 f["reasons"].append("couldn't read the detail page to check this total")
             elif abs(f["value"] - total) > 0.011:
                 f["reasons"].append(f"doesn't match the detail page total ({total:,.2f})")
+
+
+# ---------------------------------------------------------------- the model on its own
+
+def model_fields(page, form, out, labels):
+    """The model's answer as fields, with no second read: for scoring a model on its own, and for pairing two models
+    (pair.py). Values still go to review for low confidence, STMT, a malformed amount, a missing code or a failed
+    cross-check, which need nothing but the model's answer."""
+    fields, seen = [], set()
+
+    def add(key, label, v, reasons=()):
+        if key.startswith("payer"):  # a name or EIN, not an amount
+            reasons = list(reasons) + ([] if v.confidence >= CONFIDENCE_MIN else [f"the model's confidence is {v.confidence:.2f}"])
+        else:
+            reasons = list(reasons) + model_reasons(v, "amount", allow_text=key.startswith("16 "))
+        if key in seen:
+            reasons.insert(0, f"{key} appears twice")
+            key = f"{key} (again)"
+        seen.add(key)
+        fields.append(field(page, key, label, parse_value(v.printed)[0] if not key.startswith("payer") else v.printed.split("\n")[0].strip(),
+                            v.printed, page.to_px(v.bbox) if len(v.bbox) == 4 else None, v.confidence, reasons))
+
+    if form == "BROKER":
+        for key, label in BROKER_LINES.items():
+            v = getattr(out, key.replace(" ", "_"))
+            if v is not None:
+                add(key, label, v)
+        for term, label in BROKER_ROWS.items():
+            row = getattr(out, f"B_{term}")
+            for col in B_COLS:
+                if row is not None:
+                    add(f"B {term} {col}", f"1099-B {label}: {col}", getattr(row, col))
+        broker_crosschecks(fields, None, check_detail=False)
+        return fields
+    for key, label in zip(("payer_ein", "payer_name"), HEADER_LABELS[form]):
+        if getattr(out, key) is not None:
+            add(key, label, getattr(out, key))
+    for r in out.boxes:
+        label, kind = labels.get(r.box, (K1_1065.get(r.box, ("", ""))[0], "amount"))
+        reasons = [] if r.box in labels else [f"Form {form} for this year has no box {r.box}"]
+        key = r.box
+        if kind == "coded":
+            code = code_of(r.code.strip().replace(" ", "")) if (r.code or "").strip() else "?"
+            if code == "?":
+                reasons.append("the model gave no code for a row in a coded box")
+            key, label = f"{r.box} {code}", f"{label}, code {code}"
+        add(key, label, r.value, reasons)
+    k1_crosschecks(fields, form)
     return fields
 
 
@@ -510,14 +577,33 @@ def statement_page_for(pages, box):
 
 # ---------------------------------------------------------------- running it
 
+def model_price(model_name):
+    """OpenRouter's listed (input, output) price per token for a model."""
+    req = urllib.request.Request("https://openrouter.ai/api/v1/models",
+                                 headers={"Authorization": f"Bearer {os.environ['OPENROUTER_API_KEY']}"})
+    for m in json.loads(urllib.request.urlopen(req, timeout=60).read())["data"]:
+        if m["id"] == model_name:
+            return float(m["pricing"]["prompt"]), float(m["pricing"]["completion"])
+    return 0.0, 0.0
+
+
 class Runner:
-    def __init__(self, model_name):
-        self.model = OpenRouterModel(model_name, settings=ModelSettings(temperature=0, max_tokens=8000))
+    def __init__(self, model_name, prompted=False):
+        # Reading a form doesn't need long reasoning. Thinking models (GLM 5.3, Gemini 3.x, Qwen 3.8) get a low
+        # reasoning effort, so they don't spend their whole output budget thinking; OpenRouter ignores the setting
+        # for models that don't reason.
+        self.model = OpenRouterModel(model_name, settings=OpenRouterModelSettings(
+            temperature=0, max_tokens=8000, openrouter_reasoning={"effort": REASONING_EFFORT}))
+        self.price = model_price(model_name)
         self.sem = asyncio.Semaphore(PARALLEL)
+        self.prompted = prompted
         self.cost = {}
 
     async def ask(self, doc, output_type, prompt, images):
-        agent = Agent(self.model, output_type=output_type, instructions=INSTRUCTIONS, retries=2)
+        # Typed output goes through a forced tool call by default. Some thinking models' providers refuse a forced
+        # tool call; --prompted puts the schema in the prompt and validates the JSON that comes back.
+        agent = Agent(self.model, output_type=PromptedOutput(output_type) if self.prompted else output_type,
+                      instructions=INSTRUCTIONS, retries=2)
         parts = [prompt] + [BinaryContent(png, media_type="image/png") for png in images]
         async with self.sem:
             for attempt in range(6):
@@ -531,7 +617,9 @@ class Runner:
                     print(f"  {doc}: retrying after {type(e).__name__}: {str(e)[:120]}")
                     await asyncio.sleep(15 * (attempt + 1))
         c = self.cost.setdefault(doc, {"usd": 0.0, "input_tokens": 0, "output_tokens": 0, "calls": 0, "seconds": 0.0})
-        c["usd"] += float(r.usage.cost or 0)
+        # OpenRouter's own cost for the call when it reports one, else the listed per-token price.
+        c["usd"] += float(r.usage.cost) if r.usage.cost else (
+            r.usage.input_tokens * self.price[0] + r.usage.output_tokens * self.price[1])
         c["input_tokens"] += r.usage.input_tokens
         c["output_tokens"] += r.usage.output_tokens
         c["calls"] += 1
@@ -553,7 +641,7 @@ async def process(runner, path, out_dir):
             form, main = k1_kind(p.text), p
             break
     tp = None
-    if form is None or (form != "BROKER" and not main.text_layer):
+    if not runner.model_only and (form is None or (form != "BROKER" and not main.text_layer)):
         # A scanned K-1: line it up with the blank IRS forms for its box labels. The best fit also gives the form
         # and year when Docling's OCR couldn't make out the title.
         cand = main or pages[0]
@@ -578,9 +666,12 @@ async def process(runner, path, out_dir):
     if form == "BROKER":
         out = await runner.ask(doc, Brokerage1099, "Read the summary amounts on this consolidated brokerage 1099 page.", [png])
         raw["extraction"] = out.model_dump()
-        tp = TemplatePage(path, main.index)  # no blank form fits a brokerage statement, so this OCRs the whole page
-        detail = TemplatePage(path, main.index + 1) if len(pages) > main.index + 1 else None
-        fields = broker_fields(Reader(main, tp), detail, out)
+        if runner.model_only:
+            fields = model_fields(main, form, out, {})
+        else:
+            tp = TemplatePage(path, main.index)  # no blank form fits a brokerage statement, so this OCRs the whole page
+            detail = TemplatePage(path, main.index + 1) if len(pages) > main.index + 1 else None
+            fields = broker_fields(Reader(main, tp), detail, out)
     else:
         names = k1_1065_labels(2025) if form == "1065" else K1_LABELS[form]
         guide = "; ".join(f"{b} {label}" + (" (coded)" if k == "coded" else "") for b, (label, k) in names.items())
@@ -593,9 +684,12 @@ async def process(runner, path, out_dir):
         raw["extraction"] = out.model_dump()
         if tp is None:
             year = k1_year(main) if re.search(r"calendar\s*year\s*20\d\d", main.text, re.I) else out.tax_year
-        reader = Reader(main, tp)
-        labels, regions = k1_regions(reader.labels, form, year)
-        fields = k1_fields(reader, form, out, labels, regions)
+        if runner.model_only:
+            fields = model_fields(main, form, out, k1_1065_labels(year) if form == "1065" else K1_LABELS[form])
+        else:
+            reader = Reader(main, tp)
+            labels, regions = k1_regions(reader.labels, form, year)
+            fields = k1_fields(reader, form, out, labels, regions)
         stmts = [p for p in pages if p.index > main.index and statement_rows(p)]
         # Amounts on a statement: the model reads the statement page and suggests the lines for that box.
         for f in fields:
@@ -645,7 +739,7 @@ async def process(runner, path, out_dir):
     (out_dir / "raw" / (path.stem + ".json")).write_text(json.dumps(raw, indent=1))
     c = runner.cost.get(doc, {})
     return {"file": doc, "form": form, "year": year, "source": "text layer" if main.text_layer else "OCR",
-            "second_read": "Tesseract, box by box" if tp else "Docling",
+            "second_read": "none" if runner.model_only else ("Tesseract, box by box" if tp else "Docling"),
             "pages": page_files, "seconds": round(layout["seconds"] + c.get("seconds", 0), 1),
             "docling_seconds": layout["seconds"], "model_seconds": round(c.get("seconds", 0), 1),
             "cost_usd": round(c.get("usd", 0), 6), "input_tokens": c.get("input_tokens", 0),
@@ -659,14 +753,18 @@ def slug(model_name):
 async def main():
     if not os.environ.get("OPENROUTER_API_KEY"):
         sys.exit("OPENROUTER_API_KEY isn't set")
-    model_name = sys.argv[1]
-    out_dir = HERE / "output" / slug(model_name)
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    prompted = "--prompted" in sys.argv
+    model_only = "--model-only" in sys.argv
+    model_name = args[0]
+    out_dir = HERE / "output" / (slug(model_name) + ("-alone" if "--model-only" in sys.argv else ""))
     (out_dir / "pages").mkdir(parents=True, exist_ok=True)
     (out_dir / "raw").mkdir(exist_ok=True)
     files = sorted(SAMPLES.glob("*.pdf"))
-    if len(sys.argv) > 2:
-        files = [f for f in files if any(a in f.name for a in sys.argv[2:])]
-    runner = Runner(model_name)
+    if len(args) > 1:
+        files = [f for f in files if any(a in f.name for a in args[1:])]
+    runner = Runner(model_name, prompted)
+    runner.model_only = model_only
 
     async def one(path):
         try:
@@ -684,7 +782,8 @@ async def main():
     docs = sorted((d for d in results if d), key=lambda d: d["file"])
     failed = [p.name for p, d in zip(files, results) if not d]
     (out_dir / "extracted.json").write_text(json.dumps({
-        "pipeline": "Docling + vision-language model", "model": model_name, "confidence_min": CONFIDENCE_MIN,
+        "pipeline": "vision-language model alone" if model_only else "Docling + vision-language model", "model": model_name, "reasoning_effort": REASONING_EFFORT,
+        "confidence_min": CONFIDENCE_MIN,
         "image_dpi": IMAGE_DPI, "documents": docs}, indent=1))
     total = sum(d["cost_usd"] for d in docs)
     print(f"{model_name}: {len(docs)} documents, ${total:.4f} in all, ${total / max(1, len(docs)):.4f} per document")

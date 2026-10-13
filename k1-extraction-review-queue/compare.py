@@ -5,8 +5,24 @@ from pathlib import Path
 
 HERE = Path(__file__).parent
 OUT = HERE / "output"
-PIPELINES = [("Tesseract and rules", OUT), ("Docling + Qwen3-VL 235B", OUT / "qwen3-vl-235b"),
-             ("Docling + Qwen3-VL 30B", OUT / "qwen3-vl-30b")]
+
+
+def pipelines():
+    """Every run in output/ that has been scored: the Tesseract pipeline, then each model run and pair by name."""
+    found = [("Tesseract and rules", OUT)] if (OUT / "metrics.json").exists() else []
+    for d in sorted(p for p in OUT.iterdir() if p.is_dir() and (p / "metrics.json").exists()):
+        data = json.loads((d / "extracted.json").read_text())
+        model = data.get("model", d.name)
+        if "models" in data:
+            label = " + ".join(m.split("/")[-1] for m in data["models"]) + ", must agree"
+        elif data.get("pipeline", "").endswith("alone"):
+            label = model.split("/")[-1] + ", alone"
+        else:
+            label = model.split("/")[-1] + ", checked by Docling/Tesseract"
+        found.append((label, d))
+    return found
+
+
 ROWS = [("Held-out set, all", "held_out_set"), ("Tuning set, all", "tuning_set"),
         ("Real K-1s, born-digital", "tuning / real / born-digital"),
         ("Held-out, real K-1 office scans", "held out / real / office scan"),
@@ -21,7 +37,7 @@ def pct(a, b):
 
 
 def main():
-    loaded = [(name, json.loads((d / "metrics.json").read_text())) for name, d in PIPELINES if (d / "metrics.json").exists()]
+    loaded = [(name, json.loads((d / "metrics.json").read_text())) for name, d in pipelines()]
     out = ["# Pipelines compared", "",
            "Same documents, same answer keys. \"Accepted\" values went straight through; the rest went to the review queue. "
            "A silent error is a wrong value that was accepted.", ""]

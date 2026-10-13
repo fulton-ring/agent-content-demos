@@ -1,18 +1,15 @@
 #!/usr/bin/env bash
-# One command: set up, fetch and make the documents, extract, score, and build the review screen.
-#   ./run.sh            everything except the screen recording
-#   ./run.sh --record   also click through the review screen and record it (needs Chromium)
+# One command: set up, fetch and make the documents, extract with each model, score, and build the review screens.
+#   ./run.sh               the model comparison (needs OPENROUTER_API_KEY)
+#   ./run.sh --tesseract   also the Tesseract pipelines: OCR and rules, and Qwen3-VL checked by Tesseract (slow on CPU)
+#   ./run.sh --record      also click through the review screen and record it (needs Chromium)
 #
-# Two pipelines run on the same documents and are scored on the same answer keys:
-#   output/                 Tesseract and rules (extract.py), no model, no network after the downloads
-#   output/qwen3-vl-235b/   Docling + Qwen3-VL 235B through OpenRouter (extract_vlm.py)
-#   output/qwen3-vl-30b/    Docling + Qwen3-VL 30B through OpenRouter
-# The model pipelines run only when OPENROUTER_API_KEY is set. output/comparison.md puts them side by side.
+# Each model reads every document on its own (output/<model>-alone/). pair.py then combines two models' answers,
+# accepting a value only when both read the same thing (output/pair-<a>+<b>/). output/comparison.md has them all.
 set -euo pipefail
 cd "$(dirname "$0")"
-RECORD="${1:-}"
+FLAGS=" $* "
 
-command -v tesseract >/dev/null || { echo "Tesseract is needed: apt install tesseract-ocr (or brew install tesseract)"; exit 1; }
 if [ ! -d .venv ]; then
   python3 -m venv .venv
 fi
@@ -21,28 +18,52 @@ if ! .venv/bin/python -c "import pytesseract, docling, pydantic_ai" 2>/dev/null;
   .venv/bin/pip install -q --extra-index-url https://download.pytorch.org/whl/cpu -r requirements.txt
 fi
 PY=.venv/bin/python
+[ -n "${OPENROUTER_API_KEY:-}" ] || { echo "OPENROUTER_API_KEY is needed"; exit 1; }
 
 $PY generate.py      # made-up 1120-S and 1041 K-1s and brokerage 1099s, with their answer key
 $PY fetch_real.py    # real sample K-1s from the issuers' sites, plus scanned copies
-$PY extract.py       # Tesseract pipeline: read every document
-$PY evaluate.py      # score against the answer keys
-$PY report.py        # output/index.html
+$PY layout.py        # Docling: words, page types and statement tables for every page
 
-if [ -n "${OPENROUTER_API_KEY:-}" ]; then
-  $PY layout.py      # Docling: words, box labels and statement tables for every page
-  for pair in "qwen/qwen3-vl-235b-a22b-instruct qwen3-vl-235b" "qwen/qwen3-vl-30b-a3b-instruct qwen3-vl-30b"; do
-    set -- $pair
-    $PY extract_vlm.py "$1"
-    $PY evaluate.py "output/$2"
-    $PY report.py "output/$2"
-  done
-  $PY compare.py     # output/comparison.md
-else
-  echo "OPENROUTER_API_KEY isn't set, so only the Tesseract pipeline ran."
+# OpenRouter model id, output folder, extra flags. Qwen 3.8's provider refuses the forced tool call Pydantic AI
+# uses for typed output in thinking mode, so it gets the schema in the prompt instead.
+MODELS=(
+  "google/gemini-3.8-flash gemini-3.8-flash"
+  "qwen/qwen3.8-flash qwen3.8-flash --prompted"
+  "qwen/qwen3-vl-235b-a22b-instruct qwen3-vl-235b"
+  "z-ai/glm-5.3-flash glm-5.3-flash"
+  "google/gemma-4-31b-it gemma-4-31b-it"
+)
+pids=()
+for m in "${MODELS[@]}"; do
+  set -- $m
+  id=$1; name=$2; shift 2
+  $PY extract_vlm.py "$id" --model-only "$@" > "output-$name.log" 2>&1 &
+  pids+=($!)
+done
+for p in "${pids[@]}"; do wait "$p" || { echo "a model run failed; see output-*.log"; exit 1; }; done
+for m in "${MODELS[@]}"; do
+  set -- $m
+  $PY evaluate.py "output/$2-alone" > /dev/null
+  $PY report.py "output/$2-alone"
+done
+
+for pair in "gemini-3.8-flash qwen3.8-flash" "gemini-3.8-flash qwen3-vl-235b"; do
+  set -- $pair
+  $PY pair.py "output/$1-alone" "output/$2-alone"
+  $PY evaluate.py "output/pair-$1+$2" > /dev/null
+  $PY report.py "output/pair-$1+$2"
+done
+
+if [[ "$FLAGS" == *" --tesseract "* ]]; then
+  command -v tesseract >/dev/null || { echo "Tesseract is needed: apt install tesseract-ocr"; exit 1; }
+  $PY extract.py && $PY evaluate.py > /dev/null && $PY report.py
+  $PY extract_vlm.py qwen/qwen3-vl-235b-a22b-instruct && $PY evaluate.py output/qwen3-vl-235b > /dev/null && $PY report.py output/qwen3-vl-235b
 fi
 
-if [ "$RECORD" = "--record" ]; then
+$PY compare.py > /dev/null   # output/comparison.md
+
+if [[ "$FLAGS" == *" --record "* ]]; then
   [ -n "${CHROMIUM_PATH:-}" ] || .venv/bin/playwright install chromium
   $PY record.py
 fi
-echo "Open output/index.html (or output/qwen3-vl-235b/index.html) in a browser."
+echo "See output/comparison.md, and open output/pair-gemini-3.8-flash+qwen3.8-flash/index.html in a browser."

@@ -115,7 +115,9 @@ function docTitle(d) {
   return "Made-up " + kind;
 }
 const esc = t => String(t).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
-if (DATA.model) $("pipeline").textContent = `Read by ${DATA.model} through OpenRouter, each value checked against a second read of its box (Docling, or Tesseract on scans).`;
+if (DATA.models) $("pipeline").textContent = `Read by ${DATA.models.join(" and ")} through OpenRouter. A value is accepted only when both models read the same thing.`;
+else if (DATA.pipeline && DATA.pipeline.endsWith("alone")) $("pipeline").textContent = `Read by ${DATA.model} through OpenRouter, with no second read.`;
+else if (DATA.model) $("pipeline").textContent = `Read by ${DATA.model} through OpenRouter, each value checked against a second read of its box (Docling, or Tesseract on scans).`;
 else $("pipeline").textContent = "Read by Tesseract OCR and rules, with no language model.";
 const m = METRICS.all, h = METRICS.held_out_set;
 const pct = (a, b) => b ? (100 * a / b).toFixed(1) + "%" : "n/a";
