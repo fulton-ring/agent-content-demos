@@ -2,7 +2,12 @@
 
 Starts a Claude Spike worker on each Ready card on the [Agent work](https://github.com/orgs/fulton-ring/projects/1) board. The `Board dispatcher` GitHub Action runs it every 15 minutes.
 
-A card gets a worker when all of these hold:
+Cloud agent sessions can't reach the org's project board, so agents signal on the issue and the dispatcher moves the card. Each run, first:
+
+- A `move:ready`, `move:review`, `move:needs-founder` or `move:backlog` label sets the card's Status to Ready, Review, Needs founder or Backlog, and the label is removed. If several are present, the first in that order wins.
+- A line `Not before: YYYY-MM-DD` in the issue body fills the card's Not before field, and a line `Card: <Notion URL>` fills Proposal, when those fields are empty.
+
+Then a card gets a worker when all of these hold:
 
 - Status is **Ready** and the issue is open.
 - Agent is **Claude worker** or empty.
