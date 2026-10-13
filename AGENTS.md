@@ -42,9 +42,16 @@ Rules for every coding agent that works in this repo. Read this file first, then
 
 ## Code style and tooling
 
+### Use what exists
+
+- Check the official documentation and search the web before you build anything. Don't invent an API, flag, file format or behavior you haven't confirmed.
+- Prefer a native or built-in feature, then a well-maintained library, over code you write yourself. If you can pull in a library, do that.
+- Write your own code only for what no existing tool does, and say in the README what you looked at first.
+
 ### Python
 
 - Use `uv` for environments and dependencies, with a `pyproject.toml` per project.
+- Use [marimo](https://marimo.io) notebooks for exploration, analysis and walkthroughs, not Jupyter. Keep logic in modules the notebook imports.
 - Lint and format with `ruff` (`ruff check` and `ruff format`).
 - Type-check with `ty`.
 - Put type hints on every function.
@@ -55,6 +62,15 @@ Rules for every coding agent that works in this repo. Read this file first, then
 - Lint and format with `biome`.
 - Use TypeScript in strict mode.
 - `biome` and `tsc` must pass with zero warnings before you push.
+
+### UI
+
+- Build UI with [Tailwind CSS](https://tailwindcss.com) and [shadcn/ui](https://ui.shadcn.com) components. Add components with the shadcn CLI rather than writing your own.
+
+### Agents and chatbots
+
+- Build agentic workflows and chatbots with [Pydantic AI](https://ai.pydantic.dev) in Python or [Mastra](https://mastra.ai) in TypeScript.
+- Use typed inputs and outputs for every model call, so results are validated against a schema.
 
 ### Clean code
 
