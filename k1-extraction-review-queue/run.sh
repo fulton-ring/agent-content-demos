@@ -18,20 +18,22 @@ if ! .venv/bin/python -c "import pytesseract, docling, pydantic_ai" 2>/dev/null;
   .venv/bin/pip install -q --extra-index-url https://download.pytorch.org/whl/cpu -r requirements.txt
 fi
 PY=.venv/bin/python
-[ -n "${OPENROUTER_API_KEY:-}" ] || { echo "OPENROUTER_API_KEY is needed"; exit 1; }
+[ -n "${OPENROUTER_API_KEY:-}" ] || { echo "OPENROUTER_API_KEY is needed for the models in MODELS below"; exit 1; }
 
 $PY generate.py      # made-up 1120-S and 1041 K-1s and brokerage 1099s, with their answer key
 $PY fetch_real.py    # real sample K-1s from the issuers' sites, plus scanned copies
 $PY layout.py        # Docling: words, page types and statement tables for every page
 
-# OpenRouter model id, output folder, extra flags. Qwen 3.8's provider refuses the forced tool call Pydantic AI
-# uses for typed output in thinking mode, so it gets the schema in the prompt instead.
+# Pydantic AI model string, output folder, extra flags. All of these go through OpenRouter, which is one Pydantic AI
+# provider like any other: another provider's model string works the same way. Qwen 3.8 Flash's provider refuses the
+# forced tool call Pydantic AI uses for typed output in thinking mode, so it gets the schema in the prompt instead.
 MODELS=(
-  "google/gemini-3.8-flash gemini-3.8-flash"
-  "qwen/qwen3.8-flash qwen3.8-flash --prompted"
-  "qwen/qwen3-vl-235b-a22b-instruct qwen3-vl-235b"
-  "z-ai/glm-5.3-flash glm-5.3-flash"
-  "google/gemma-4-31b-it gemma-4-31b-it"
+  "openrouter:google/gemini-3.8-flash gemini-3.8-flash"
+  "openrouter:qwen/qwen3.8-flash qwen3.8-flash --prompted"
+  "openrouter:qwen/qwen3.8-27b qwen3.8-27b"
+  "openrouter:qwen/qwen3-vl-235b-a22b-instruct qwen3-vl-235b-a22b-instruct"
+  "openrouter:z-ai/glm-5.3-flash glm-5.3-flash"
+  "openrouter:google/gemma-4-31b-it gemma-4-31b-it"
 )
 pids=()
 for m in "${MODELS[@]}"; do
@@ -47,7 +49,7 @@ for m in "${MODELS[@]}"; do
   $PY report.py "output/$2-alone"
 done
 
-for pair in "gemini-3.8-flash qwen3.8-flash" "gemini-3.8-flash qwen3-vl-235b"; do
+for pair in "gemini-3.8-flash qwen3.8-flash" "gemini-3.8-flash qwen3.8-27b"; do
   set -- $pair
   $PY pair.py "output/$1-alone" "output/$2-alone"
   $PY evaluate.py "output/pair-$1+$2" > /dev/null
@@ -57,7 +59,8 @@ done
 if [[ "$FLAGS" == *" --tesseract "* ]]; then
   command -v tesseract >/dev/null || { echo "Tesseract is needed: apt install tesseract-ocr"; exit 1; }
   $PY extract.py && $PY evaluate.py > /dev/null && $PY report.py
-  $PY extract_vlm.py qwen/qwen3-vl-235b-a22b-instruct && $PY evaluate.py output/qwen3-vl-235b > /dev/null && $PY report.py output/qwen3-vl-235b
+  $PY extract_vlm.py openrouter:qwen/qwen3-vl-235b-a22b-instruct && $PY evaluate.py output/qwen3-vl-235b-a22b-instruct > /dev/null \
+    && $PY report.py output/qwen3-vl-235b-a22b-instruct
 fi
 
 $PY compare.py > /dev/null   # output/comparison.md

@@ -29,12 +29,13 @@ document:
 Writes output/<model>/extracted.json in the same shape as extract.py, so
 evaluate.py and report.py work on both. Never reads the answer keys.
 
-    python extract_vlm.py qwen/qwen3-vl-235b-a22b-instruct [--prompted] [--model-only] [file filter ...]
+    python extract_vlm.py openrouter:google/gemini-3.8-flash [--prompted] [--model-only] [file filter ...]
 
 --model-only skips the second read and writes output/<model>-alone/: the model's
 own answers, for scoring a model on its own and for pairing two models (pair.py).
 
-Needs OPENROUTER_API_KEY in the environment.
+The model is any Pydantic AI model string; the comparison in run.sh uses OpenRouter, which needs
+OPENROUTER_API_KEY in the environment.
 """
 
 import asyncio
@@ -45,14 +46,15 @@ import os
 import re
 import sys
 import time
-import urllib.request
 from pathlib import Path
 from typing import Literal
 
 import pypdfium2 as pdfium
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent, BinaryContent, PromptedOutput
-from pydantic_ai.models.openrouter import OpenRouterModel, OpenRouterModelSettings
+from pydantic_ai.messages import ModelResponse
+from pydantic_ai.models import infer_model
+from pydantic_ai.settings import ModelSettings
 
 from extract import Page as TemplatePage
 from extract import (AMOUNT_AREA, B_COLS, BROKER_LINES, BROKER_ROWS, CODED_AREA, HEADER_LABELS, K1_1065, K1_LABELS,
@@ -66,7 +68,7 @@ PT = 300 / 72  # pixel units per PDF point, the same as extract.py so its label 
 IMAGE_DPI = 200  # what the model sees
 CONFIDENCE_MIN = 0.9
 PARALLEL = 6
-REASONING_EFFORT = "low"
+THINKING = "low"
 
 
 # ---------------------------------------------------------------- what the model returns
@@ -80,8 +82,9 @@ class Value(BaseModel):
 
 
 class Row(BaseModel):
-    code: str | None = Field(None, description="For a coded box, the code printed to the left of the amount, as printed, "
-                                               "including any asterisk ('A', 'AH*', '*'). Null for a box with no codes.")
+    # Required: when it was optional, several models left it out of every row.
+    code: str = Field(description="For a coded box, the code printed to the left of the amount, as printed, "
+                                  "including any asterisk ('A', 'AH*', '*'). An empty string for a box with no codes.")
     value: Value
 
 
@@ -577,24 +580,30 @@ def statement_page_for(pages, box):
 
 # ---------------------------------------------------------------- running it
 
-def model_price(model_name):
-    """OpenRouter's listed (input, output) price per token for a model."""
-    req = urllib.request.Request("https://openrouter.ai/api/v1/models",
-                                 headers={"Authorization": f"Bearer {os.environ['OPENROUTER_API_KEY']}"})
-    for m in json.loads(urllib.request.urlopen(req, timeout=60).read())["data"]:
-        if m["id"] == model_name:
-            return float(m["pricing"]["prompt"]), float(m["pricing"]["completion"])
-    return 0.0, 0.0
+def response_cost(m):
+    """One model response's cost in dollars: the provider's own figure when it reports one (OpenRouter puts it in
+    provider_details), else Pydantic AI's price table. NaN when neither knows the model."""
+    if (m.provider_details or {}).get("cost") is not None:
+        return float(m.provider_details["cost"])
+    try:
+        return float(m.cost().total_price)
+    except LookupError:
+        return float("nan")
+
+
+def run_cost(r):
+    return sum(response_cost(m) for m in r.new_messages() if isinstance(m, ModelResponse))
 
 
 class Runner:
     def __init__(self, model_name, prompted=False):
-        # Reading a form doesn't need long reasoning. Thinking models (GLM 5.3, Gemini 3.x, Qwen 3.8) get a low
-        # reasoning effort, so they don't spend their whole output budget thinking; OpenRouter ignores the setting
-        # for models that don't reason.
-        self.model = OpenRouterModel(model_name, settings=OpenRouterModelSettings(
-            temperature=0, max_tokens=8000, openrouter_reasoning={"effort": REASONING_EFFORT}))
-        self.price = model_price(model_name)
+        # Any Pydantic AI model string works: "openrouter:google/gemini-3.8-flash", "google-gla:...", "anthropic:...".
+        # Reading a form doesn't need long reasoning, so thinking models run at low effort, through Pydantic AI's
+        # provider-neutral thinking setting; models that don't reason ignore it.
+        self.model = infer_model(model_name)
+        self.settings = ModelSettings(temperature=0, max_tokens=8000, thinking=THINKING)
+        if model_name.startswith("openrouter:"):
+            self.settings["openrouter_usage"] = {"include": True}  # OpenRouter reports each call's cost
         self.sem = asyncio.Semaphore(PARALLEL)
         self.prompted = prompted
         self.cost = {}
@@ -603,7 +612,7 @@ class Runner:
         # Typed output goes through a forced tool call by default. Some thinking models' providers refuse a forced
         # tool call; --prompted puts the schema in the prompt and validates the JSON that comes back.
         agent = Agent(self.model, output_type=PromptedOutput(output_type) if self.prompted else output_type,
-                      instructions=INSTRUCTIONS, retries=2)
+                      instructions=INSTRUCTIONS, retries=2, model_settings=self.settings)
         parts = [prompt] + [BinaryContent(png, media_type="image/png") for png in images]
         async with self.sem:
             for attempt in range(6):
@@ -617,9 +626,7 @@ class Runner:
                     print(f"  {doc}: retrying after {type(e).__name__}: {str(e)[:120]}")
                     await asyncio.sleep(15 * (attempt + 1))
         c = self.cost.setdefault(doc, {"usd": 0.0, "input_tokens": 0, "output_tokens": 0, "calls": 0, "seconds": 0.0})
-        # OpenRouter's own cost for the call when it reports one, else the listed per-token price.
-        c["usd"] += float(r.usage.cost) if r.usage.cost else (
-            r.usage.input_tokens * self.price[0] + r.usage.output_tokens * self.price[1])
+        c["usd"] += run_cost(r)
         c["input_tokens"] += r.usage.input_tokens
         c["output_tokens"] += r.usage.output_tokens
         c["calls"] += 1
@@ -754,12 +761,10 @@ async def process(runner, path, out_dir):
 
 
 def slug(model_name):
-    return re.sub(r"[^a-z0-9.]+", "-", model_name.split("/")[-1].lower()).replace("-a22b", "").replace("-a3b", "").replace("-instruct", "")
+    return re.sub(r"[^a-z0-9.]+", "-", model_name.split(":", 1)[-1].split("/")[-1].lower())
 
 
 async def main():
-    if not os.environ.get("OPENROUTER_API_KEY"):
-        sys.exit("OPENROUTER_API_KEY isn't set")
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     prompted = "--prompted" in sys.argv
     model_only = "--model-only" in sys.argv
@@ -789,7 +794,7 @@ async def main():
     docs = sorted((d for d in results if d), key=lambda d: d["file"])
     failed = [p.name for p, d in zip(files, results) if not d]
     (out_dir / "extracted.json").write_text(json.dumps({
-        "pipeline": "vision-language model alone" if model_only else "Docling + vision-language model", "model": model_name, "reasoning_effort": REASONING_EFFORT,
+        "pipeline": "vision-language model alone" if model_only else "Docling + vision-language model", "model": model_name, "thinking": THINKING,
         "confidence_min": CONFIDENCE_MIN,
         "image_dpi": IMAGE_DPI, "documents": docs}, indent=1))
     total = sum(d["cost_usd"] for d in docs)
