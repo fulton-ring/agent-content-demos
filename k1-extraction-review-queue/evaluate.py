@@ -14,8 +14,8 @@ output/extracted.json for the report.
 """
 
 import json
-import sys
 import re
+import sys
 from collections import defaultdict
 from pathlib import Path
 
@@ -55,6 +55,40 @@ def scan_level(file, key):
         return {"1": "office scan", "2": "bad scan"}[m.group(1)]
     level = key.get("scan_level")
     return {"original": "born-digital", 0: "clean scan", 1: "office scan", 2: "bad scan"}[level]
+
+
+def statement_check(data):
+    """The model pipeline's readings of supplemental statements, against the statement's own text layer.
+
+    The answer keys stop at "STMT", so the statement lines are checked against the
+    issuer's PDF: every line on the statement whose code starts with the box number,
+    and the amount at the end of that line. Born-digital packages only.
+    """
+    import pdfplumber
+    from extract import parse_value
+
+    lines_total = right = missed = 0
+    wrong = []
+    for doc in data["documents"]:
+        fields = [f for f in doc["fields"] if "statement_lines" in f]
+        if not fields:
+            continue
+        with pdfplumber.open(HERE / "samples" / doc["file"]) as pdf:
+            text = [ln for pg in pdf.pages for ln in (pg.extract_text() or "").splitlines()]
+        for f in fields:
+            box = f["key"].split(" ")[0]
+            printed = {ln.split()[0]: ln.split()[-1] for ln in text if re.match(rf"^{box}[A-Z]{{1,2}}\d*\s", ln)}
+            read = {ln["code"].replace(" ", "").upper(): ln for ln in f["statement_lines"]}
+            missed += len(set(printed) - set(read))
+            for code, ln in read.items():
+                lines_total += 1
+                if code in printed and parse_value(printed[code])[0] == ln["value"]:
+                    right += 1
+                else:
+                    wrong.append(f"{doc['file']} {code} read {ln['printed']}, statement says {printed.get(code)}")
+    if not lines_total and not missed:
+        return None
+    return {"lines_read": lines_total, "right": right, "lines_missed": missed, "wrong": wrong}
 
 
 def main():
@@ -136,6 +170,9 @@ def main():
         metrics["cost_usd_per_document"] = round(metrics["cost_usd_total"] / len(data["documents"]), 5)
         metrics["model_seconds_per_document"] = round(sum(d["model_seconds"] for d in data["documents"]) / len(data["documents"]), 1)
         metrics["docling_seconds_per_document"] = round(sum(d["docling_seconds"] for d in data["documents"]) / len(data["documents"]), 1)
+    stmt = statement_check(data)
+    if stmt:
+        metrics["statement_lines"] = stmt
     (OUT / "metrics.json").write_text(json.dumps(metrics, indent=1))
     (OUT / "extracted.json").write_text(json.dumps(data, indent=1))
 
@@ -147,6 +184,8 @@ def main():
               f"{m['wrong']:6d} {m['wrong_caught_by_review']:7d} {m['silent_errors']:7d}")
     for s in metrics["all"]["silent_error_boxes"]:
         print("  silent error:", s)
+    if stmt:
+        print(f"statement lines: {stmt['right']} of {stmt['lines_read']} read right, {stmt['lines_missed']} missed")
 
 
 if __name__ == "__main__":

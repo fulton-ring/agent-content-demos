@@ -2,16 +2,27 @@
 
 This demo reads Schedule K-1s and brokerage 1099s and links every extracted value to the box it came from. Anything the software isn't sure of goes to a review queue for a person to check. It answers a sales question for the CPA document extraction play: can a two-minute screen recording show a tax preparer what they'd get, without them sending us any documents?
 
+It runs two pipelines on the same documents and scores both against the same answer keys:
+
+- **Tesseract and rules** (`extract.py`): OCR, blank-form templates and cross-checks. No model, no paid service.
+- **A vision-language model, checked by a second reader** (`layout.py`, `extract_vlm.py`): Qwen3-VL through OpenRouter reads each form into typed Pydantic models, and every value is confirmed against an independent read of the box it names. Two model sizes are compared.
+
 ![A value on a real K-1, highlighted on the page it came from](screenshots/1-value-linked-to-box.png)
 
 ## Run it
 
 ```
-./run.sh            # a few minutes on a laptop CPU
+./run.sh            # Tesseract pipeline always; the model pipelines too when OPENROUTER_API_KEY is set
 ./run.sh --record   # also clicks through the review screen and records it
 ```
 
-You need Python 3.10+ and Tesseract (`apt install tesseract-ocr` or `brew install tesseract`). The script makes a virtualenv, downloads the real sample K-1s, generates the made-up documents, extracts, scores and writes `output/index.html`. Open that file in a browser. To use a Chromium you already have for the recording, set `CHROMIUM_PATH`.
+You need Python 3.10+ and Tesseract (`apt install tesseract-ocr` or `brew install tesseract`). The script makes a virtualenv (the model pipeline adds Docling and a CPU build of PyTorch; the virtualenv comes to about 2 GB), downloads the real sample K-1s, generates the made-up documents, extracts, scores and writes the review screens:
+
+- `output/index.html`: Tesseract and rules
+- `output/qwen3-vl-235b/index.html` and `output/qwen3-vl-30b/index.html`: the model pipelines
+- `output/comparison.md`: all three side by side
+
+The model pipelines need `OPENROUTER_API_KEY` in the environment. Both models together cost about 18 cents for all 30 documents. The whole clean run took about an hour, almost all of it waiting on OpenRouter; the 30B model is the slow one. To use a Chromium you already have for the recording, set `CHROMIUM_PATH`.
 
 ## The documents
 
@@ -29,7 +40,7 @@ These files are not in the repo. `fetch_real.py` downloads them from the issuers
 
 **Made-up K-1s and 1099s.** Real 1120-S and 1041 K-1s and real brokerage 1099s aren't published anywhere we can use. `generate.py` fills the blank 2025 IRS forms (in `forms/`) with invented names and amounts, and draws a made-up broker's consolidated 1099 with DIV, INT and 1099-B summary and detail pages. Their EINs start with `00-`, a prefix the IRS doesn't assign. Every made-up document is image-only, either a clean scan, an office scan or a bad scan.
 
-## How it works
+## How the Tesseract pipeline works
 
 1. **Find the page.** In a multi-page tax package, the extractor finds the K-1 page and the supplemental statement pages.
 2. **Get the words.**
@@ -46,58 +57,111 @@ These files are not in the repo. `fetch_real.py` downloads them from the issuers
    - a label can't be found;
    - the amount is on an attached statement;
    - or a cross-check fails: qualified dividends above ordinary dividends, 4a + 4b ≠ 4c, a 1099-B summary row that doesn't balance or doesn't match the detail page.
-6. **Show it.** `report.py` builds the review screen. Clicking a value highlights its box on the page. A STMT value opens the statement page. The queue shows each flagged box cropped from the page, with the reason, and lets a person correct it or confirm it. The results export to CSV.
 
-The extractor never reads the answer keys. `evaluate.py` scores its output against them afterwards.
+## How the model pipeline works
+
+1. **Docling reads every page once** (`layout.py`, on CPU). It finds the K-1 page and the supplemental statements, and turns each statement into a Box / Description / Amount table.
+2. **The model reads the form.** The K-1 page (or the 1099 summary page) goes to Qwen3-VL as an image at 200 dpi. Pydantic AI asks for a typed result: one Pydantic model per form (1065, 1120-S, 1041 and the brokerage 1099), where every value carries what was printed, its bounding box and the model's own confidence.
+3. **A second reader checks every value in the box the model named.** Each box is located by its printed label. On a born-digital page the second read is Docling's words, which come from the PDF's text layer. On a scan it is the Tesseract pipeline's reader: the page is lined up with its blank IRS form and each box is OCR'd on its own.
+4. **A value goes to review when:**
+   - the model's confidence is below 0.9;
+   - the second read of that box says something else, or nothing (the same digits with different punctuation count as agreeing, since OCR often reads a comma as a period);
+   - the model gave no code letter for a row in a coded box;
+   - the second read finds a box or a row the model didn't report;
+   - the value isn't a well-formed amount, or it's on an attached statement;
+   - or one of the Tesseract pipeline's cross-checks fails.
+5. **Statements.** For a `STMT` amount, the model reads the statement page and lists that box's lines. The reviewer sees them as a suggestion, each marked by whether Docling's table has the same code and amount. The value stays in the queue.
+
+Docling's OCR wasn't usable as the second read on scans. On the scanned K-1s it picked up 26% of the answer-key values: 84% on the clean made-up scans, 21% on office scans and 5% on bad scans. It finds a form's blocks of printed text, but most of the small typed amounts inside the boxes never reach OCR. It did better on the brokerage summaries (93 to 100% of amounts) but dropped lots from the detail pages that the cross-check needs, so the brokerage scans use Tesseract as the second read as well.
+
+LlamaIndex isn't used. A tax package has at most a handful of statement pages, and Docling's tables already say which page has which box's lines, so there is nothing for a retrieval index to do. LibreOffice isn't used either, since every input is a PDF.
+
+## The review screen
+
+`report.py` builds the review screen for each pipeline. Clicking a value highlights its box on the page. A STMT value opens the statement page. The queue shows each flagged box cropped from the page, with the reason, and lets a person correct it or confirm it. The results export to CSV.
+
+Neither extractor reads the answer keys. `evaluate.py` scores the output against them afterwards.
 
 ## Results
 
-These are from a clean run of `./run.sh` with Tesseract 5.3.4. "Boxes" means every box on the answer key plus every value the extractor reported. Blank boxes count, so reading something in an empty box is an error.
+These are from one clean run of `./run.sh` from a fresh checkout, with Tesseract 5.3.4, Docling 2.138 and Pydantic AI 2.55, on 2026-10-13. "Boxes" means every box on the answer key plus every value a pipeline reported, so reading something in an empty box, or reporting a box twice, counts as an error. That's why the box counts differ between pipelines.
 
-I tuned the thresholds and rules while looking at the first set of documents. The held-out set uses a different random seed for its scans and made-up documents. I ran it once, after the code was final, and changed nothing afterwards, so it is the fairer measure.
+**Tuning and held-out sets.** The Tesseract pipeline's thresholds and rules were tuned on the first set of documents. The model pipeline's checks were tuned the same way, on the same set: no output from the held-out documents was looked at until the scoring logic was final. The only changes after that were to how a statement page is found, retries when OpenRouter rate-limits a call, and the statement check in `evaluate.py`, none of which change what gets accepted. The held-out set uses a different random seed for its scans and made-up documents, so it is the fairer measure.
 
-| | Boxes | Accepted without review | Right when accepted | Sent to review | Misreads | Caught by review | Silent errors |
+### Held-out set (14 documents)
+
+| Pipeline | Boxes | Accepted without review | Right when accepted | Sent to review | Misreads | Caught by review | Silent errors |
 |---|---|---|---|---|---|---|---|
-| Real K-1s, born-digital | 97 | 91 | 91 (100%) | 6 (all STMT) | 0 | 0 | 0 |
-| Tuning set, all | 371 | 253 | 253 (100%) | 118 | 55 | 55 | 0 |
-| **Held-out set, all** | **321** | **182** | **180 (98.9%)** | **139** | **68** | **66** | **2** |
-| Held-out, real K-1 office scans | 99 | 64 | 63 | 35 | 16 | 15 | 1 |
-| Held-out, real K-1 bad scans | 74 | 26 | 26 | 48 | 31 | 31 | 0 |
-| Held-out, made-up clean scans | 50 | 37 | 36 | 13 | 3 | 2 | 1 |
-| Held-out, made-up office scans | 47 | 35 | 35 | 12 | 4 | 4 | 0 |
-| Held-out, made-up bad scans | 51 | 20 | 20 | 31 | 14 | 14 | 0 |
+| Tesseract and rules | 321 | 182 | 180 (98.9%) | 139 (43%) | 68 | 66 | 2 |
+| **Qwen3-VL 235B, checked** | **327** | **236** | **236 (100%)** | **91 (28%)** | **17** | **17** | **0** |
+| Qwen3-VL 30B, checked | 450 | 124 | 123 (99.2%) | 326 (72%) | 201 | 200 | 1 |
 
-The two silent errors on the held-out set are:
+### By kind of document (held-out, except the born-digital K-1s, which have nothing to tune)
 
-- **Blackstone office scan, box 13 E.** The issuer printed a dash for zero, and OCR missed both the dash and its row. Other rows in the same box were in review, so a reviewer looking at box 13 would see it on the page, but it isn't flagged on its own.
-- **Made-up 1041, the trust's name.** OCR skipped the name line and read the address line under it with high confidence. A name isn't an amount, so no cross-check can catch it.
+Accepted without review, then how many of those were right:
 
-Speed: 2 to 3 seconds for a whole born-digital tax package, and 4 to 12 seconds for a scanned page, on one CPU core.
+| | Tesseract and rules | Qwen3-VL 235B | Qwen3-VL 30B |
+|---|---|---|---|
+| Real K-1s, born-digital | 91, all right | 88, all right | 39, all right |
+| Real K-1 office scans | 64, 63 right | 85, all right | 32, 31 right |
+| Real K-1 bad scans | 26, all right | 45, all right | 12, all right |
+| Made-up clean scans | 37, 36 right | 35, all right | 22, all right |
+| Made-up office scans | 35, all right | 37, all right | 28, all right |
+| Made-up bad scans | 20, all right | 34, all right | 30, all right |
+
+`output/comparison.md` has every row of every table after a run.
+
+### Cost and time per document
+
+| Pipeline | Cost | Time |
+|---|---|---|
+| Tesseract and rules | nothing | 6 seconds |
+| Qwen3-VL 235B | $0.0022 | 95 seconds: 9 for Docling on CPU, 85 waiting on OpenRouter |
+| Qwen3-VL 30B | $0.0037 | 299 seconds, almost all waiting on OpenRouter |
+
+The cost is OpenRouter's own figure for each call, summed by `extract_vlm.py`. It includes reading the supplemental statements. The time is mostly queueing at the provider, and some calls were rate-limited and retried; a dedicated endpoint would be far faster.
+
+### Supplemental statements
+
+The 235B model read every statement line behind the six `STMT` boxes in the two packages that have statements (Enviva 2021 and Blackstone 2019): 62 lines, all 62 right and none missed, checked by `evaluate.py` against the issuers' own text layer. On 10 of those lines Docling's table disagreed with the model. Each time the model was right and Docling's table had merged or shifted rows, which is why these readings are shown to the reviewer as suggestions rather than accepted.
+
+### The errors
+
+- **Tesseract and rules, 2 silent errors.** On the Blackstone office scan, box 13 E, the issuer printed a dash for zero and OCR missed both the dash and its row. On a made-up 1041, OCR skipped the trust's name and read the address line under it with high confidence.
+- **Qwen3-VL 235B, no silent errors** in this run, or in an earlier full run of the same code (238 accepted, all right). Its 17 held-out misreads were all caught. Nine are rows Tesseract read on a scan that didn't line up with the model's, mostly because Tesseract misread a code letter (`L*` as `L°`, `B` as `8`) or read specks as a row. Two are rows the model skipped and Tesseract found. Six are code letters the model repeated or left out in the made-up 1041s. Each one disagreed with the second read, so each went to review.
+- **Qwen3-VL 30B, 1 silent error**, the same Blackstone 13 E dash that Tesseract missed, since Tesseract was its second reader there. With the same prompt and schema, the 30B model listed empty boxes, put box numbers where the code letters go, and moved amounts between boxes (on the Enviva 2021 K-1 it put box 19's 32,336 under box 9b), so most of what it read went to review. It also wrote about three times as many output tokens, which is why it cost more than the larger model.
 
 ## What this shows
 
-- Born-digital K-1s, which is how most PTP and fund K-1s arrive, extract exactly, with every value tied to its box. The only things left for a person are the amounts the issuer moved to a statement.
-- On scans, the review queue is what makes the output usable. On the held-out set it caught 66 of 68 misreads, and 98.9% of the values it let through were right.
-- Showing the box next to each value is what makes review fast. A preparer looks at a cropped box and types a number. They don't hunt through the page.
+- Born-digital K-1s, which is how most PTP and fund K-1s arrive, extract exactly with either pipeline, with every value tied to its box. The only things left for a person are the amounts the issuer moved to a statement, and the model pipeline also reads those statements correctly as a suggestion.
+- On scans, Qwen3-VL 235B with a second reader lets about 30% more values through without review than Tesseract does (236 against 182 on the held-out set), and every one it let through was right. The share sent to review fell from 43% to 28%.
+- The check is what makes the model safe to use. Its first answers had values in the wrong box and skipped rows; none of those got through, because each one disagreed with the second read of the box it named.
+- The smaller model isn't a cheaper option: it cost more per document and sent nearly three-quarters of the boxes to review.
 
 ## What it doesn't show
 
-- **This is not our production extraction.** It uses Tesseract OCR, form templates and rules, with no language model and no paid service. A model would likely read more of the scanned boxes (fewer reviews) and could read the statement pages. Nothing here measures that.
+- **This is not our production extraction.** It is a demo built on public tools and a public model. A prospect who sends real documents will see different numbers.
 - **The scans are simulated.** Real scans have problems we didn't model: staples, handwriting, stamps, pages scanned at a different scale, and colour backgrounds.
-- **The sample is small.** It has three real K-1s, all Form 1065 from publicly traded partnerships. There are no real 1120-S or 1041 K-1s, and no real brokerage 1099s. The made-up documents use our own layout for the 1099s.
-- **It doesn't read supplemental statements.** STMT amounts go to review with a link to the statement page.
-- **Header fields are weak on scans.** These are the partnership's name and EIN. On scans they often go to review or come out wrong. Box values are the focus.
-- **The review queue is large on bad scans** (up to two-thirds of the boxes). On those pages the demo shows a person doing the work, with the software pointing at the boxes.
+- **The sample is small.** It has three real K-1s, all Form 1065 from publicly traded partnerships. There are no real 1120-S or 1041 K-1s and no real brokerage 1099s; the made-up 1099s use our own layout. The statement check covers two packages.
+- **Model answers vary from run to run.** Two full runs of the 235B pipeline gave 238 and 236 accepted values on the held-out set, both with no silent errors. The rate of silent errors is zero on these documents, which is not the same as zero in general.
+- **On a scan the second reader is Tesseract**, so a box Tesseract can't read goes to review even when the model read it right. That is most of the review load on bad scans.
+- **Header fields are weaker than box values on scans.** The partnership's name and EIN often go to review, because Tesseract reads the address line or misreads a digit.
+- **The review queue is still large on bad scans:** a third to a half of the boxes with the 235B model, depending on the set.
 
 ## Files
 
 - `run.sh`: the one command
 - `fetch_real.py`: downloads the real K-1s and makes scanned copies
 - `generate.py`: makes the made-up documents and `answer_key.json`
-- `extract.py`: the extractor
-- `evaluate.py`: scores the extraction and writes `output/metrics.json`
-- `report.py`: builds the review screen, `output/index.html`
+- `extract.py`: the Tesseract pipeline
+- `layout.py`: runs Docling over every sample once, writing `output/layout/`
+- `extract_vlm.py`: the model pipeline, `python extract_vlm.py <OpenRouter model id>`
+- `evaluate.py`: scores a pipeline's output and writes its `metrics.json`
+- `report.py`: builds a pipeline's review screen, `index.html`
+- `compare.py`: writes `output/comparison.md`
 - `record.py`: clicks through the review screen and saves `screenshots/` and `recording/walkthrough.mp4`
 - `real_answer_key.json`: the real K-1s' Part III boxes and the partnership name and EIN, keyed by hand from the issuers' PDFs
 - `forms/`: blank IRS Schedule K-1 forms (1065 for 2018, 2019, 2021 and 2025; 1120-S and 1041 for 2025), from irs.gov
 - `SCRIPT.md`: a two-minute voice-over for recording the walkthrough
+
+The committed screenshots and recording still show the Tesseract pipeline's review screen.

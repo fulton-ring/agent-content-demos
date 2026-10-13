@@ -520,16 +520,16 @@ class Runner:
         agent = Agent(self.model, output_type=output_type, instructions=INSTRUCTIONS, retries=2)
         parts = [prompt] + [BinaryContent(png, media_type="image/png") for png in images]
         async with self.sem:
-            for attempt in range(3):
+            for attempt in range(6):
                 try:
                     t0 = time.time()
                     r = await agent.run(parts)
                     break
-                except Exception as e:  # network errors and malformed output after retries
-                    if attempt == 2:
+                except Exception as e:  # rate limits, network errors, malformed output after retries
+                    if attempt == 5:
                         raise
                     print(f"  {doc}: retrying after {type(e).__name__}: {str(e)[:120]}")
-                    await asyncio.sleep(3 * (attempt + 1))
+                    await asyncio.sleep(15 * (attempt + 1))
         c = self.cost.setdefault(doc, {"usd": 0.0, "input_tokens": 0, "output_tokens": 0, "calls": 0, "seconds": 0.0})
         c["usd"] += float(r.usage.cost or 0)
         c["input_tokens"] += r.usage.input_tokens
@@ -680,13 +680,17 @@ async def main():
                   f"${d['cost_usd']:.4f}, {d['model_seconds']:5.1f}s model")
         return d
 
-    docs = [d for d in await asyncio.gather(*(one(p) for p in files)) if d]
-    docs.sort(key=lambda d: d["file"])
+    results = await asyncio.gather(*(one(p) for p in files))
+    docs = sorted((d for d in results if d), key=lambda d: d["file"])
+    failed = [p.name for p, d in zip(files, results) if not d]
     (out_dir / "extracted.json").write_text(json.dumps({
         "pipeline": "Docling + vision-language model", "model": model_name, "confidence_min": CONFIDENCE_MIN,
         "image_dpi": IMAGE_DPI, "documents": docs}, indent=1))
     total = sum(d["cost_usd"] for d in docs)
     print(f"{model_name}: {len(docs)} documents, ${total:.4f} in all, ${total / max(1, len(docs)):.4f} per document")
+    if failed:
+        # Scoring a run with documents missing would make the results look better than they are.
+        sys.exit(f"{len(failed)} documents failed and aren't in the results: {', '.join(failed)}. Run again.")
 
 
 if __name__ == "__main__":

@@ -47,6 +47,12 @@ def main():
             out.append(f"| {name} | $0 | none | none | {m['seconds_per_document']}s |")
     out.append("")
     for name, m in loaded:
+        if "statement_lines" in m:
+            st = m["statement_lines"]
+            out.append(f"Supplemental statements, {name}: {st['right']} of {st['lines_read']} lines read right, "
+                       f"{st['lines_missed']} missed (checked against the issuers' text layer).")
+            out.append("")
+    for name, m in loaded:
         boxes = m["all"]["silent_error_boxes"]
         out.append(f"Silent errors, {name}: " + ("; ".join(boxes) if boxes else "none") + ".")
         out.append("")
