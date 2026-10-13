@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Northside Youth Partnership: dashboard</title><style>
+:root{color-scheme:light;--page:#f9f9f7;--surface:#fcfcfb;--ink:#0b0b0b;--ink2:#52514e;--muted:#6f6d68;--grid:#e1e0d9;--axis:#c3c2b7;
+--border:rgba(11,11,11,.10);--accent:#2a78d6;--prior:#52514e;--good:#0ca30c;--good-ink:#006300;--warn:#fab219;--warn-ink:#8a5a00;
+--crit:#d03b3b;--crit-ink:#b42626;--info:#2a78d6;--chip:#f0efec;--b1:#cde2fb;--b2:#86b6ef;--b3:#3987e5;--b4:#1c5cab}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){color-scheme:dark;--page:#0d0d0d;--surface:#1a1a19;--ink:#f0efec;--ink2:#c3c2b7;
+--muted:#9a988f;--grid:#2c2c2a;--axis:#383835;--border:rgba(255,255,255,.10);--accent:#3987e5;--prior:#c3c2b7;--good-ink:#0ca30c;--warn-ink:#fab219;
+--crit-ink:#e66767;--chip:#262624;--b1:#184f95;--b2:#256abf;--b3:#5598e7;--b4:#9ec5f4}}
+:root[data-theme="dark"]{color-scheme:dark;--page:#0d0d0d;--surface:#1a1a19;--ink:#f0efec;--ink2:#c3c2b7;--muted:#9a988f;--grid:#2c2c2a;
+--axis:#383835;--border:rgba(255,255,255,.10);--accent:#3987e5;--prior:#c3c2b7;--good-ink:#0ca30c;--warn-ink:#fab219;--crit-ink:#e66767;--chip:#262624;
+--b1:#184f95;--b2:#256abf;--b3:#5598e7;--b4:#9ec5f4}
+*{box-sizing:border-box}
+body{margin:0;background:var(--page);color:var(--ink);font:15px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:1080px;margin:0 auto;padding:28px 16px 64px}
+header.top{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px;align-items:flex-end;margin-bottom:20px}
+.eyebrow{color:var(--ink2);font-size:13px;margin:0}
+h1{font-size:28px;line-height:1.2;margin:4px 0 6px}
+h2{font-size:19px;margin:36px 0 10px}
+h3{font-size:15px;margin:18px 0 6px}
+p{margin:0 0 12px;max-width:72ch}
+a{color:var(--accent)}
+nav.links{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:14px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px 18px}
+.banner{border-left:4px solid var(--warn);background:var(--surface);border-radius:6px;padding:12px 16px;margin:16px 0}
+.banner.crit{border-left-color:var(--crit)}
+.meta{color:var(--muted);font-size:13px}
+.table-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:10px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:14px}
+th,td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--grid);vertical-align:top}
+th{font-weight:600;color:var(--ink2);font-size:13px;white-space:nowrap}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+tr.total td{font-weight:600;border-top:2px solid var(--axis)}
+tr.prior td{color:var(--ink2)}
+tr:last-child td{border-bottom:none}
+.sub{display:block;color:var(--muted);font-size:12px;font-weight:400}
+.chip{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;padding:2px 8px;border-radius:999px;background:var(--chip);white-space:nowrap}
+.chip .dot{width:8px;height:8px;border-radius:50%}
+.chip.ok .dot{background:var(--good)}.chip.ok{color:var(--good-ink)}
+.chip.warning .dot{background:var(--warn)}.chip.warning{color:var(--warn-ink)}
+.chip.error .dot{background:var(--crit)}.chip.error{color:var(--crit-ink)}
+.chip.info .dot{background:var(--info)}.chip.info{color:var(--ink2)}
+ul.notes{list-style:none;padding:0;margin:0}
+ul.notes li{padding:10px 0;border-bottom:1px solid var(--grid)}
+ul.notes li:last-child{border-bottom:none}
+.rows{color:var(--muted);font-size:13px;margin-top:2px}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+.tile .label{color:var(--ink2);font-size:13px}
+.tile .value{font-size:30px;font-weight:650;line-height:1.15;margin:4px 0 2px}
+.tile .delta{font-size:13px;color:var(--ink2)}
+.nw{white-space:nowrap}
+.grid2{display:grid;grid-template-columns:3fr 2fr;gap:16px;margin-top:16px}
+@media (max-width:760px){.grid2{grid-template-columns:1fr}h1{font-size:23px}}
+.seg{display:inline-flex;flex-wrap:wrap;gap:4px;background:var(--chip);border-radius:8px;padding:3px}
+.seg button{font:inherit;font-size:13px;border:0;background:transparent;color:var(--ink2);padding:5px 10px;border-radius:6px;cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--surface);color:var(--ink);font-weight:600;box-shadow:0 0 0 1px var(--border)}
+.controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:4px 0 12px}
+.legend{display:flex;flex-wrap:wrap;gap:14px;font-size:12px;color:var(--ink2);margin:6px 0}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.key-bar{width:14px;height:8px;border-radius:2px;background:var(--accent)}
+.key-dot{width:9px;height:9px;border-radius:50%;background:var(--surface);border:2px solid var(--prior)}
+svg text{fill:var(--ink2);font-size:12px}
+svg .val{fill:var(--ink);font-weight:600}
+#tip{position:fixed;pointer-events:none;background:var(--ink);color:var(--page);font-size:12px;padding:6px 8px;border-radius:6px;opacity:0;transition:opacity .1s;max-width:240px;z-index:5}
+details summary{cursor:pointer;color:var(--accent);font-size:14px;margin-top:8px}
+.status-list{list-style:none;margin:0;padding:0}
+.status-list li{display:flex;justify-content:space-between;gap:8px;padding:8px 0;border-bottom:1px solid var(--grid);font-size:14px}
+.status-list li:last-child{border-bottom:none}
+footer{margin-top:48px;color:var(--muted);font-size:13px}
+@media print{nav.links,.no-print{display:none}body{background:#fff}.card,.table-wrap{border-color:#ccc}}
+</style></head>
+<body><main><header class="top"><div><p class="eyebrow">Northside Youth Partnership · Leadership dashboard</p>
+<h1 id="title">Program dashboard</h1><p class="meta">Rebuilt 2026-10-13 17:19 UTC from the same site files as the quarterly report.</p></div>
+<nav class="links"><a href="index.html">All reports</a><a href="dashboard.html">Leadership dashboard</a><a href="report-FY26-Q1.html">FY26-Q1 report</a><a href="report-FY26-Q2.html">FY26-Q2 report</a></nav></header>
+<div class="controls"><span class="meta">Quarter</span><div class="seg" id="qsel" role="group" aria-label="Quarter"></div></div>
+<div id="banner"></div>
+<section class="tiles" id="tiles" aria-label="Headline measures"></section>
+<div class="grid2">
+ <section class="card"><h3 style="margin-top:0">By site</h3>
+  <div class="controls"><div class="seg" id="msel" role="group" aria-label="Measure"></div></div>
+  <div class="legend"><span><i class="key-bar"></i><b id="lg-cur"></b></span><span><i class="key-dot"></i><b id="lg-prev"></b></span></div>
+  <div id="chart"></div>
+  <details><summary>Show as a table</summary><div class="table-wrap" style="margin-top:8px"><table id="ctable"></table></div></details>
+ </section>
+ <section class="card"><h3 style="margin-top:0">Site submissions</h3><ul class="status-list" id="status"></ul>
+  <h3>Program hours per participant</h3><p class="meta" style="margin-bottom:6px">Sites with student-level rows</p><div id="bands"></div>
+ </section>
+</div>
+<div id="tip" role="tooltip"></div>
+<script>
+const DATA = [{"quarter": "FY26-Q1", "label": "Q1 FY26 (Jul\u2013Sep 2025)", "sitesReporting": 4, "sitesExpected": 5, "totals": {"ada_pct": 93.5, "chronic_pct": 26.1, "hours_45_plus_pct": 62.2, "avg_hours": 54.8, "on_track_pct": 52.5, "family_pct": 44.1, "enrolled": 406}, "issues": {"error": 3, "warning": 2}, "bands": [5, 125, 180, 31], "sites": [{"id": "eastgate", "name": "Eastgate Elementary", "status": "on_time", "lateDays": 0, "issues": 0, "worst": "warning", "enrolled": 112, "ada_pct": 93.6, "chronic_pct": 27.0, "hours_45_plus_pct": 60.7, "avg_hours": 55.0, "on_track_pct": 58.8, "family_pct": 48.2}, {"id": "riverside", "name": "Riverside Middle", "status": "on_time", "lateDays": 0, "issues": 2, "worst": "warning", "enrolled": 138, "ada_pct": 94.2, "chronic_pct": 25.8, "hours_45_plus_pct": 67.4, "avg_hours": 58.1, "on_track_pct": 48.9, "family_pct": 42.0}, {"id": "lincoln", "name": "Lincoln Heights K-8", "status": "on_time", "lateDays": 0, "issues": 0, "worst": "warning", "enrolled": 64, "ada_pct": 91.9, "chronic_pct": 30.6, "hours_45_plus_pct": 64.1, "avg_hours": 51.6, "on_track_pct": 51.6, "family_pct": 45.3}, {"id": "westfield", "name": "Westfield High", "status": "on_time", "lateDays": 0, "issues": 2, "worst": "error", "enrolled": 92, "ada_pct": 93.5, "chronic_pct": 22.5, "hours_45_plus_pct": 54.9, "avg_hours": 51.9, "on_track_pct": 51.1, "family_pct": 41.3}, {"id": "harbor", "name": "Harbor View Elementary", "status": "missing", "lateDays": null, "issues": 1, "worst": "error", "enrolled": null}]}, {"quarter": "FY26-Q2", "label": "Q2 FY26 (Oct\u2013Dec 2025)", "sitesReporting": 5, "sitesExpected": 5, "totals": {"ada_pct": 94.6, "chronic_pct": 15.2, "hours_45_plus_pct": 65.7, "avg_hours": 57.4, "on_track_pct": 57.4, "family_pct": 50.5, "enrolled": 487}, "issues": {"error": 1, "warning": 4}, "bands": [13, 125, 223, 61], "sites": [{"id": "eastgate", "name": "Eastgate Elementary", "status": "on_time", "lateDays": 0, "issues": 1, "worst": "warning", "enrolled": 112, "ada_pct": 94.5, "chronic_pct": 14.5, "hours_45_plus_pct": 74.1, "avg_hours": 59.4, "on_track_pct": 56.2, "family_pct": 47.3}, {"id": "riverside", "name": "Riverside Middle", "status": "on_time", "lateDays": 0, "issues": 1, "worst": "warning", "enrolled": 139, "ada_pct": 95.1, "chronic_pct": 11.9, "hours_45_plus_pct": 69.1, "avg_hours": 58.5, "on_track_pct": 61.2, "family_pct": 49.6}, {"id": "lincoln", "name": "Lincoln Heights K-8", "status": "on_time", "lateDays": 0, "issues": 1, "worst": "error", "enrolled": 65, "ada_pct": null, "chronic_pct": 18.5, "hours_45_plus_pct": 55.4, "avg_hours": 55.2, "on_track_pct": 59.7, "family_pct": 47.7}, {"id": "westfield", "name": "Westfield High", "status": "on_time", "lateDays": 0, "issues": 1, "worst": "warning", "enrolled": 91, "ada_pct": 94.0, "chronic_pct": 18.7, "hours_45_plus_pct": 60.4, "avg_hours": 55.3, "on_track_pct": 58.0, "family_pct": 59.3}, {"id": "harbor", "name": "Harbor View Elementary", "status": "late", "lateDays": 12, "issues": 1, "worst": "warning", "enrolled": 80, "ada_pct": 94.5, "chronic_pct": 15.2, "hours_45_plus_pct": 62.5, "avg_hours": 57.1, "on_track_pct": 50.0, "family_pct": 48.8}]}];
+const BANDS = ["Under 15", "15-44", "45-89", "90+"];
+const MEASURES = [
+ {key:"ada_pct",label:"Attendance",long:"Average daily attendance",better:"up"},
+ {key:"chronic_pct",label:"Chronic absence",long:"Chronically absent",better:"down"},
+ {key:"hours_45_plus_pct",label:"45+ hours",long:"Participants with 45+ program hours",better:"up"},
+ {key:"on_track_pct",label:"On track",long:"On track (reading or credits)",better:"up"},
+ {key:"family_pct",label:"Family",long:"Families at 1+ event",better:"up"}];
+let qi = DATA.length-1, mk = "chronic_pct";
+const $ = s => document.querySelector(s);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"})[c]);
+const pct = v => v==null ? "—" : v.toFixed(1)+"%";
+const tip = $("#tip");
+function showTip(e, html){tip.innerHTML=html;tip.style.opacity=1;const x=Math.min(e.clientX+12, innerWidth-tip.offsetWidth-8);tip.style.left=x+"px";tip.style.top=(e.clientY+14)+"px";}
+function hideTip(){tip.style.opacity=0;}
+function seg(el, items, cur, on){el.innerHTML=items.map(([v,l])=>`<button type="button" data-v="${v}" aria-pressed="${v==cur}">${esc(l)}</button>`).join("");
+ el.querySelectorAll("button").forEach(b=>b.onclick=()=>on(b.dataset.v));}
+function delta(cur, prev, better){
+ if(cur==null||prev==null) return "No earlier quarter";
+ const d=cur-prev; if(Math.abs(d)<0.05) return "No change";
+ const good=(d>0)===(better==="up");
+ return `<span style="color:var(${good?"--good-ink":"--crit-ink"})">${d>0?"▲":"▼"} ${Math.abs(d).toFixed(1)} pts</span> <span class="nw">vs ${esc(DATA[qi-1].quarter)}</span>`;}
+function render(){
+ const q=DATA[qi], p=DATA[qi-1];
+ $("#title").textContent="Program dashboard, "+q.label;
+ seg($("#qsel"), DATA.map((d,i)=>[i,d.quarter]), qi, v=>{qi=+v;render();});
+ seg($("#msel"), MEASURES.map(m=>[m.key,m.label]), mk, v=>{mk=v;render();});
+ const miss=q.sites.filter(s=>s.status==="missing"||s.status==="unreadable");
+ $("#banner").innerHTML = (miss.length||q.issues.error) ? `<div class="banner${miss.length?" crit":""}"><strong>${q.sitesReporting} of ${q.sitesExpected} sites reporting.</strong> ${miss.map(s=>esc(s.name)+": not received").join("; ")}${miss.length&&q.issues.error?"; ":""}${q.issues.error?q.issues.error+(q.issues.error===1?" data problem needs":" data problems need")+" fixing (see the report's Data notes).":""}</div>` : "";
+ const tiles=[["Enrolled",q.totals.enrolled,p&&p.totals.enrolled,"up",v=>v.toLocaleString()]].concat(MEASURES.map(m=>[m.long,q.totals[m.key],p&&p.totals[m.key],m.better,pct]));
+ $("#tiles").innerHTML=tiles.map(([l,v,pv,b,f])=>`<div class="card tile"><div class="label">${esc(l)}</div><div class="value">${v==null?"—":f(v)}</div><div class="delta">${
+   l==="Enrolled" ? (pv==null?"No earlier quarter":`${v-pv>=0?"+":"−"}${Math.abs(v-pv)} <span class="nw">vs ${esc(p.quarter)}</span>`) : delta(v,pv,b)}</div></div>`).join("");
+ const m=MEASURES.find(x=>x.key===mk);
+ $("#lg-cur").textContent=q.quarter; $("#lg-prev").parentElement.style.display=p?"":"none"; if(p) $("#lg-prev").textContent=p.quarter;
+ drawBars(q,p,m); drawStatus(q); drawBands(q);
+ $("#ctable").innerHTML=`<thead><tr><th>Site</th><th class=num>${esc(q.quarter)}</th>${p?`<th class=num>${esc(p.quarter)}</th>`:""}</tr></thead><tbody>`+
+  q.sites.map(s=>{const ps=p&&p.sites.find(x=>x.id===s.id);return `<tr><td>${esc(s.name)}</td><td class=num>${pct(s[mk])}</td>${p?`<td class=num>${pct(ps&&ps[mk])}</td>`:""}</tr>`;}).join("")+
+  `<tr class=total><td>All sites</td><td class=num>${pct(q.totals[mk])}</td>${p?`<td class=num>${pct(p.totals[mk])}</td>`:""}</tr></tbody>`;
+}
+function drawBars(q,p,m){
+ const el=$("#chart"), W=Math.max(280, el.clientWidth), narrow=W<480, rowH=narrow?52:40, labW=narrow?0:150, padR=58, H=q.sites.length*rowH+24;
+ const vals=q.sites.map(s=>s[m.key]).concat(p?p.sites.map(s=>s[m.key]):[]).filter(v=>v!=null);
+ const max = m.key==="ada_pct" ? 100 : Math.max(10, Math.ceil(Math.max(...vals,0)/10)*10);
+ const x=v=>labW+(W-labW-padR)*v/max;
+ let s=`<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(m.long)} by site">`;
+ for(let t=0;t<=max;t+=max/4){s+=`<line x1="${x(t)}" x2="${x(t)}" y1="0" y2="${H-20}" stroke="var(--grid)"/><text x="${x(t)}" y="${H-4}" text-anchor="${t===0&&labW===0?"start":"middle"}">${t}%</text>`;}
+ q.sites.forEach((site,i)=>{
+  const y=i*rowH+(narrow?20:8), v=site[m.key], ps=p&&p.sites.find(z=>z.id===site.id), pv=ps?ps[m.key]:null;
+  s+=`<text x="0" y="${narrow?y:y+15}">${esc(site.name)}</text>`;
+  const tipHtml=`<b>${esc(site.name)}</b><br>${esc(m.long)}<br>${esc(q.quarter)}: ${pct(v)}${p?`<br>${esc(p.quarter)}: ${pct(pv)}`:""}`;
+  if(v==null){s+=`<text x="${labW}" y="${y+15}" class="val">${site.status==="missing"?"Not received":"Not usable"}</text>`;}
+  else{const w=Math.max(2,x(v)-labW);
+   s+=`<path d="M${labW} ${y+4}h${w-4}a4 4 0 0 1 4 4v8a4 4 0 0 1-4 4h-${w-4}z" fill="var(--accent)"/>`;
+   s+=`<text x="${Math.max(x(v), pv!=null?x(pv)+4:0)+8}" y="${y+16}" class="val">${v.toFixed(1)}%</text>`;}
+  if(pv!=null) s+=`<circle cx="${x(pv)}" cy="${y+12}" r="5" fill="var(--surface)" stroke="var(--prior)" stroke-width="2"/>`;
+  s+=`<rect x="0" y="${y-(narrow?16:4)}" width="${W}" height="${rowH}" fill="transparent" data-tip="${esc(tipHtml)}"/>`;
+ });
+ el.innerHTML=s+"</svg>";
+ el.querySelectorAll("rect[data-tip]").forEach(r=>{r.onmousemove=e=>showTip(e,r.dataset.tip);r.onmouseleave=hideTip;});
+}
+function drawStatus(q){
+ const c={on_time:["ok","On time"],late:["warning","Late"],missing:["error","Not received"],unreadable:["error","Unreadable"]};
+ $("#status").innerHTML=q.sites.map(s=>{const [k,l]=c[s.status];const lab=s.status==="late"?`Late, ${s.lateDays} days`:l;
+  const iss=s.issues&&s.status!=="missing"?`<span class="chip ${s.worst}"><span class="dot"></span>${s.issues} to review</span>`:"";
+  return `<li><span>${esc(s.name)}</span><span style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">${iss}<span class="chip ${k}"><span class="dot"></span>${lab}</span></span></li>`;}).join("");
+}
+function drawBands(q){
+ const el=$("#bands"); if(!q.bands){el.innerHTML="";return;}
+ const tot=q.bands.reduce((a,b)=>a+b,0), W=Math.max(260, el.clientWidth), cols=["var(--b1)","var(--b2)","var(--b3)","var(--b4)"];
+ let x=0, s=`<svg width="${W}" height="34" viewBox="0 0 ${W} 34" role="img" aria-label="Program hours bands">`;
+ q.bands.forEach((n,i)=>{const w=W*n/tot; s+=`<rect x="${x}" y="0" width="${Math.max(0,w-2)}" height="24" rx="${i===0||i===3?4:0}" fill="${cols[i]}" data-tip="<b>${BANDS[i]} hours</b><br>${n} participants (${(100*n/tot).toFixed(0)}%)"/>`; x+=w;});
+ el.innerHTML=s+"</svg>"+`<div class="legend">${q.bands.map((n,i)=>`<span><i style="width:10px;height:10px;border-radius:2px;background:${cols[i]}"></i>${BANDS[i]} h: ${(100*n/tot).toFixed(0)}%</span>`).join("")}</div>`;
+ el.querySelectorAll("rect[data-tip]").forEach(r=>{r.onmousemove=e=>showTip(e,r.dataset.tip);r.onmouseleave=hideTip;});
+}
+let rt; addEventListener("resize",()=>{clearTimeout(rt);rt=setTimeout(render,100);});
+render();
+</script>
+<footer>Every number on this page is synthetic, made up for a demonstration of how a quarterly report can rebuild itself from each site's files.
+Built by Fulton Ring.</footer></main></body></html>
