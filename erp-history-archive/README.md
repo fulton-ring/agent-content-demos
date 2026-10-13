@@ -7,7 +7,7 @@ This demo asks whether a company leaving Dynamics GP can copy the old system's h
 3. runs the trial balance, receivables and payables agings, and customer and vendor history reports on the source and on the archive, and compares every value,
 4. shuts SQL Server down and answers a set of auditor questions from the archive alone.
 
-Answer from this run: **yes, on this data.** All 58,888 rows in 18 tables copied with matching row fingerprints. 23,040 report values were compared between source and archive. Every agings and history value matched, and the agings tie to the AR and AP control accounts at all 45 period ends. The trial balance had one difference, which we planted on purpose: a journal entry that GP's summary table never received. The reconciliation found it and named the entry. The archive answers the auditor queries after the server is gone.
+Answer from this run: **yes, on this data.** All 58,888 rows in 18 tables copied with matching row fingerprints. 24,500 report values were compared between source and archive. Every agings and history value matched, and the agings tie to the AR and AP control accounts at all 45 period ends. The trial balance had one difference, which we planted on purpose: a journal entry that GP's summary table never received. The reconciliation found it and named the entry. The archive answers the auditor queries after the server is gone.
 
 Proposal card: [Can a retired Dynamics GP or NAV system's history stay queryable after the old software is turned off?](https://app.notion.com/p/3f8cc69045cb8143a95ad63302778ba5) · Issue: [#5](https://github.com/fulton-ring/agent-content-demos/issues/5)
 
@@ -62,7 +62,7 @@ One problem is planted on purpose. In 2026, journal entry 13179 ("Office furnitu
 
 Numbers from `results/reconciliation.md` and `results/timings.md` on a clean checkout. Timings are from a 4-core cloud container.
 
-**Copy.** 18 tables and 58,888 rows. Each row was fingerprinted (SHA-256 of its normalised values) in the source, in the DuckDB file and in the Parquet files. All three matched for every table. The export took 4.3 seconds. The archive is 6.8 MB as a DuckDB file and 2.0 MB as Parquet.
+**Copy.** 18 tables and 58,888 rows. Each row was fingerprinted (SHA-256 of its normalised values) in the source, in the DuckDB file and in the Parquet files. All three matched for every table. The export took 4.6 seconds. The archive is 6.8 MB as a DuckDB file and 2.0 MB as Parquet.
 
 | Table | Rows | | Table | Rows |
 |---|---:|---|---|---:|
@@ -84,7 +84,7 @@ Numbers from `results/reconciliation.md` and `results/timings.md` on a clean che
 | Customer history by year | 240 | 1,440 | 0 |
 | Vendor history by year | 96 | 480 | 0 |
 
-**Trial balance by period.** Total debits and credits agree for all 45 periods except May 2026. There the source shows 2,237,670.41 and the archive 2,250,016.28, a difference of 12,345.67 on each side. The reconciliation searched the archive's journal lines for the difference and found journal entry 13179, "Office furniture reclass", posted by GL.ACCT on 2026-05-14: debit 000-1500-00, credit 000-6300-00, 12,345.67. The other 18 differing values are the same amount carried into the beginning and ending balances of June to September for those two accounts. The ledger balances on both sides; the source's summary just never got that entry. On a real system this would show up as GP's trial balance disagreeing with its own detail, which is what GP's financial Reconcile utility exists to repair. It needs fixing before the old system is switched off, or the archive and the last printed trial balance will disagree forever. (The full per-period table is in `results/reconciliation.md`.)
+**Trial balance by period.** Total debits and credits agree for all 45 periods except May 2026. There the source shows 2,577,285.35 and the archive 2,589,631.02, a difference of 12,345.67 on each side. The reconciliation searched the archive's journal lines for the difference and found journal entry 13179, "Office furniture reclass", posted by GL.ACCT on 2026-05-14: debit 000-1500-00, credit 000-6300-00, 12,345.67. The other 18 differing values are the same amount carried into the beginning and ending balances of June to September for those two accounts. The ledger balances on both sides; the source's summary just never got that entry. On a real system this would show up as GP's trial balance disagreeing with its own detail, which GP's financial Reconcile utility is meant to repair (we didn't test it). It needs fixing before the old system is switched off, or the archive and the last printed trial balance will disagree forever. (The full per-period table is in `results/reconciliation.md`.)
 
 **Receivables and payables.** Open AR and AP agree between source and archive at every period end. They also equal the AR (000-1200-00) and AP (000-2100-00) balances rebuilt from journal lines at all 45 period ends:
 
@@ -99,15 +99,15 @@ Numbers from `results/reconciliation.md` and `results/timings.md` on a clean che
 
 **Read-only.** Before exporting, the script tries to update a table with the archive login. SQL Server refused: "The UPDATE permission was denied on the object 'GL00100'". Nothing in the source was changed. The new system isn't touched at all.
 
-**Timings.** Building the source took 34.5 s, exporting 6.9 s (4.3 s of it copying), reconciling 4.4 s, and the seven auditor queries plus the Parquet check 0.9 s. The AR aging over 45 dates took 3.2 s in SQL Server and 0.1 s in DuckDB.
+**Timings.** Building the source took 34.1 s, exporting 7.3 s (4.6 s of it copying and the rest checking), reconciling 4.6 s, and the eight saved query runs plus the Parquet check 1.0 s. The AR aging over 45 dates took 3.4 s in SQL Server and 0.1 s in DuckDB.
 
 **Auditor queries** (outputs in `results/samples/`, all produced after SQL Server was removed):
 
 | Question | Query | Sample |
 |---|---|---|
 | Trial balance for any period | `trial_balance` | December 2024: 22 accounts |
-| A vendor's full payment history | `vendor_payment_history` | V0001: 212 documents, including a voided and reissued check |
-| Open AR at a past date | `open_ar_at_date` | 30 June 2025: 144 open documents, with days past due on that date |
+| A vendor's full payment history | `vendor_payment_history` | V0001: 210 documents, including a voided and reissued check |
+| Open AR at a past date | `open_ar_at_date` | 30 June 2025: 142 open documents, with days past due on that date |
 | Journal entries posted by a user in a date range | `journal_entries_by_user` | Everything `sa` posted; GL.ACCT in May 2026 |
 | Everything about one document | `document_trail` | An invoice with a credit memo and two payments; a bounced payment and its reversal |
 | Entries worth a second look | `unusual_journal_entries` | Three entries: a round 64,000.00 equipment purchase, two posted by `sa`, one of them on a Saturday |
@@ -135,7 +135,7 @@ Partly, and the options cost more than this demo needs. From what we found (date
 
 - Microsoft's GP-to-Business Central cloud migration can move historical GL, receivables, payables, sales order, purchase receipt and inventory detail into Business Central extension tables as a "historical snapshot". It is free inside the migration tool. Microsoft can also copy the GP database to Azure Data Lake. [Microsoft Learn, 2026-01-14](https://learn.microsoft.com/en-us/dynamics365/business-central/dev-itpro/administration/migrate-dynamics-gp), [Azure Data Lake option](https://learn.microsoft.com/en-us/dynamics365/business-central/dev-itpro/administration/cloud-migration-azure-data-lake-gp)
 - eOne's Popdock sells "Access Legacy Dynamics GP Data in D365 Business Central" as a $6,000 service. It also needs a Popdock Business or Premium plan. [eOne, 2023-12-05](https://www.eonesolutions.com/blog/data-migration-services-pricing-update-on-february-5-2024/)
-- Many partners recommend keeping GP running read-only, often for 12 to 24 months, on the customer's existing perpetual licence. [Alphavima, 2026-05-18](https://alphavima.com/blog/dynamics-gp-to-business-central-migration/), [ERP Software Blog, 2026-03-19](https://erpsoftwareblog.com/2026/03/migration-checklist-to-business-central/), [ArcherPoint, 2025-04-17](https://archerpoint.com/debunking-the-myths-of-migrating-from-dynamics-gp-to-business-central/)
+- Partners commonly recommend keeping GP running read-only on the customer's existing perpetual licence. One suggests 12 to 24 months. [Alphavima, 2026-05-18](https://alphavima.com/blog/dynamics-gp-to-business-central-migration/), [ERP Software Blog, 2026-03-19](https://erpsoftwareblog.com/2026/03/migration-checklist-to-business-central/), [ArcherPoint, 2025-04-17](https://archerpoint.com/debunking-the-myths-of-migrating-from-dynamics-gp-to-business-central/)
 
 None of the partner pages we read mentioned reconciling the archive against GP's own reports before shutdown. That is the part this demo adds. We didn't survey partners systematically, so treat this as a sample, not a market count.
 

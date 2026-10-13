@@ -2,7 +2,7 @@
 
 | Step | Seconds |
 |---|---:|
-| generate | 34.5 |
-| export | 6.9 |
-| reconcile | 4.4 |
-| queries | 0.9 |
+| generate | 34.1 |
+| export | 7.3 |
+| reconcile | 4.6 |
+| queries | 1.0 |

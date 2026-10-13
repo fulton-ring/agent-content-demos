@@ -1,6 +1,6 @@
 # Reconciliation: source GP database against the archive
 
-Run 2026-10-13 17:32 UTC. Source `TWOSYN` on SQL Server, read with login `gp_archive_reader` (refused: The UPDATE permission was denied on the object 'GL00100', database 'TWOSYN', schema 'dbo'.).
+Run 2026-10-13 17:34 UTC. Source `TWOSYN` on SQL Server, read with login `gp_archive_reader` (refused: The UPDATE permission was denied on the object 'GL00100', database 'TWOSYN', schema 'dbo'.).
 
 ## Tables copied
 
@@ -25,14 +25,14 @@ Run 2026-10-13 17:32 UTC. Source `TWOSYN` on SQL Server, read with login `gp_arc
 | SY40100 | 48 | 48 | yes |
 | SY40101 | 4 | 4 | yes |
 
-18 tables, 58,888 rows. Export took 4.3s. Archive size: DuckDB file 6.8 MB, Parquet files 2.0 MB.
+18 tables, 58,888 rows. Export took 4.6s. Archive size: DuckDB file 6.8 MB, Parquet files 2.0 MB.
 
 ## Report comparison
 
 | Report | Rows (source) | Rows (archive) | Values compared | Differences | Source time | Archive time |
 |---|---:|---:|---:|---:|---:|---:|
-| trial_balance | 990 | 990 | 3,960 | 20 | 0.09s | 0.02s |
-| ar_aging | 1,606 | 1,606 | 11,242 | 0 | 3.24s | 0.10s |
+| trial_balance | 990 | 990 | 3,960 | 20 | 0.10s | 0.03s |
+| ar_aging | 1,606 | 1,606 | 11,242 | 0 | 3.39s | 0.10s |
 | ap_aging | 1,054 | 1,054 | 7,378 | 0 | 0.68s | 0.05s |
 | customer_history | 240 | 240 | 1,440 | 0 | 0.02s | 0.01s |
 | vendor_history | 96 | 96 | 480 | 0 | 0.01s | 0.00s |
