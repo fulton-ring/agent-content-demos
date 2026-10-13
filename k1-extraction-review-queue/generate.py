@@ -1,6 +1,9 @@
-"""Generate the sample documents and their answer key.
+"""Generate the made-up sample documents and their answer key.
 
-Fills blank 2025 IRS Schedule K-1 forms (1065, 1120-S, 1041) and a made-up
+The partnership K-1s in this demo are real issuers' published samples (see
+fetch_real.py). Real 1120-S and 1041 K-1s and brokerage 1099s aren't published
+anywhere we can use, so this script makes them: it fills blank 2025 IRS
+Schedule K-1 forms (1120-S, 1041) and a made-up
 brokerage consolidated 1099 with invented numbers, prints them flat (no form
 fields), and turns some of them into degraded "scans". Every name, ID and
 amount is made up. The answer key goes to answer_key.json; extract.py never
@@ -25,27 +28,6 @@ SAMPLES = HERE / "samples"
 SEED = 2025
 
 # Box spec per form: key -> (pdf field for the amount, pdf field for the code or None, label)
-K1_1065 = {
-    "1": ("f1_34", None, "Ordinary business income (loss)"),
-    "2": ("f1_35", None, "Net rental real estate income (loss)"),
-    "3": ("f1_36", None, "Other net rental income (loss)"),
-    "4a": ("f1_37", None, "Guaranteed payments for services"),
-    "4b": ("f1_38", None, "Guaranteed payments for capital"),
-    "4c": ("f1_39", None, "Total guaranteed payments"),
-    "5": ("f1_40", None, "Interest income"),
-    "6a": ("f1_41", None, "Ordinary dividends"),
-    "6b": ("f1_42", None, "Qualified dividends"),
-    "7": ("f1_44", None, "Royalties"),
-    "8": ("f1_45", None, "Net short-term capital gain (loss)"),
-    "9a": ("f1_46", None, "Net long-term capital gain (loss)"),
-    "10": ("f1_49", None, "Net section 1231 gain (loss)"),
-    "12": ("f1_54", None, "Section 179 deduction"),
-    "13": ("f1_55", "Line13", "Other deductions"),
-    "14": ("f1_60", "Line14", "Self-employment earnings (loss)"),
-    "19": ("f1_89", "Line19", "Distributions"),
-    "20": ("f1_92", "Line20", "Other information"),
-    "21": ("f1_66", None, "Foreign taxes paid or accrued"),
-}
 K1_1120S = {
     "1": ("f1_21", None, "Ordinary business income (loss)"),
     "2": ("f1_22", None, "Net rental real estate income (loss)"),
@@ -80,17 +62,15 @@ K1_1041 = {
     "14": ("f1_57", "f1_56", "Other information"),
 }
 HEADER = {
-    "1065": {"payer_ein": "f1_6", "payer_name": "f1_7", "recipient_tin": "f1_9", "recipient_name": "f1_10"},
     "1120S": {"payer_ein": "f1_06", "payer_name": "f1_07", "recipient_tin": "f1_11", "recipient_name": "f1_12"},
     "1041": {"payer_ein": "f1_6", "payer_name": "f1_7", "recipient_tin": "f1_10", "recipient_name": "f1_11"},
 }
-FORM_FILES = {"1065": "f1065sk1.pdf", "1120S": "f1120ssk.pdf", "1041": "f1041sk1.pdf"}
-BOXES = {"1065": K1_1065, "1120S": K1_1120S, "1041": K1_1041}
+FORM_FILES = {"1120S": "f1120ssk.pdf", "1041": "f1041sk1.pdf"}
+BOXES = {"1120S": K1_1120S, "1041": K1_1041}
 
 ENTITY_WORDS = ["Harbor", "Juniper", "Granite", "Meridian", "Alder", "Kestrel", "Sable", "Copper",
                 "Lantern", "Willow", "Basalt", "Heron", "Quarry", "Tamarack", "Orchard", "Beacon"]
-ENTITY_KINDS = {"1065": ["Partners LP", "Fund II LP", "Holdings LLC", "Real Estate LP"],
-                "1120S": ["Services Inc", "Builders Inc", "Logistics Inc"],
+ENTITY_KINDS = {"1120S": ["Services Inc", "Builders Inc", "Logistics Inc"],
                 "1041": ["Family Trust", "Residuary Trust", "Estate"]}
 PEOPLE = ["Avery Sample", "Jordan Example", "Riley Placeholder", "Morgan Testcase", "Casey Specimen",
           "Taylor Fictional", "Quinn Madeup", "Drew Notreal"]
@@ -111,39 +91,7 @@ def fmt(v):
 def make_k1_values(rng, form):
     """Pick which boxes carry amounts on this K-1, and what they are."""
     vals = {}
-    if form == "1065":
-        vals["1"] = money(rng, 1_000, 480_000, allow_loss=True)
-        if rng.random() < 0.5:
-            vals["2"] = money(rng, 500, 90_000, allow_loss=True)
-        if rng.random() < 0.3:
-            vals["3"] = money(rng, 200, 20_000, allow_loss=True)
-        if rng.random() < 0.4:
-            vals["4a"] = money(rng, 10_000, 250_000)
-            vals["4b"] = money(rng, 0, 40_000) if rng.random() < 0.5 else 0
-            if vals["4b"] == 0:
-                del vals["4b"]
-            vals["4c"] = vals["4a"] + vals.get("4b", 0)
-        vals["5"] = money(rng, 10, 25_000)
-        vals["6a"] = money(rng, 100, 60_000)
-        vals["6b"] = rng.randint(0, vals["6a"])
-        if rng.random() < 0.3:
-            vals["7"] = money(rng, 100, 15_000)
-        if rng.random() < 0.5:
-            vals["8"] = money(rng, 100, 40_000, allow_loss=True)
-        vals["9a"] = money(rng, 100, 200_000, allow_loss=True)
-        if rng.random() < 0.4:
-            vals["10"] = money(rng, 500, 80_000, allow_loss=True)
-        if rng.random() < 0.3:
-            vals["12"] = money(rng, 1_000, 30_000)
-        if rng.random() < 0.5:
-            vals["13"] = ("ZZ" if rng.random() < 0.2 else rng.choice(["A", "H", "W"]), money(rng, 100, 20_000))
-        if "4a" in vals or rng.random() < 0.3:
-            vals["14"] = ("A", vals.get("1", 0) + vals.get("4c", 0) if vals.get("1", 0) > 0 else vals.get("4c", 1_000))
-        vals["19"] = ("A", money(rng, 1_000, 300_000))
-        vals["20"] = ("Z", money(rng, 1_000, 400_000))
-        if rng.random() < 0.3:
-            vals["21"] = money(rng, 10, 3_000)
-    elif form == "1120S":
+    if form == "1120S":
         vals["1"] = money(rng, 1_000, 650_000, allow_loss=True)
         if rng.random() < 0.4:
             vals["2"] = money(rng, 500, 60_000, allow_loss=True)
@@ -416,21 +364,29 @@ def to_scan(pdf_bytes, rng, level, dpi=200):
 
 
 def main():
-    rng = random.Random(SEED)
     SAMPLES.mkdir(exist_ok=True)
-    for old in SAMPLES.glob("*.pdf"):
+    for old in SAMPLES.glob("*-madeup-*.pdf"):
         old.unlink()
     # (form, scan level) for each sample document. Level 0 is a clean print run through
     # a scanner at 200 dpi; 1 is an ordinary office scan; 2 is a bad fax or phone photo.
-    plan = [("1065", 0), ("1065", 0), ("1065", 1), ("1065", 1), ("1065", 2),
-            ("1120S", 0), ("1120S", 1), ("1120S", 1), ("1120S", 2),
-            ("1041", 0), ("1041", 1), ("1041", 1), ("1041", 2),
+    plan = [("1120S", 0), ("1120S", 1), ("1120S", 2),
+            ("1041", 0), ("1041", 1), ("1041", 2),
             ("BROKER", 0), ("BROKER", 1), ("BROKER", 2)]
+    # Documents 10-18 were used while tuning the extractor; 20-28 come from a different
+    # seed and were held out, so their results show how it does on documents it wasn't tuned on.
     key = {}
-    for i, (form, level) in enumerate(plan, 1):
+    for start, seed in ((10, SEED), (20, SEED + 1)):
+        rng = random.Random(seed)
+        make_set(plan, start, rng, key)
+    (HERE / "answer_key.json").write_text(json.dumps(key, indent=1))
+    print(f"generated {len(key)} made-up documents in {SAMPLES.relative_to(HERE)}/")
+
+
+def make_set(plan, start, rng, key):
+    for i, (form, level) in enumerate(plan, start):
         if form == "BROKER":
             pdf, truth, header = make_brokerage(rng)
-            name = f"{i:02d}-brokerage-1099-composite.pdf"
+            name = f"{i:02d}-madeup-brokerage-1099.pdf"
         else:
             header = make_header(rng, form)
             vals = make_k1_values(rng, form)
@@ -445,13 +401,11 @@ def main():
                         truth[f"{box} {v[0]}"] = v[1]
                 else:
                     truth[box] = v
-            name = f"{i:02d}-k1-{form.lower()}.pdf"
+            name = f"{i:02d}-madeup-k1-{form.lower()}.pdf"
         (SAMPLES / name).write_bytes(to_scan(pdf, rng, level))
         key[name] = {"form": form, "scan_level": level,
                      "header": {k: v for k, v in header.items() if k in ("payer_name", "payer_ein", "recipient_name")},
                      "fields": truth}
-    (HERE / "answer_key.json").write_text(json.dumps(key, indent=1))
-    print(f"generated {len(plan)} documents in {SAMPLES.relative_to(HERE)}/")
 
 
 if __name__ == "__main__":
