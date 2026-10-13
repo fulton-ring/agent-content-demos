@@ -1,6 +1,6 @@
 # K-1 extraction with a review queue
 
-This demo reads Schedule K-1s and brokerage 1099s and links every extracted value to the box it came from. Anything the software isn't sure of goes to a review queue for a person to check. It answers a sales question for the CPA document extraction play: can a two-minute screen recording show a tax preparer what they'd get, without them sending us any documents?
+This demo reads Schedule K-1s and brokerage 1099s and links every extracted value to the box it came from. Anything the software isn't sure of goes to a review queue for a person to check. It answers a sales question for the CPA document extraction play: can we show a tax preparer what they'd get, with screenshots of real sample documents, without them sending us any documents?
 
 It compares five current vision-language models, three of them open-weight, and two OCR models run on Modal's GPUs, on the same documents and answer keys, each on its own and in pairs where two models must agree. Docling reads the page layout and the supplemental statements; Pydantic AI turns each model's answer into typed values with a page, box and confidence.
 
@@ -11,7 +11,7 @@ It compares five current vision-language models, three of them open-weight, and 
 ```
 ./run.sh               # the model comparison
 ./run.sh --tesseract   # also the earlier Tesseract pipelines (slow on CPU)
-./run.sh --record      # also clicks through the review screen and records it
+./run.sh --screenshots # also takes screenshots of Gemini 3.8 Flash's review screen
 ```
 
 You need Python 3.10+, `OPENROUTER_API_KEY`, and for the OCR models `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` in the environment. Without the Modal credentials the OCR models are skipped. The script makes a virtualenv (Docling brings a CPU build of PyTorch; the virtualenv comes to about 2 GB), downloads the real sample K-1s, generates the made-up documents, runs Docling, runs the five models in parallel, pairs Gemini with Qwen 3.8 27B, scores everything and writes:
@@ -96,7 +96,7 @@ The OCR models were the cheapest way to get the characters off the page, and olm
 
 ### Gemini alone, or checked by an open model
 
-Gemini 3.8 Flash on its own was right on every value here, but its own confidence never flagged anything: everything it sent to review was a STMT amount. On a document it does misread, nothing but the cross-checks would catch it. Pairing it with Qwen 3.8 27B, an open-weight model that could run on our own hardware, adds an independent read for about 60% more cost: on these documents the pair let nothing wrong through and sent 54 more values to review than Gemini alone (78 against 24), almost all of them rows Qwen skipped or filed under the wrong box. For a demo video, Gemini alone is enough. For client documents, the pair is the safer default.
+Gemini 3.8 Flash on its own was right on every value here, but its own confidence never flagged anything: everything it sent to review was a STMT amount. On a document it does misread, nothing but the cross-checks would catch it. Pairing it with Qwen 3.8 27B, an open-weight model that could run on our own hardware, adds an independent read for about 60% more cost: on these documents the pair let nothing wrong through and sent 54 more values to review than Gemini alone (78 against 24), almost all of them rows Qwen skipped or filed under the wrong box. For a demo, Gemini alone is enough. For client documents, the pair is the safer default.
 
 ## Earlier approaches
 
@@ -123,9 +123,8 @@ The first versions of this demo, still in the repository and run with `--tessera
 - `report.py`: builds a run's review screen, `index.html`
 - `compare.py`: writes `output/comparison.md`
 - `extract.py`: the earlier Tesseract pipeline
-- `record.py`: clicks through the review screen and saves `screenshots/` and `recording/walkthrough.mp4`
+- `screenshots.py`: saves `screenshots/` from a run's review screen (Gemini 3.8 Flash by default)
 - `real_answer_key.json`: the real K-1s' Part III boxes and the partnership name and EIN, keyed by hand from the issuers' PDFs
 - `forms/`: blank IRS Schedule K-1 forms (1065 for 2018, 2019, 2021 and 2025; 1120-S and 1041 for 2025), from irs.gov
-- `SCRIPT.md`: a two-minute voice-over for recording the walkthrough
 
-The committed screenshots, recording and `SCRIPT.md` still show the Tesseract pipeline's review screen; `record.py` needs `--tesseract` until they are redone.
+The committed screenshots are Gemini 3.8 Flash's review screen from the clean run reported above.

@@ -2,7 +2,7 @@
 # One command: set up, fetch and make the documents, extract with each model, score, and build the review screens.
 #   ./run.sh               the model comparison (needs OPENROUTER_API_KEY)
 #   ./run.sh --tesseract   also the Tesseract pipelines: OCR and rules, and Qwen3-VL checked by Tesseract (slow on CPU)
-#   ./run.sh --record      also click through the review screen and record it (needs Chromium)
+#   ./run.sh --screenshots also take screenshots of Gemini 3.8 Flash's review screen (needs Chromium)
 #
 # Each model reads every document on its own (output/<model>-alone/). pair.py then combines two models' answers,
 # accepting a value only when both read the same thing (output/pair-<a>+<b>/). output/comparison.md has them all.
@@ -78,8 +78,8 @@ fi
 
 $PY compare.py > /dev/null   # output/comparison.md
 
-if [[ "$FLAGS" == *" --record "* ]]; then
+if [[ "$FLAGS" == *" --screenshots "* ]]; then
   [ -n "${CHROMIUM_PATH:-}" ] || .venv/bin/playwright install chromium
-  $PY record.py
+  $PY screenshots.py output/gemini-3.8-flash-alone
 fi
 echo "See output/comparison.md, and open output/gemini-3.8-flash-alone/index.html in a browser."
