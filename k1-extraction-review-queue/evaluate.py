@@ -14,12 +14,14 @@ output/extracted.json for the report.
 """
 
 import json
+import sys
 import re
 from collections import defaultdict
 from pathlib import Path
 
 HERE = Path(__file__).parent
-OUT = HERE / "output"
+# The Tesseract pipeline writes to output/; the model pipeline to output/<model>/, given as the argument.
+OUT = Path(sys.argv[1]) if len(sys.argv) > 1 else HERE / "output"
 
 
 def load_keys():
@@ -128,7 +130,12 @@ def main():
                "made_up": summarize([r for r in rows if r["group"] == "made-up"]),
                "by_source": {f"{st} / {g} / {lv}": summarize(rs) for (st, g, lv), rs in sorted(by.items(), reverse=True)},
                "seconds_per_document": round(sum(d["seconds"] for d in data["documents"]) / max(1, len(data["documents"])), 1),
-               "tesseract": data["tesseract"]}
+               "engine": data.get("tesseract") or data.get("model")}
+    if any("cost_usd" in d for d in data["documents"]):
+        metrics["cost_usd_total"] = round(sum(d["cost_usd"] for d in data["documents"]), 4)
+        metrics["cost_usd_per_document"] = round(metrics["cost_usd_total"] / len(data["documents"]), 5)
+        metrics["model_seconds_per_document"] = round(sum(d["model_seconds"] for d in data["documents"]) / len(data["documents"]), 1)
+        metrics["docling_seconds_per_document"] = round(sum(d["docling_seconds"] for d in data["documents"]) / len(data["documents"]), 1)
     (OUT / "metrics.json").write_text(json.dumps(metrics, indent=1))
     (OUT / "extracted.json").write_text(json.dumps(data, indent=1))
 

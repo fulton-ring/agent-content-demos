@@ -7,10 +7,12 @@ correct it. Corrections stay in the browser and export to CSV.
 """
 
 import json
+import sys
 from pathlib import Path
 
 HERE = Path(__file__).parent
-OUT = HERE / "output"
+# The Tesseract pipeline writes to output/; the model pipeline to output/<model>/, given as the argument.
+OUT = Path(sys.argv[1]) if len(sys.argv) > 1 else HERE / "output"
 
 PAGE = r"""<!doctype html>
 <html lang="en">
@@ -66,6 +68,8 @@ td.num { text-align:right; font-variant-numeric:tabular-nums; font-family:ui-mon
 .item input { font:inherit; font-family:ui-monospace, Menlo, monospace; padding:4px 6px; width:140px; }
 .item button, .toolbar button { font:inherit; padding:4px 10px; cursor:pointer; }
 .toolbar { display:flex; gap:10px; align-items:center; margin-bottom:12px; color:var(--muted); font-size:13px; }
+.stmt { font-size:12px; color:var(--muted); margin-top:4px; }
+.stmt i { color:var(--bad); font-style:normal; }
 label.tg { font-size:12px; color:var(--muted); margin-left:auto; padding:8px 20px 0; }
 </style>
 </head>
@@ -73,6 +77,7 @@ label.tg { font-size:12px; color:var(--muted); margin-left:auto; padding:8px 20p
 <header>
   <h1>K-1 extraction with a review queue</h1>
   <div class="sub">Real sample K-1s published by Enviva Partners and The Blackstone Group, scanned copies of them, and made-up 1120-S, 1041 and brokerage 1099s. Every value links to the box it came from.</div>
+  <div class="sub" id="pipeline"></div>
   <div class="stats" id="stats"></div>
 </header>
 <nav>
@@ -109,6 +114,9 @@ function docTitle(d) {
   const kind = { "1120S": "1120-S K-1", "1041": "1041 K-1", "BROKER": "Brokerage 1099" }[d.form] || d.form;
   return "Made-up " + kind;
 }
+const esc = t => String(t).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+if (DATA.model) $("pipeline").textContent = `Read by ${DATA.model} through OpenRouter, each value checked against a second read of its box (Docling, or Tesseract on scans).`;
+else $("pipeline").textContent = "Read by Tesseract OCR and rules, with no language model.";
 const m = METRICS.all, h = METRICS.held_out_set;
 const pct = (a, b) => b ? (100 * a / b).toFixed(1) + "%" : "n/a";
 const all = DATA.documents.flatMap(d => d.fields);
@@ -194,6 +202,8 @@ function queue() {
       <div><h3>${docTitle(d)} · box ${f.key}</h3>
         <div class="sub">${f.label}</div>
         <div class="why">${f.reasons.join("; ")}</div>
+        ${f.statement_lines && f.statement_lines.length ? `<div class="stmt">On the statement, the model read: ${f.statement_lines.map(l =>
+          `<span title="${esc(l.description)}">${esc(l.code)} <b class="num">${esc(l.printed)}</b>${l.docling_agrees ? "" : " <i>(not in Docling's table)</i>"}</span>`).join(" · ")}</div>` : ""}
         <div style="margin-top:6px">Read: <b class="num">${f.value !== null && f.value !== undefined ? fmt(f.value) : f.raw ? "'" + f.raw + "'" : "(nothing)"}</b> ${keycell(f)}</div>
         <div style="margin-top:6px"><input data-q="${i}" placeholder="correct value" value="${fx && fx.value !== undefined ? fx.value : ""}">
           <button data-fix="${i}">Save correction</button> <button data-ok="${i}">Value is right</button>
@@ -243,7 +253,7 @@ def main():
     metrics = json.loads((OUT / "metrics.json").read_text())
     html = PAGE.replace("__DATA__", json.dumps(data)).replace("__METRICS__", json.dumps(metrics))
     (OUT / "index.html").write_text(html)
-    print(f"wrote {(OUT / 'index.html').relative_to(HERE)}")
+    print(f"wrote {OUT / 'index.html'}")
 
 
 if __name__ == "__main__":
