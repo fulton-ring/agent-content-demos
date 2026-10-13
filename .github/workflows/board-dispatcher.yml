@@ -6,6 +6,8 @@ name: Board dispatcher
 on:
   schedule:
     - cron: "*/15 * * * *"
+  issues:
+    types: [labeled]
   workflow_dispatch:
     inputs:
       dry_run:
@@ -22,6 +24,8 @@ permissions:
 
 jobs:
   dispatch:
+    # Runs on schedule, by hand, and right away when an agent adds a move:* label.
+    if: github.event_name != 'issues' || startsWith(github.event.label.name, 'move:')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     defaults:
