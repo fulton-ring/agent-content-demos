@@ -1,0 +1,49 @@
+name: Board dispatcher
+
+# Starts a Claude Spike worker on each Ready card on the Agent work board.
+# Rules for the board live on the Agent Content page in Notion.
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Only list the cards that would get a worker"
+        type: boolean
+        default: true
+
+concurrency:
+  group: board-dispatcher
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: tools/board-dispatcher
+    env:
+      GH_TOKEN: ${{ secrets.AGENT_BOARD_TOKEN }}
+      SPIKE_WORKER_TOKEN: ${{ secrets.SPIKE_WORKER_TOKEN }}
+      WORKER_ROUTINE_ID: trig_01QFJTcXruuR1BDyYQMK7kgU
+      PROJECT_OWNER: fulton-ring
+      PROJECT_NUMBER: "1"
+      REPO: ${{ github.repository }}
+      MAX_IN_PROGRESS: "5"
+      COOLDOWN_HOURS: "6"
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && '1' || '' }}
+    steps:
+      - name: Skip until the secrets are set
+        if: env.GH_TOKEN == '' || env.SPIKE_WORKER_TOKEN == ''
+        run: echo "AGENT_BOARD_TOKEN or SPIKE_WORKER_TOKEN isn't set; nothing to do."
+      - uses: actions/checkout@v4
+        if: env.GH_TOKEN != '' && env.SPIKE_WORKER_TOKEN != ''
+      - uses: astral-sh/setup-uv@v5
+        if: env.GH_TOKEN != '' && env.SPIKE_WORKER_TOKEN != ''
+      - run: uv run --frozen board-dispatcher
+        if: env.GH_TOKEN != '' && env.SPIKE_WORKER_TOKEN != ''
