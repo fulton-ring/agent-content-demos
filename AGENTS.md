@@ -13,12 +13,13 @@ Rules for every coding agent that works in this repo. Read this file first, then
 
 - Work arrives as a GitHub issue on the [Agent work](https://github.com/orgs/fulton-ring/projects/1) board. The label `agent:spike` means a Claude worker owns it.
 - The board's Status column says who is doing what: Backlog, Ready, In progress, Needs founder, Review, Done. A dispatcher starts a worker on each Ready card every 15 minutes and moves it to In progress.
+- You can't reach the board directly. To move your card, add a label to the issue and the dispatcher applies it within 15 minutes: `move:ready`, `move:review`, `move:needs-founder` or `move:backlog`.
 - Work only the issue you were given. Read the issue and all its comments before you start.
 - If the issue has no plan, comment a short one before you start. If another worker commented on the issue in the last 2 hours, stop.
-- Split off anything big or separable as a sub-issue of your issue, labeled `agent:spike`, saying what's needed and what done means. Set its card to Ready if it can run alongside you. Leave it in Backlog if it should wait, and mark it blocked by the issue it waits on or set its Not before date.
-- If a decision only a founder can make blocks you, ask it on the issue, add the label `needs:founder`, set the card to Needs founder, push what you have and stop.
+- Split off anything big or separable as a sub-issue of your issue, labeled `agent:spike`, saying what's needed and what done means. It lands in Backlog. Add `move:ready` if it can run alongside you. If it should wait, mark it blocked by the issue it waits on, or put a line `Not before: YYYY-MM-DD` in its body.
+- If a decision only a founder can make blocks you, ask it on the issue, add `move:needs-founder`, push what you have and stop.
 - Commit and push work in progress at least every hour.
-- Finish by commenting on the issue with what was built, the numbers, what failed, and either `Ready for review` (set the card to Review) or `Stopped at:` with what's left (set the card to Ready).
+- Finish by commenting on the issue with what was built, the numbers, what failed, and either `Ready for review` (add `move:review`) or `Stopped at:` with what's left (add `move:ready`).
 
 ## The repo is public
 
