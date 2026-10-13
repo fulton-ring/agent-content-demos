@@ -2,7 +2,7 @@
 
 This demo reads Schedule K-1s and brokerage 1099s and links every extracted value to the box it came from. Anything the software isn't sure of goes to a review queue for a person to check. It answers a sales question for the CPA document extraction play: can a two-minute screen recording show a tax preparer what they'd get, without them sending us any documents?
 
-It compares five current vision-language models, three of them open-weight, on the same documents and answer keys, each on its own and in pairs where two models must agree. Docling reads the page layout and the supplemental statements; Pydantic AI turns each model's answer into typed values with a page, box and confidence.
+It compares five current vision-language models, three of them open-weight, and two OCR models run on Modal's GPUs, on the same documents and answer keys, each on its own and in pairs where two models must agree. Docling reads the page layout and the supplemental statements; Pydantic AI turns each model's answer into typed values with a page, box and confidence.
 
 ![A value on a real K-1, highlighted on the page it came from](screenshots/1-value-linked-to-box.png)
 
@@ -14,13 +14,13 @@ It compares five current vision-language models, three of them open-weight, on t
 ./run.sh --record      # also clicks through the review screen and records it
 ```
 
-You need Python 3.10+ and `OPENROUTER_API_KEY` in the environment. The script makes a virtualenv (Docling brings a CPU build of PyTorch; the virtualenv comes to about 2 GB), downloads the real sample K-1s, generates the made-up documents, runs Docling, runs the five models in parallel, pairs Gemini with Qwen 3.8 27B, scores everything and writes:
+You need Python 3.10+, `OPENROUTER_API_KEY`, and for the OCR models `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` in the environment. Without the Modal credentials the OCR models are skipped. The script makes a virtualenv (Docling brings a CPU build of PyTorch; the virtualenv comes to about 2 GB), downloads the real sample K-1s, generates the made-up documents, runs Docling, runs the five models in parallel, pairs Gemini with Qwen 3.8 27B, scores everything and writes:
 
 - `output/comparison.md`: every run side by side
 - `output/<model>-alone/index.html`: each model's review screen
 - `output/pair-gemini-3.8-flash+qwen3.8-27b/index.html`: the review screen for Gemini checked by Qwen 3.8 27B
 
-A clean run took about 20 minutes and cost about 57 cents for all five models; Gemini 3.8 Flash on its own finishes in a few minutes.
+A clean run took about 30 minutes and cost about $1.24 in all; Gemini 3.8 Flash on its own finishes in a few minutes for about 20 cents.
 
 ## The documents
 
@@ -45,6 +45,11 @@ These files are not in the repo. `fetch_real.py` downloads them from the issuers
 3. **A value goes to review** when the model's confidence is below 0.9, the amount is on an attached statement (`STMT`), it isn't a well-formed amount, a coded row has no code letter, or a cross-check fails (qualified dividends above ordinary dividends, 4a + 4b ≠ 4c, a 1099-B row that doesn't balance).
 4. **Pairs** (`pair.py`). Two models' saved answers are combined with no further API calls. A value is accepted only when both models report the same box and code with the same amount and neither has its own reason to send it to review. Anything only one model reported, or that the two read differently, goes to review.
 5. **Statements.** For a `STMT` amount, the model reads the statement page and lists that box's lines. The reviewer sees them as a suggestion; the value stays in the queue.
+6. **OCR models on Modal** (`ocr_modal.py`, `extract_ocr.py`). olmOCR 2 and granite-docling turn a page into text rather than filling a schema, so each is followed by a text model (Gemini 3.8 Flash, which never sees the image) that fills the same typed schema from the OCR text, with the same review rules.
+   - **Weights:** a small CPU container on Modal (`modal run ocr_modal.py::download`) downloads both models from Hugging Face into a Modal Volume. The GPU containers read them from there and only spend GPU time reading pages.
+   - **olmOCR 2** (`allenai/olmOCR-2-7B-1025-FP8`) runs on vLLM on an L4 GPU, with olmOCR's own prompt and 1288-pixel page images, and returns Markdown with HTML tables.
+   - **granite-docling** (`ibm-granite/granite-docling-258M`) is served by vLLM on an L4 GPU behind an API key made for each run. Docling's VLM pipeline runs locally and calls it, using Docling's own `GRANITEDOCLING_VLLM_API` preset with two changes. The preset asks the server to skip special tokens, but granite-docling's DocTags are special tokens, so the reply came back with no tags and Docling parsed nothing. And a dense form needs more than the preset's 4,096 output tokens.
+   - The GPU cost is Modal's L4 list price ($0.000222 a second) for each page's GPU time.
 
 `report.py` builds the review screen for each run. Clicking a value highlights its box on the page. A STMT value opens the statement page. The queue shows each flagged box cropped from the page, with the reason, and lets a person correct or confirm it. The results export to CSV. No extractor reads the answer keys; `evaluate.py` scores the output against them afterwards.
 
@@ -54,34 +59,44 @@ From one clean run of `./run.sh` from a fresh checkout on 2026-10-13. "Boxes" me
 
 ### All 30 documents
 
-| Model | Values right | Accepted without review | Wrong but accepted | Sent to review | Cost per document | Model time per document |
+| Pipeline | Values right | Accepted without review | Wrong but accepted | Sent to review | Cost per document | Time per document |
 |---|---|---|---|---|---|---|
 | **Gemini 3.8 Flash** | **676 of 676** | **652** | **0** | **24, all STMT** | **$0.0065** | **19 s** |
-| Qwen 3.8 27B (open weights) | 658 of 686 | 662 | 25 | 24 | $0.0063 | 34 s |
-| Qwen3-VL 235B (open weights) | 645 of 690 | 653 | 29 | 37 | $0.0039 | 71 s |
-| GLM 5.3 Flash | 570 of 676 | 560 | 14 | 116 | $0.0011 | 27 s |
-| Gemma 4 31B (open weights) | 434 of 741 | 636 | 211 | 105 | $0.0015 | 36 s |
-| Gemini 3.8 Flash + Qwen 3.8 27B, must agree | 676 of 686 | 637 | 0 | 49 | $0.0127 | 35 s |
+| Qwen3-VL 235B (open weights) | 667 of 681 | 651 | 6 | 30 | $0.0037 | 37 s |
+| Qwen 3.8 27B (open weights) | 634 of 697 | 676 | 57 | 21 | $0.0039 | 57 s |
+| GLM 5.3 Flash | 564 of 677 | 545 | 4 | 132 | $0.0009 | 17 s |
+| Gemma 4 31B (open weights) | 367 of 739 | 639 | 278 | 100 | $0.0050 | 18 s |
+| olmOCR 2 on Modal, then Gemini 3.8 Flash on the text | 549 of 702 | 542 | 69 | 160 | $0.0072 | 12 s GPU + 6 s |
+| granite-docling on Modal, then Gemini 3.8 Flash on the text | 256 of 678 | 105 | 26 | 573 | $0.0141 | 57 s GPU + 4 s |
+| Gemini 3.8 Flash + Qwen 3.8 27B, must agree | 675 of 697 | 619 | 0 | 78 | $0.0105 | 57 s |
 
-On the held-out set alone, Gemini 3.8 Flash accepted 299 of 310 boxes, all right, and sent 11 to review, all of them STMT amounts. The Gemini + Qwen 3.8 27B pair accepted 287 of 320, all right, and sent 33 to review. `output/comparison.md` breaks every run down by kind of document.
+"Wrong but accepted" counts both wrong values that were accepted and values on the answer key that a run never reported, since a missed row reads as a blank box.
 
-The cost is the provider's own figure for each response (OpenRouter reports it), or Pydantic AI's price table when a provider doesn't, and includes reading the supplemental statements. One response for Qwen 3.8 27B came back without a cost and Pydantic AI's table doesn't list that model, so its average covers 29 of the 30 documents. Docling adds about 11 seconds per document on CPU. A pair costs the sum of its two models and takes as long as the slower one, since they run side by side.
+On the held-out set alone, Gemini 3.8 Flash accepted 299 of 310 boxes, all right, and sent 11 to review, all of them STMT amounts. `output/comparison.md` breaks every run down by kind of document.
+
+The cost is the provider's own figure for each response (OpenRouter reports it), or Pydantic AI's price table when a provider doesn't, and includes reading the supplemental statements. For the OCR pipelines it adds each page's GPU time at Modal's L4 list price: about $0.0027 a document for olmOCR and $0.0126 for granite-docling, whose time is each page's round trip to a server handling several pages at once, so it overstates its share. Docling's layout pass adds about 10 seconds per document on CPU. A pair costs the sum of its two models and takes as long as the slower one.
 
 ### What each model got wrong
 
-- **Gemini 3.8 Flash** made no errors in this run, and 675, 676 and 676 of 676 in three earlier full runs. The one error, in one run, was Enviva 2018's `-27,942` read as `-27.942` on an office scan, and that value went to review because it isn't a well-formed amount.
-- **Qwen 3.8 27B** let 25 errors through, all in coded boxes on scans of the real K-1s. On the Blackstone bad scan it put whole boxes under the wrong number (box 16's rows as box 15, box 13's as box 20), and on the Enviva 2018 scans it skipped rows of box 16.
-- **Qwen3-VL 235B** let 29 errors through in this run, against 7 in the run before. On three scans it reported zeros or dashes for boxes that are blank on the form, on the Enviva 2018 bad scan it put box 17's rows under box 11, and on the born-digital Blackstone K-1 it gave code A the amount that belongs to code B.
-- **GLM 5.3 Flash** returned a valid but empty answer for 5 of the 30 pages. An empty answer used to read as every box blank, so the pipeline now sends such a page to review as a whole. 14 wrong values went through.
-- **Gemma 4 31B** shifted amounts into neighbouring boxes and misread names ("ENVIRO PARTNERS, LP"). About a third of what it accepted was wrong.
+- **Gemini 3.8 Flash** made no errors in this run, and 675, 676, 676 and 676 of 676 in four earlier full runs. The one error, in one run, was Enviva 2018's `-27,942` read as `-27.942` on an office scan, and that value went to review because it isn't a well-formed amount.
+- **Qwen3-VL 235B** let 6 errors through in this run and between 5 and 29 in earlier ones. This time it reported dashes for two boxes that are blank on a made-up 1041 and skipped a few rows.
+- **Qwen 3.8 27B** let 57 errors through, mostly rows it skipped in coded boxes on the real K-1s, and on Blackstone and Enviva 2018 it put box 16's rows under box 15.
+- **GLM 5.3 Flash** returned a valid but empty answer for 6 of the 30 pages, which sends the whole page to review. Only 4 wrong values went through, but it sent 132 to review.
+- **Gemma 4 31B** shifted amounts into neighbouring boxes and misread names ("ENVIRO PARTNERS, LP"). Over 40% of what it accepted was wrong.
+- **olmOCR 2** read the characters well: on the Blackstone office scan its text has every Part III amount. But it lays a K-1's two columns of boxes out as one HTML table, pairing labels and amounts loosely, and once the form is text the box an amount belongs to is easy to lose. The text model then put amounts one box off (Blackstone's 6a, 6b and 6c each got the next box's amount), filed coded rows under the wrong box (`20 V` as `13 V`), and missed rows. 69 errors went through.
+- **granite-docling** could not read these forms. On 25 of the 30 pages Docling got nothing usable back, and those pages went to review whole. Where it did return text, it read some of the page and often then repeated one token until it ran out of output; it never read a Part III amount on any of the real K-1s. A repetition penalty didn't help. Docling's own Transformers pipeline on a Modal GPU gave the same result at 257 seconds a page, so this is the model, not the serving.
 
-Every model that reached the supplemental statements read their lines correctly, checked by `evaluate.py` against the issuers' own text layer. Gemini 3.8 Flash read all 62 lines behind the STMT boxes and missed none.
+Every vision model that reached the supplemental statements read their lines correctly, checked by `evaluate.py` against the issuers' own text layer. Gemini 3.8 Flash read all 62 lines behind the STMT boxes and missed none.
 
-Two changes made the models comparable. In the coded boxes the code letter is now a required field: when it was optional, GLM and Qwen 3.8 27B left it out of every row. And thinking models run at low effort, without which they spent their whole output budget thinking.
+Two changes made the vision models comparable. In the coded boxes the code letter is now a required field: when it was optional, GLM and Qwen 3.8 27B left it out of every row. And thinking models run at low effort, without which they spent their whole output budget thinking.
+
+### Reading the image, or reading text
+
+The OCR models were the cheapest way to get the characters off the page, and olmOCR got nearly all of them. What they lose is the layout: a K-1 is a grid of numbered boxes, and a text model filling the schema from OCR text has to guess which amount belongs to which box. A vision model reading the image sees the grid. On these documents that difference decided the result: Gemini reading the image was right on all 676 values; Gemini reading olmOCR's text of the same pages was right on 549 of 702.
 
 ### Gemini alone, or checked by an open model
 
-Gemini 3.8 Flash on its own was right on every value here, but its own confidence never flagged anything: everything it sent to review was a STMT amount. On a document it does misread, nothing but the cross-checks would catch it. Pairing it with Qwen 3.8 27B, an open-weight model that could run on our own hardware, adds an independent read for about twice the cost: on these documents the pair let nothing wrong through and sent 25 more values to review than Gemini alone (49 against 24), almost all of them rows where Qwen attached an amount to the wrong code. For a demo video, Gemini alone is enough. For client documents, the pair is the safer default.
+Gemini 3.8 Flash on its own was right on every value here, but its own confidence never flagged anything: everything it sent to review was a STMT amount. On a document it does misread, nothing but the cross-checks would catch it. Pairing it with Qwen 3.8 27B, an open-weight model that could run on our own hardware, adds an independent read for about 60% more cost: on these documents the pair let nothing wrong through and sent 54 more values to review than Gemini alone (78 against 24), almost all of them rows Qwen skipped or filed under the wrong box. For a demo video, Gemini alone is enough. For client documents, the pair is the safer default.
 
 ## Earlier approaches
 
@@ -92,7 +107,7 @@ The first versions of this demo, still in the repository and run with `--tessera
 - **This is not our production extraction.** It is a demo built on public tools and public models. A prospect who sends real documents will see different numbers.
 - **The scans are simulated.** Real scans have problems we didn't model: staples, handwriting, stamps, pages scanned at a different scale, and colour backgrounds.
 - **The sample is small.** It has three real K-1s, all Form 1065 from publicly traded partnerships. There are no real 1120-S or 1041 K-1s and no real brokerage 1099s; the made-up 1099s use our own layout. A perfect score on 676 values doesn't mean a perfect score in general.
-- **Model answers vary from run to run.** Across four full runs GLM 5.3 Flash got between 58% and 84% of values right, and Qwen3-VL 235B let between 5 and 29 errors through; Gemini 3.8 Flash got 675, 676, 676 and 676 of 676.
+- **Model answers vary from run to run.** Across five full runs GLM 5.3 Flash got between 58% and 84% of values right, Qwen3-VL 235B let between 5 and 29 errors through and Qwen 3.8 27B between 25 and 57; Gemini 3.8 Flash got 675 of 676 once and 676 of 676 four times.
 
 ## Files
 
@@ -102,6 +117,8 @@ The first versions of this demo, still in the repository and run with `--tessera
 - `layout.py`: runs Docling over every sample once, writing `output/layout/`
 - `extract_vlm.py`: reads every document with one model, `python extract_vlm.py openrouter:<model> --model-only`, or any other Pydantic AI model string
 - `pair.py`: combines two models' runs, `python pair.py output/<a>-alone output/<b>-alone`
+- `ocr_modal.py`: the Modal app: the CPU weight download, olmOCR 2 on vLLM, and the granite-docling vLLM server
+- `extract_ocr.py`: OCR on Modal, then a text model fills the schema, `python extract_ocr.py olmocr|granite-docling openrouter:<model>`
 - `evaluate.py`: scores a run and writes its `metrics.json`
 - `report.py`: builds a run's review screen, `index.html`
 - `compare.py`: writes `output/comparison.md`
