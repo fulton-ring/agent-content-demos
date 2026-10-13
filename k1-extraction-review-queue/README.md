@@ -2,7 +2,7 @@
 
 This demo reads Schedule K-1s and brokerage 1099s and links every extracted value to the box it came from. Anything the software isn't sure of goes to a review queue for a person to check. It answers a sales question for the CPA document extraction play: can a two-minute screen recording show a tax preparer what they'd get, without them sending us any documents?
 
-It compares five current vision-language models on the same documents and answer keys, each on its own and in pairs where two models must agree. Docling reads the page layout and the supplemental statements; Pydantic AI turns each model's answer into typed values with a page, box and confidence.
+It compares five current vision-language models, three of them open-weight, on the same documents and answer keys, each on its own and in pairs where two models must agree. Docling reads the page layout and the supplemental statements; Pydantic AI turns each model's answer into typed values with a page, box and confidence.
 
 ![A value on a real K-1, highlighted on the page it came from](screenshots/1-value-linked-to-box.png)
 
@@ -14,13 +14,13 @@ It compares five current vision-language models on the same documents and answer
 ./run.sh --record      # also clicks through the review screen and records it
 ```
 
-You need Python 3.10+ and `OPENROUTER_API_KEY` in the environment. The script makes a virtualenv (Docling brings a CPU build of PyTorch; the virtualenv comes to about 2 GB), downloads the real sample K-1s, generates the made-up documents, runs Docling, runs the five models in parallel through OpenRouter, pairs them, scores everything and writes:
+You need Python 3.10+ and `OPENROUTER_API_KEY` in the environment. The script makes a virtualenv (Docling brings a CPU build of PyTorch; the virtualenv comes to about 2 GB), downloads the real sample K-1s, generates the made-up documents, runs Docling, runs the five models in parallel, pairs Gemini with Qwen 3.8 27B, scores everything and writes:
 
 - `output/comparison.md`: every run side by side
 - `output/<model>-alone/index.html`: each model's review screen
-- `output/pair-gemini-3.8-flash+qwen3.8-flash/index.html`: the review screen for the recommended pair
+- `output/pair-gemini-3.8-flash+qwen3.8-27b/index.html`: the review screen for Gemini checked by Qwen 3.8 27B
 
-A clean run took about 45 minutes and cost about 48 cents for all five models; Gemini 3.8 Flash on its own finishes in a few minutes.
+A clean run took about 20 minutes and cost about 57 cents for all five models; Gemini 3.8 Flash on its own finishes in a few minutes.
 
 ## The documents
 
@@ -41,7 +41,7 @@ These files are not in the repo. `fetch_real.py` downloads them from the issuers
 ## How it works
 
 1. **Docling reads every page once** (`layout.py`, on CPU). It finds the K-1 page and the supplemental statements, and turns each statement into a Box / Description / Amount table.
-2. **Each model reads the form** (`extract_vlm.py --model-only`). The K-1 page (or the 1099 summary page) goes to the model as an image at 200 dpi. Pydantic AI asks for a typed result: one Pydantic model per form (1065, 1120-S, 1041 and the brokerage 1099), where every value carries what was printed, its bounding box and the model's own confidence. Thinking models run at low reasoning effort; reading a form doesn't need long reasoning, and at the default they spent their whole output budget thinking.
+2. **Each model reads the form** (`extract_vlm.py --model-only`). The K-1 page (or the 1099 summary page) goes to the model as an image at 200 dpi. Each model is named by a Pydantic AI model string, such as `openrouter:google/gemini-3.8-flash`. All five here go through OpenRouter, which Pydantic AI treats as one provider among others, so a model from another provider is a different string and no code change. Pydantic AI asks for a typed result: one Pydantic model per form (1065, 1120-S, 1041 and the brokerage 1099), where every value carries what was printed, its bounding box and the model's own confidence. Thinking models run at low effort through Pydantic AI's provider-neutral `thinking` setting; reading a form doesn't need long reasoning, and at the default they spent their whole output budget thinking.
 3. **A value goes to review** when the model's confidence is below 0.9, the amount is on an attached statement (`STMT`), it isn't a well-formed amount, a coded row has no code letter, or a cross-check fails (qualified dividends above ordinary dividends, 4a + 4b ≠ 4c, a 1099-B row that doesn't balance).
 4. **Pairs** (`pair.py`). Two models' saved answers are combined with no further API calls. A value is accepted only when both models report the same box and code with the same amount and neither has its own reason to send it to review. Anything only one model reported, or that the two read differently, goes to review.
 5. **Statements.** For a `STMT` amount, the model reads the statement page and lists that box's lines. The reviewer sees them as a suggestion; the value stays in the queue.
@@ -56,31 +56,32 @@ From one clean run of `./run.sh` from a fresh checkout on 2026-10-13. "Boxes" me
 
 | Model | Values right | Accepted without review | Wrong but accepted | Sent to review | Cost per document | Model time per document |
 |---|---|---|---|---|---|---|
-| **Gemini 3.8 Flash** | **676 of 676** | **652** | **0** | **24, all STMT** | **$0.0066** | **18 s** |
-| Qwen 3.8 Flash | 647 of 684 | 649 | 24 | 35 | $0.0036 | 69 s |
-| Qwen3-VL 235B | 660 of 705 | 646 | 7 | 59 | $0.0026 | 46 s |
-| GLM 5.3 Flash | 533 of 705 | 513 | 3 | 192 | $0.0017 | 27 s |
-| Gemma 4 31B | 409 of 764 | 586 | 182 | 178 | $0.0015 | 73 s |
-| Gemini 3.8 Flash + Qwen 3.8 Flash, must agree | 669 of 684 | 625 | 0 | 59 | $0.0101 | 69 s |
-| Gemini 3.8 Flash + Qwen3-VL 235B, must agree | 676 of 705 | 639 | 0 | 66 | $0.0091 | 46 s |
+| **Gemini 3.8 Flash** | **676 of 676** | **652** | **0** | **24, all STMT** | **$0.0065** | **19 s** |
+| Qwen 3.8 27B (open weights) | 658 of 686 | 662 | 25 | 24 | $0.0063 | 34 s |
+| Qwen3-VL 235B (open weights) | 645 of 690 | 653 | 29 | 37 | $0.0039 | 71 s |
+| GLM 5.3 Flash | 570 of 676 | 560 | 14 | 116 | $0.0011 | 27 s |
+| Gemma 4 31B (open weights) | 434 of 741 | 636 | 211 | 105 | $0.0015 | 36 s |
+| Gemini 3.8 Flash + Qwen 3.8 27B, must agree | 676 of 686 | 637 | 0 | 49 | $0.0127 | 35 s |
 
-On the held-out set alone, Gemini 3.8 Flash accepted 299 of 310 boxes, all right, and sent 11 to review, all of them STMT amounts. The Gemini + Qwen 3.8 pair accepted 288 of 312, all right, and sent 24 to review. `output/comparison.md` breaks every run down by kind of document.
+On the held-out set alone, Gemini 3.8 Flash accepted 299 of 310 boxes, all right, and sent 11 to review, all of them STMT amounts. The Gemini + Qwen 3.8 27B pair accepted 287 of 320, all right, and sent 33 to review. `output/comparison.md` breaks every run down by kind of document.
 
-The cost is OpenRouter's own figure for each call, or the listed per-token price when a call doesn't report one, and includes reading the supplemental statements. Docling adds about 11 seconds per document on CPU. A pair costs the sum of its two models and takes as long as the slower one, since they run side by side.
+The cost is the provider's own figure for each response (OpenRouter reports it), or Pydantic AI's price table when a provider doesn't, and includes reading the supplemental statements. One response for Qwen 3.8 27B came back without a cost and Pydantic AI's table doesn't list that model, so its average covers 29 of the 30 documents. Docling adds about 11 seconds per document on CPU. A pair costs the sum of its two models and takes as long as the slower one, since they run side by side.
 
 ### What each model got wrong
 
-- **Gemini 3.8 Flash** made no errors in this run. In an earlier full run of the same code it made one: it read Enviva 2018's `-27,942` as `-27.942` on an office scan, and that value went to review because it isn't a well-formed whole-dollar amount.
-- **Qwen 3.8 Flash** read well but let 24 errors through, almost all in coded boxes on the real K-1s, where it attached amounts to the wrong code letters: box 16 (foreign transactions) on Blackstone and Enviva 2018, and the `AH*` rows on Enviva 2018. Its provider refuses the forced tool call Pydantic AI normally uses for typed output when the model is in thinking mode, so it runs with the schema in the prompt instead (`--prompted`).
-- **Qwen3-VL 235B** let 7 errors through, all in Blackstone's box 13, where it assigned amounts to the wrong code letters.
-- **GLM 5.3 Flash** returned a valid but empty answer for 6 of the 30 pages in this run (12 in an earlier run, including every brokerage 1099). An empty answer used to read as every box blank, so the pipeline now sends such a page to review as a whole. It also often left out the code letter in coded boxes, which sends those rows to review. Only 3 wrong values went through, but it sent 192 to review.
-- **Gemma 4 31B** shifted amounts into neighbouring boxes and misread names ("ENVIRO PARTNERS, LP"). About half of what it reported was wrong.
+- **Gemini 3.8 Flash** made no errors in this run, and 675, 676 and 676 of 676 in three earlier full runs. The one error, in one run, was Enviva 2018's `-27,942` read as `-27.942` on an office scan, and that value went to review because it isn't a well-formed amount.
+- **Qwen 3.8 27B** let 25 errors through, all in coded boxes on scans of the real K-1s. On the Blackstone bad scan it put whole boxes under the wrong number (box 16's rows as box 15, box 13's as box 20), and on the Enviva 2018 scans it skipped rows of box 16.
+- **Qwen3-VL 235B** let 29 errors through in this run, against 7 in the run before. On three scans it reported zeros or dashes for boxes that are blank on the form, on the Enviva 2018 bad scan it put box 17's rows under box 11, and on the born-digital Blackstone K-1 it gave code A the amount that belongs to code B.
+- **GLM 5.3 Flash** returned a valid but empty answer for 5 of the 30 pages. An empty answer used to read as every box blank, so the pipeline now sends such a page to review as a whole. 14 wrong values went through.
+- **Gemma 4 31B** shifted amounts into neighbouring boxes and misread names ("ENVIRO PARTNERS, LP"). About a third of what it accepted was wrong.
 
-Every model read the supplemental statement lines it reached correctly, checked by `evaluate.py` against the issuers' own text layer. Gemini 3.8 Flash read all 62 lines behind the STMT boxes and missed none.
+Every model that reached the supplemental statements read their lines correctly, checked by `evaluate.py` against the issuers' own text layer. Gemini 3.8 Flash read all 62 lines behind the STMT boxes and missed none.
 
-### Gemini alone, or checked by a second model
+Two changes made the models comparable. In the coded boxes the code letter is now a required field: when it was optional, GLM and Qwen 3.8 27B left it out of every row. And thinking models run at low effort, without which they spent their whole output budget thinking.
 
-Gemini 3.8 Flash on its own was right on every value here, but its own confidence never flagged anything: everything it sent to review was a STMT amount. On a document it does misread, nothing but the cross-checks would catch it. Pairing it with Qwen 3.8 Flash adds an independent read for about 50% more cost and a longer wait: on these documents the pair let nothing wrong through and sent 35 more values to review than Gemini alone (59 against 24 across all 30 documents), almost all of them rows where Qwen attached an amount to the wrong code. For a demo video, Gemini alone is enough. For client documents, the pair is the safer default.
+### Gemini alone, or checked by an open model
+
+Gemini 3.8 Flash on its own was right on every value here, but its own confidence never flagged anything: everything it sent to review was a STMT amount. On a document it does misread, nothing but the cross-checks would catch it. Pairing it with Qwen 3.8 27B, an open-weight model that could run on our own hardware, adds an independent read for about twice the cost: on these documents the pair let nothing wrong through and sent 25 more values to review than Gemini alone (49 against 24), almost all of them rows where Qwen attached an amount to the wrong code. For a demo video, Gemini alone is enough. For client documents, the pair is the safer default.
 
 ## Earlier approaches
 
@@ -91,7 +92,7 @@ The first versions of this demo, still in the repository and run with `--tessera
 - **This is not our production extraction.** It is a demo built on public tools and public models. A prospect who sends real documents will see different numbers.
 - **The scans are simulated.** Real scans have problems we didn't model: staples, handwriting, stamps, pages scanned at a different scale, and colour backgrounds.
 - **The sample is small.** It has three real K-1s, all Form 1065 from publicly traded partnerships. There are no real 1120-S or 1041 K-1s and no real brokerage 1099s; the made-up 1099s use our own layout. A perfect score on 676 values doesn't mean a perfect score in general.
-- **Model answers vary from run to run.** Across three full runs GLM 5.3 Flash got between 58% and 76% of values right; Gemini 3.8 Flash got 675, 676 and 676 of 676.
+- **Model answers vary from run to run.** Across four full runs GLM 5.3 Flash got between 58% and 84% of values right, and Qwen3-VL 235B let between 5 and 29 errors through; Gemini 3.8 Flash got 675, 676, 676 and 676 of 676.
 
 ## Files
 
@@ -99,7 +100,7 @@ The first versions of this demo, still in the repository and run with `--tessera
 - `fetch_real.py`: downloads the real K-1s and makes scanned copies
 - `generate.py`: makes the made-up documents and `answer_key.json`
 - `layout.py`: runs Docling over every sample once, writing `output/layout/`
-- `extract_vlm.py`: reads every document with one model, `python extract_vlm.py <OpenRouter model id> --model-only`
+- `extract_vlm.py`: reads every document with one model, `python extract_vlm.py openrouter:<model> --model-only`, or any other Pydantic AI model string
 - `pair.py`: combines two models' runs, `python pair.py output/<a>-alone output/<b>-alone`
 - `evaluate.py`: scores a run and writes its `metrics.json`
 - `report.py`: builds a run's review screen, `index.html`

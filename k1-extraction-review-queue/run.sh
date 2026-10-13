@@ -25,11 +25,9 @@ $PY fetch_real.py    # real sample K-1s from the issuers' sites, plus scanned co
 $PY layout.py        # Docling: words, page types and statement tables for every page
 
 # Pydantic AI model string, output folder, extra flags. All of these go through OpenRouter, which is one Pydantic AI
-# provider like any other: another provider's model string works the same way. Qwen 3.8 Flash's provider refuses the
-# forced tool call Pydantic AI uses for typed output in thinking mode, so it gets the schema in the prompt instead.
+# provider like any other: another provider's model string works the same way.
 MODELS=(
   "openrouter:google/gemini-3.8-flash gemini-3.8-flash"
-  "openrouter:qwen/qwen3.8-flash qwen3.8-flash --prompted"
   "openrouter:qwen/qwen3.8-27b qwen3.8-27b"
   "openrouter:qwen/qwen3-vl-235b-a22b-instruct qwen3-vl-235b-a22b-instruct"
   "openrouter:z-ai/glm-5.3-flash glm-5.3-flash"
@@ -49,7 +47,7 @@ for m in "${MODELS[@]}"; do
   $PY report.py "output/$2-alone"
 done
 
-for pair in "gemini-3.8-flash qwen3.8-flash" "gemini-3.8-flash qwen3.8-27b"; do
+for pair in "gemini-3.8-flash qwen3.8-27b"; do
   set -- $pair
   $PY pair.py "output/$1-alone" "output/$2-alone"
   $PY evaluate.py "output/pair-$1+$2" > /dev/null
@@ -69,4 +67,4 @@ if [[ "$FLAGS" == *" --record "* ]]; then
   [ -n "${CHROMIUM_PATH:-}" ] || .venv/bin/playwright install chromium
   $PY record.py
 fi
-echo "See output/comparison.md, and open output/pair-gemini-3.8-flash+qwen3.8-flash/index.html in a browser."
+echo "See output/comparison.md, and open output/gemini-3.8-flash-alone/index.html in a browser."

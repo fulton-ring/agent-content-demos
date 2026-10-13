@@ -167,8 +167,11 @@ def main():
                "seconds_per_document": round(sum(d["seconds"] for d in data["documents"]) / max(1, len(data["documents"])), 1),
                "engine": data.get("tesseract") or data.get("model")}
     if any("cost_usd" in d for d in data["documents"]):
-        metrics["cost_usd_total"] = round(sum(d["cost_usd"] for d in data["documents"]), 4)
-        metrics["cost_usd_per_document"] = round(metrics["cost_usd_total"] / len(data["documents"]), 5)
+        # A cost is NaN when neither the provider nor Pydantic AI's price table had one; average over the rest.
+        known = [d["cost_usd"] for d in data["documents"] if d["cost_usd"] == d["cost_usd"]]
+        metrics["cost_known_for_documents"] = len(known)
+        metrics["cost_usd_total"] = round(sum(known), 4)
+        metrics["cost_usd_per_document"] = round(metrics["cost_usd_total"] / max(1, len(known)), 5)
         metrics["model_seconds_per_document"] = round(sum(d["model_seconds"] for d in data["documents"]) / len(data["documents"]), 1)
         metrics["docling_seconds_per_document"] = round(sum(d["docling_seconds"] for d in data["documents"]) / len(data["documents"]), 1)
     stmt = statement_check(data)
