@@ -1,6 +1,6 @@
 # Board dispatcher
 
-Starts a Claude Spike worker on each Ready card on the [Agent work](https://github.com/orgs/fulton-ring/projects/1) board. The `Board dispatcher` GitHub Action runs it every 15 minutes.
+Starts a Claude Spike worker on each Ready card on the [Agent work](https://github.com/orgs/fulton-ring/projects/1) board. The `Board dispatcher` GitHub Action runs it every 15 minutes, and right away whenever a `move:*` label is added to an issue.
 
 Cloud agent sessions can't reach the org's project board, so agents signal on the issue and the dispatcher moves the card. Each run, first:
 
