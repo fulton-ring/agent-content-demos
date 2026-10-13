@@ -13,7 +13,7 @@ FLAGS=" $* "
 if [ ! -d .venv ]; then
   python3 -m venv .venv
 fi
-if ! .venv/bin/python -c "import pytesseract, docling, pydantic_ai" 2>/dev/null; then
+if ! .venv/bin/python -c "import pytesseract, docling, pydantic_ai, modal" 2>/dev/null; then
   # The CPU build of PyTorch (for Docling's layout model); the default build pulls in CUDA.
   .venv/bin/pip install -q --extra-index-url https://download.pytorch.org/whl/cpu -r requirements.txt
 fi
@@ -53,6 +53,21 @@ for pair in "gemini-3.8-flash qwen3.8-27b"; do
   $PY evaluate.py "output/pair-$1+$2" > /dev/null
   $PY report.py "output/pair-$1+$2"
 done
+
+# OCR models on Modal's GPUs (ocr_modal.py), then Gemini 3.8 Flash fills the schema from their text. Weights go into a
+# Modal Volume on a CPU container first; the GPU containers only read pages. The two run one after the other because
+# ephemeral runs of the Modal app share the granite-docling server's URL.
+if [ -n "${MODAL_TOKEN_ID:-}" ]; then
+  export MODAL_IMAGE_BUILDER_VERSION=2025.06
+  .venv/bin/modal run ocr_modal.py::download
+  for engine in olmocr granite-docling; do
+    $PY extract_ocr.py $engine openrouter:google/gemini-3.8-flash > "output-$engine.log" 2>&1 || { echo "$engine failed; see output-$engine.log"; exit 1; }
+    $PY evaluate.py "output/$engine+gemini-3.8-flash" > /dev/null
+    $PY report.py "output/$engine+gemini-3.8-flash"
+  done
+else
+  echo "MODAL_TOKEN_ID isn't set, so the OCR models (olmOCR, granite-docling) didn't run."
+fi
 
 if [[ "$FLAGS" == *" --tesseract "* ]]; then
   command -v tesseract >/dev/null || { echo "Tesseract is needed: apt install tesseract-ocr"; exit 1; }

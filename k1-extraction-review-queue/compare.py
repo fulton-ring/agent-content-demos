@@ -13,7 +13,9 @@ def pipelines():
     for d in sorted(p for p in OUT.iterdir() if p.is_dir() and (p / "metrics.json").exists()):
         data = json.loads((d / "extracted.json").read_text())
         model = data.get("model", d.name)
-        if "models" in data:
+        if "label" in data:
+            label = data["label"]
+        elif "models" in data:
             label = " + ".join(m.split("/")[-1] for m in data["models"]) + ", must agree"
         elif data.get("pipeline", "").endswith("alone"):
             label = model.split("/")[-1] + ", alone"
