@@ -724,6 +724,12 @@ async def process(runner, path, out_dir):
                 missing = [c for c in table if c.startswith(box) and re.match(rf"{box}[A-Z]", c)
                            and c not in {ln.code.replace(" ", "").upper() for ln in lines.lines}]
                 f["statement_lines_missed"] = missing
+    # A model can return a valid but empty answer. That would read as every box blank, so the whole page goes to
+    # review instead.
+    page_review = None
+    if not any(f["raw"] for f in fields if not f["key"].startswith("payer")):
+        page_review = "the model read nothing on this page"
+        fields.append(field(main, "page", "The whole page", None, "", None, 0, [page_review]))
     for f in fields:
         f["status"] = "review" if f["reasons"] else "accepted"
     # Page images for the review screen, at the size report.py expects.
@@ -739,6 +745,7 @@ async def process(runner, path, out_dir):
     (out_dir / "raw" / (path.stem + ".json")).write_text(json.dumps(raw, indent=1))
     c = runner.cost.get(doc, {})
     return {"file": doc, "form": form, "year": year, "source": "text layer" if main.text_layer else "OCR",
+            "page_review": page_review,
             "second_read": "none" if runner.model_only else ("Tesseract, box by box" if tp else "Docling"),
             "pages": page_files, "seconds": round(layout["seconds"] + c.get("seconds", 0), 1),
             "docling_seconds": layout["seconds"], "model_seconds": round(c.get("seconds", 0), 1),

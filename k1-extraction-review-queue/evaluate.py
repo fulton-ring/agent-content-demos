@@ -103,7 +103,7 @@ def main():
         for k in ("payer_ein", "payer_name"):
             if k in key.get("header", {}) and doc["form"] != "BROKER":
                 truth[k] = key["header"][k]
-        got = {f["key"]: f for f in doc["fields"]}
+        got = {f["key"]: f for f in doc["fields"] if f["key"] != "page"}
         group = "real" if doc["file"][:2] in ("01", "02", "03") else "made-up"
         # Born-digital originals have nothing to tune (no OCR), so they count with the tuning set.
         held_out = doc["file"].startswith("2") or bool(re.search(r"-scan\db\.pdf$", doc["file"]))
@@ -116,7 +116,8 @@ def main():
             # A value we read that isn't on the key at all (a phantom row) is wrong.
             if f is not None and k not in truth:
                 correct = False
-            status = f["status"] if f else "accepted"  # a missing box reads as blank
+            # A missing box reads as blank, unless the whole page was sent to review.
+            status = f["status"] if f else ("review" if doc.get("page_review") else "accepted")
             # A coded row we missed still reaches a reviewer when its box has an unreadable row, or a row
             # with the same code letter, in review.
             box = k.split(" ")[0]

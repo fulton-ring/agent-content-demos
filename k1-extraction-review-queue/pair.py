@@ -50,7 +50,7 @@ def combine(da, db, na, nb, dir_a):
     for f in fields:
         f["status"] = "review" if f["reasons"] else "accepted"
     pages = {k: f"../{dir_a.name}/{v}" for k, v in da["pages"].items()}
-    return dict(da, pages=pages, fields=fields, second_read=nb,
+    return dict(da, pages=pages, fields=fields, second_read=nb, page_review=da.get("page_review") or db.get("page_review"),
                 cost_usd=round(da["cost_usd"] + db["cost_usd"], 6),
                 input_tokens=da["input_tokens"] + db["input_tokens"],
                 output_tokens=da["output_tokens"] + db["output_tokens"],
