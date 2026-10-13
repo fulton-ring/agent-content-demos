@@ -11,13 +11,14 @@ Rules for every coding agent that works in this repo. Read this file first, then
 
 ## How work is assigned
 
-- Work arrives as a GitHub issue. The label `agent:spike` means a Claude worker owns it.
+- Work arrives as a GitHub issue on the [Agent work](https://github.com/orgs/fulton-ring/projects/1) board. The label `agent:spike` means a Claude worker owns it.
+- The board's Status column says who is doing what: Backlog, Ready, In progress, Needs founder, Review, Done. A dispatcher starts a worker on each Ready card every 15 minutes and moves it to In progress.
 - Work only the issue you were given. Read the issue and all its comments before you start.
 - If the issue has no plan, comment a short one before you start. If another worker commented on the issue in the last 2 hours, stop.
-- Split off anything big or separable as a sub-issue of your issue, saying what's needed and what done means. Leave it unlabeled; the Spike manager assigns it.
-- If a decision only a founder can make blocks you, ask it on the issue, add the label `needs:founder`, push what you have and stop.
+- Split off anything big or separable as a sub-issue of your issue, labeled `agent:spike`, saying what's needed and what done means. Set its card to Ready if it can run alongside you. Leave it in Backlog if it should wait, and mark it blocked by the issue it waits on or set its Not before date.
+- If a decision only a founder can make blocks you, ask it on the issue, add the label `needs:founder`, set the card to Needs founder, push what you have and stop.
 - Commit and push work in progress at least every hour.
-- Finish by commenting on the issue with what was built, the numbers, what failed, and either `Ready for review` or `Stopped at:` with what's left.
+- Finish by commenting on the issue with what was built, the numbers, what failed, and either `Ready for review` (set the card to Review) or `Stopped at:` with what's left (set the card to Ready).
 
 ## The repo is public
 
