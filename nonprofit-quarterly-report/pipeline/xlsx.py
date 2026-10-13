@@ -35,7 +35,12 @@ def _col_index(ref):
 
 def write_xlsx(path, sheets):
     """sheets: list of (sheet_name, rows); each row is a list of str/int/float/None."""
-    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
+        class Z:  # fixed timestamps so the same data always gives the same file
+            @staticmethod
+            def writestr(name, data):
+                zf.writestr(zipfile.ZipInfo(name, (2025, 1, 1, 0, 0, 0)), data, zipfile.ZIP_DEFLATED)
+        z = Z
         z.writestr("[Content_Types].xml",
                    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
                    '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
