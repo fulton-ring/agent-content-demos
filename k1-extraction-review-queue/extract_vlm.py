@@ -783,7 +783,8 @@ def near_empty(page, fields):
         return "the model read nothing on this page"
     printed = sum(1 for w in page.words if AMOUNT_WORD.match(w["text"]) and re.search(r"[1-9]", w["text"]))
     if printed >= 8 and len(read) < printed / 4:
-        return f"the model read only {len(read)} values on a page that shows about {printed} amounts"
+        n = f"{len(read)} value" + ("" if len(read) == 1 else "s")
+        return f"the model read only {n} on a page that shows about {printed} amounts"
     if all(f["reasons"] for f in read):
         return "the model wasn't sure of any value on this page, so a box it left out may not be blank"
     return None

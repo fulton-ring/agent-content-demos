@@ -20,7 +20,7 @@ You need Python 3.10+, the `tesseract` binary (`apt install tesseract-ocr` or `b
 - `output/<model>-alone/index.html`: each model's review screen
 - `output/pair-gemini-3.8-flash+qwen3.8-27b/index.html`: the review screen for Gemini checked by Qwen 3.8 27B
 
-A clean run took about 30 minutes and cost about $1.24 in all; Gemini 3.8 Flash on its own finishes in a few minutes for about 20 cents.
+A run from scratch takes 40 to 55 minutes, 3 to 14 of them building the virtualenv, and costs about $1.25 in all; Gemini 3.8 Flash on its own finishes in a few minutes for about 20 cents.
 
 ## The documents
 
@@ -42,7 +42,7 @@ These files are not in the repo. `fetch_real.py` downloads them from the issuers
 
 1. **Docling reads every page once** (`layout.py`, on CPU). It finds the K-1 page and the supplemental statements, and turns each statement into a Box / Description / Amount table.
 2. **Each model reads the form** (`extract_vlm.py --model-only`). The K-1 page (or the 1099 summary page) goes to the model as an image at 200 dpi. Each model is named by a Pydantic AI model string, such as `openrouter:google/gemini-3.8-flash`. All five here go through OpenRouter, which Pydantic AI treats as one provider among others, so a model from another provider is a different string and no code change. Pydantic AI asks for a typed result: one Pydantic model per form (1065, 1120-S, 1041 and the brokerage 1099), where every value carries what was printed, its bounding box and the model's own confidence. Thinking models run at low effort through Pydantic AI's provider-neutral `thinking` setting; reading a form doesn't need long reasoning, and at the default they spent their whole output budget thinking.
-3. **A value goes to review** when the model's confidence is below 0.9, the amount is on an attached statement (`STMT`), it isn't a well-formed amount, a coded row has no code letter, or a cross-check fails (qualified dividends above ordinary dividends, 4a + 4b ≠ 4c, a 1099-B row that doesn't balance).
+3. **A value goes to review** when the model's confidence is below 0.9, the amount is on an attached statement (`STMT`), it isn't a well-formed amount, a coded row has no code letter, or a cross-check fails (qualified dividends above ordinary dividends, 4a + 4b ≠ 4c, a 1099-B row that doesn't balance). **The whole page goes to review** when the model read nothing on it, read fewer than a quarter as many values as Docling sees amounts printed on the page (at least 8 of them), or wasn't sure of any value it read. Otherwise every box the model left out would count as an accepted blank.
 4. **Pairs** (`pair.py`). Two models' saved answers are combined with no further API calls. A value is accepted only when both models report the same box and code with the same amount and neither has its own reason to send it to review. Anything only one model reported, or that the two read differently, goes to review.
 5. **Statements.** For a `STMT` amount, the model reads the statement page and lists that box's lines. The reviewer sees them as a suggestion; the value stays in the queue.
 6. **OCR models on Modal** (`ocr_modal.py`, `extract_ocr.py`). olmOCR 2 and granite-docling turn a page into text rather than filling a schema, so each is followed by a text model (Gemini 3.8 Flash, which never sees the image) that fills the same typed schema from the OCR text, with the same review rules.
@@ -55,59 +55,82 @@ These files are not in the repo. `fetch_real.py` downloads them from the issuers
 
 ## Results
 
-From one clean run of `./run.sh` from a fresh checkout on 2026-10-13. "Boxes" means every box on the answer key plus every value a run reported, so reading something in an empty box, or reporting a box twice, counts as an error, and the box counts differ between runs. A silent error is a wrong value that was accepted without review: the number that matters for a review queue. The held-out set is 14 documents whose scans and made-up values use a different random seed from the ones used while building the checks.
+From one clean run of `./run.sh --screenshots` from a fresh clone on 2026-10-15, after the fixes below. "Boxes" means every box on the answer key plus every value a run reported, so reading something in an empty box, or reporting a box twice, counts as an error, and the box counts differ between runs. A silent error is a wrong value that was accepted without review: the number that matters for a review queue. The held-out set is 14 documents whose scans and made-up values use a different random seed from the ones used while building the checks.
+
+The Tesseract baseline isn't in this table. The default run doesn't produce it; its numbers under [Earlier approaches](#earlier-approaches) come from earlier held-out runs with `--tesseract`.
 
 ### All 30 documents
 
-| Pipeline | Values right | Accepted without review | Wrong but accepted | Sent to review | Cost per document | Time per document |
+| Pipeline | Values right | Accepted without review | Wrong but accepted | Sent to review | Cost per document | Model time per document |
 |---|---|---|---|---|---|---|
-| **Gemini 3.8 Flash** | **676 of 676** | **652** | **0** | **24, all STMT** | **$0.0065** | **19 s** |
-| Qwen3-VL 235B (open weights) | 667 of 681 | 651 | 6 | 30 | $0.0037 | 37 s |
-| Qwen 3.8 27B (open weights) | 634 of 697 | 676 | 57 | 21 | $0.0039 | 57 s |
-| GLM 5.3 Flash | 564 of 677 | 545 | 4 | 132 | $0.0009 | 17 s |
-| Gemma 4 31B (open weights) | 367 of 739 | 639 | 278 | 100 | $0.0050 | 18 s |
-| olmOCR 2 on Modal, then Gemini 3.8 Flash on the text | 549 of 702 | 542 | 69 | 160 | $0.0072 | 12 s GPU + 6 s |
-| granite-docling on Modal, then Gemini 3.8 Flash on the text | 256 of 678 | 105 | 26 | 573 | $0.0141 | 57 s GPU + 4 s |
-| Gemini 3.8 Flash + Qwen 3.8 27B, must agree | 675 of 697 | 619 | 0 | 78 | $0.0105 | 57 s |
+| **Gemini 3.8 Flash** | **676 of 676** | **652** | **0** | **24, all STMT** | **$0.0066** | **21 s** |
+| Qwen3-VL 235B (open weights) | 653 of 687 | 655 | 22 | 32 | $0.0039 | 70 s |
+| Qwen 3.8 27B (open weights) | 656 of 693 | 667 | 32 | 26 | $0.0053 (29 documents; see below) | 33 s |
+| GLM 5.3 Flash | 656 of 678 | 619 | 4 | 59 | $0.0015 | 16 s |
+| Gemma 4 31B (open weights) | 416 of 726 | 646 | 239 | 80 | $0.0030 | 162 s, mostly retries |
+| olmOCR 2 on Modal, then Gemini 3.8 Flash on the text | 533 of 711 | 557 | 87 | 154 | $0.0074 | 12 s GPU + 6 s |
+| granite-docling on Modal, then Gemini 3.8 Flash on the text | 253 of 678 | 75 | 12 | 603 | $0.0140 | 56 s GPU + 4 s |
+| Gemini 3.8 Flash + Qwen 3.8 27B, must agree | 676 of 693 | 635 | 0 | 58 | $0.0119 (29 documents) | 33 s |
 
-"Wrong but accepted" counts both wrong values that were accepted and values on the answer key that a run never reported, since a missed row reads as a blank box.
+"Wrong but accepted" counts both wrong values that were accepted and values on the answer key that a run never reported, since a missed row reads as a blank box. Docling's layout pass adds about 11 seconds per document on CPU to every vision-model row.
 
 On the held-out set alone, Gemini 3.8 Flash accepted 299 of 310 boxes, all right, and sent 11 to review, all of them STMT amounts. `output/comparison.md` breaks every run down by kind of document.
 
-The cost is the provider's own figure for each response (OpenRouter reports it), or Pydantic AI's price table when a provider doesn't, and includes reading the supplemental statements. For the OCR pipelines it adds each page's GPU time at Modal's L4 list price: about $0.0027 a document for olmOCR and $0.0126 for granite-docling, whose time is each page's round trip to a server handling several pages at once, so it overstates its share. Docling's layout pass adds about 10 seconds per document on CPU. A pair costs the sum of its two models and takes as long as the slower one.
+**Cost.** The cost is the provider's own figure for each response (OpenRouter reports it), or Pydantic AI's price table when a provider doesn't, and includes reading the supplemental statements. Every attempt is counted, including retries that failed after the model answered: Gemma 4 31B needed 8 retries in this run (output cut off at the token limit), and they are in its cost. When a response has no known cost, its document is left out of the average and listed in `metrics.json` (`cost_unknown_documents`) and in `output/comparison.md`: here one Qwen 3.8 27B response on the Blackstone office scan, so Qwen's and the pair's averages are over 29 documents. For the OCR pipelines the cost adds each page's GPU time at Modal's L4 list price: about $0.0027 a document for olmOCR and $0.0124 for granite-docling, whose time is each page's round trip to a server handling several pages at once, so it overstates its share. A pair costs the sum of its two models and takes as long as the slower one. The whole run cost about $1.25.
+
+**Time.** A run from scratch takes 40 to 55 minutes. This one took 42.5 minutes, 3 of them building the virtualenv; the Spike manager's run on another machine took 55 minutes, 14 of them building the virtualenv. Gemini 3.8 Flash took between 19 and 32 seconds per document across runs (in this one, 21 seconds waiting on the model plus 11 seconds of Docling). Gemini on its own finishes in a few minutes for about 20 cents.
+
+### How much the results vary between runs
+
+The open models' answers change from run to run at temperature 0, by a lot. These are the four full runs with the current set of models: two on 2026-10-13 (the second was the README's earlier results), the Spike manager's run on 2026-10-15, and this one. The OCR pipelines were added for the second run.
+
+| Pipeline | Wrong but accepted, by run | Sent to review, by run | Cost per document, range |
+|---|---|---|---|
+| Gemini 3.8 Flash | 0, 0, 0, 0 | 24, 24, 24, 24 (all STMT) | $0.0065 to $0.0066 |
+| Qwen3-VL 235B | 29, 6, 13, 22 | 37, 30, 40, 32 | $0.0037 to $0.0040 |
+| Qwen 3.8 27B | 25, 57, 91, 32 | 24, 21, 22, 26 | $0.0036 to $0.0063 |
+| GLM 5.3 Flash | 14, 4, 88\*, 4 | 116, 132, 92, 59 | $0.0009 to $0.0017 |
+| Gemma 4 31B | 211, 278, 222, 239 | 105, 100, 72, 80 | $0.0015 to $0.0050 |
+| olmOCR 2 + Gemini | –, 69, 84, 87 | –, 160, 140, 154 | $0.0072 to $0.0074 |
+| granite-docling + Gemini | –, 26, 14, 12 | –, 573, 601, 603 | $0.0140 to $0.0172 |
+| Gemini + Qwen 3.8 27B pair | 0, 0, 0, 0 | 49, 78, 113, 58 | $0.0102 to $0.0127 |
+
+\* In the manager's run GLM returned only box 1a, at confidence 0, for five brokerage 1099s. The page wasn't empty, so it wasn't sent to review whole, and every box it left out counted as an accepted blank: 85 of the 88. The page check now sends a near-empty answer to review (see [How it works](#how-it-works)); on those five pages it would have sent the whole page to review, so those 85 would now be review items, not silent errors. In this run GLM didn't do that, and it had its best run yet.
+
+The first three runs counted only the attempt that succeeded, so their costs leave out failed retries; this run's costs include them. Before these four runs, with an earlier prompt and a slightly different model set, Gemini 3.8 Flash got 675, 676, 676 and 676 of 676 right; the one error was Enviva 2018's `-27,942` read as `-27.942` on an office scan, and it went to review because it isn't a well-formed amount.
 
 ### What each model got wrong
 
-- **Gemini 3.8 Flash** made no errors in this run, and 675, 676, 676 and 676 of 676 in four earlier full runs. The one error, in one run, was Enviva 2018's `-27,942` read as `-27.942` on an office scan, and that value went to review because it isn't a well-formed amount.
-- **Qwen3-VL 235B** let 6 errors through in this run and between 5 and 29 in earlier ones. This time it reported dashes for two boxes that are blank on a made-up 1041 and skipped a few rows.
-- **Qwen 3.8 27B** let 57 errors through, mostly rows it skipped in coded boxes on the real K-1s, and on Blackstone and Enviva 2018 it put box 16's rows under box 15.
-- **GLM 5.3 Flash** returned a valid but empty answer for 6 of the 30 pages, which sends the whole page to review. Only 4 wrong values went through, but it sent 132 to review.
-- **Gemma 4 31B** shifted amounts into neighbouring boxes and misread names ("ENVIRO PARTNERS, LP"). Over 40% of what it accepted was wrong.
-- **olmOCR 2** read the characters well: on the Blackstone office scan its text has every Part III amount. But it lays a K-1's two columns of boxes out as one HTML table, pairing labels and amounts loosely, and once the form is text the box an amount belongs to is easy to lose. The text model then put amounts one box off (Blackstone's 6a, 6b and 6c each got the next box's amount), filed coded rows under the wrong box (`20 V` as `13 V`), and missed rows. 69 errors went through.
-- **granite-docling** could not read these forms. On 25 of the 30 pages Docling got nothing usable back, and those pages went to review whole. Where it did return text, it read some of the page and often then repeated one token until it ran out of output; it never read a Part III amount on any of the real K-1s. A repetition penalty didn't help. Docling's own Transformers pipeline on a Modal GPU gave the same result at 257 seconds a page, so this is the model, not the serving.
+- **Gemini 3.8 Flash** made no errors in any of the four runs.
+- **Qwen3-VL 235B** let 22 errors through in this run, all on the Blackstone K-1 and its three scans: mostly Part III amounts it misread or skipped (boxes 3, 4a to 4c, 6c, 9b and 12 on one office scan) and rows of box 13.
+- **Qwen 3.8 27B** let 32 errors through, all on scans of the real K-1s, mostly coded rows (boxes 11, 15 and 16) that it skipped or filed under the wrong box. In earlier runs it put Blackstone's and Enviva 2018's box 16 rows under box 15.
+- **GLM 5.3 Flash** let 4 errors through, all on Enviva 2018, and returned an empty answer for one page, which went to review whole. It varies the most: see the table above.
+- **Gemma 4 31B** shifted amounts into neighbouring boxes, misread names ("ENVIRO PARTNERS, LP") and skipped coded rows. Between a third and 43% of what it accepted was wrong, depending on the run.
+- **olmOCR 2** read the characters well: on the Blackstone office scan its text has every Part III amount. But it lays a K-1's two columns of boxes out as one HTML table, pairing labels and amounts loosely, and once the form is text the box an amount belongs to is easy to lose. The text model then put amounts one box off (in one run Blackstone's 6a, 6b and 6c each got the next box's amount), filed coded rows under the wrong box (`20 V` as `13 V`), and missed rows. 87 errors went through in this run.
+- **granite-docling** could not read these forms. On 26 of the 30 pages Docling got nothing usable back, and those pages went to review whole. Where it did return text, it read some of the page and often then repeated one token until it ran out of output; it never read a Part III amount on any of the real K-1s. A repetition penalty didn't help. Docling's own Transformers pipeline on a Modal GPU gave the same result at 257 seconds a page, so this is the model, not the serving.
 
-Every vision model that reached the supplemental statements read their lines correctly, checked by `evaluate.py` against the issuers' own text layer. Gemini 3.8 Flash read all 62 lines behind the STMT boxes and missed none.
+**Supplemental statements.** `evaluate.py` checks every statement line a model reads against the issuer's own text layer. Gemini 3.8 Flash read all 62 lines behind the STMT boxes correctly and missed none, in this run and in the manager's. In this run every other vision model that reached the statements also read its lines correctly (Gemma reached only 15 lines). That doesn't always hold: in the manager's run Gemma 4 31B read 29 of 36 lines right and missed 10; for example it read Blackstone's 20AG as 3,213 where the statement says 3,513. The statement lines are only ever a suggestion beside a value that stays in the queue.
 
 Two changes made the vision models comparable. In the coded boxes the code letter is now a required field: when it was optional, GLM and Qwen 3.8 27B left it out of every row. And thinking models run at low effort, without which they spent their whole output budget thinking.
 
 ### Reading the image, or reading text
 
-The OCR models were the cheapest way to get the characters off the page, and olmOCR got nearly all of them. What they lose is the layout: a K-1 is a grid of numbered boxes, and a text model filling the schema from OCR text has to guess which amount belongs to which box. A vision model reading the image sees the grid. On these documents that difference decided the result: Gemini reading the image was right on all 676 values; Gemini reading olmOCR's text of the same pages was right on 549 of 702.
+The OCR models were the cheapest way to get the characters off the page, and olmOCR got nearly all of them. What they lose is the layout: a K-1 is a grid of numbered boxes, and a text model filling the schema from OCR text has to guess which amount belongs to which box. A vision model reading the image sees the grid. On these documents that difference decided the result: Gemini reading the image was right on all 676 values; Gemini reading olmOCR's text of the same pages was right on 533 of 711.
 
 ### Gemini alone, or checked by an open model
 
-Gemini 3.8 Flash on its own was right on every value here, but its own confidence never flagged anything: everything it sent to review was a STMT amount. On a document it does misread, nothing but the cross-checks would catch it. Pairing it with Qwen 3.8 27B, an open-weight model that could run on our own hardware, adds an independent read for about 60% more cost: on these documents the pair let nothing wrong through and sent 54 more values to review than Gemini alone (78 against 24), almost all of them rows Qwen skipped or filed under the wrong box. For a demo, Gemini alone is enough. For client documents, the pair is the safer default.
+Gemini 3.8 Flash on its own was right on every value here, but its own confidence never flagged anything: everything it sent to review was a STMT amount. On a document it does misread, nothing but the cross-checks would catch it. Pairing it with Qwen 3.8 27B, an open-weight model that could run on our own hardware, adds an independent read for about 80% more cost: the pair let nothing wrong through in any run and sent between 25 and 89 more values to review than Gemini alone (49 to 113 against 24), almost all of them rows Qwen skipped or filed under the wrong box. For a demo, Gemini alone is enough. For client documents, the pair is the safer default.
 
 ## Earlier approaches
 
-The first versions of this demo, still in the repository and run with `--tesseract`, read the forms with Tesseract OCR and rules (`extract.py`), and then checked Qwen3-VL 235B against Tesseract box by box (`extract_vlm.py` without `--model-only`). On the held-out set, Tesseract and rules accepted 182 of 321 boxes with 2 silent errors and sent 43% to review. Checking Qwen3-VL against Tesseract accepted 236 with no silent errors and sent 28% to review, much of it because Tesseract couldn't read a box the model had read right. Gemini 3.8 Flash on its own beats both. Docling's own OCR wasn't usable as a check on scans: it picked up 26% of the values on the scanned K-1s.
+These numbers are from earlier runs and the default `./run.sh` doesn't reproduce them; `./run.sh --tesseract` does. The first versions of this demo, still in the repository and run with `--tesseract`, read the forms with Tesseract OCR and rules (`extract.py`), and then checked Qwen3-VL 235B against Tesseract box by box (`extract_vlm.py` without `--model-only`). On the held-out set, Tesseract and rules accepted 182 of 321 boxes with 2 silent errors and sent 43% to review. Checking Qwen3-VL against Tesseract accepted 236 with no silent errors and sent 28% to review, much of it because Tesseract couldn't read a box the model had read right. Gemini 3.8 Flash on its own beats both. Docling's own OCR wasn't usable as a check on scans: it picked up 26% of the values on the scanned K-1s.
 
 ## What it doesn't show
 
 - **This is not our production extraction.** It is a demo built on public tools and public models. A prospect who sends real documents will see different numbers.
 - **The scans are simulated.** Real scans have problems we didn't model: staples, handwriting, stamps, pages scanned at a different scale, and colour backgrounds.
 - **The sample is small.** It has three real K-1s, all Form 1065 from publicly traded partnerships. There are no real 1120-S or 1041 K-1s and no real brokerage 1099s; the made-up 1099s use our own layout. A perfect score on 676 values doesn't mean a perfect score in general.
-- **Model answers vary from run to run.** Across five full runs GLM 5.3 Flash got between 58% and 84% of values right, Qwen3-VL 235B let between 5 and 29 errors through and Qwen 3.8 27B between 25 and 57; Gemini 3.8 Flash got 675 of 676 once and 676 of 676 four times.
+- **Model answers vary from run to run.** Across four runs with the current models, Qwen3-VL 235B let between 6 and 29 errors through, Qwen 3.8 27B between 25 and 91 and GLM 5.3 Flash between 4 and 88 (85 of those from near-empty answers that now go to review). Gemini 3.8 Flash made no errors in any of them. Four runs are not enough to pin down an open model's error rate.
 
 ## Files
 
