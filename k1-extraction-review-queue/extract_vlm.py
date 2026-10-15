@@ -51,7 +51,7 @@ from typing import Literal
 
 import pypdfium2 as pdfium
 from pydantic import BaseModel, Field
-from pydantic_ai import Agent, BinaryContent, PromptedOutput
+from pydantic_ai import Agent, BinaryContent, PromptedOutput, capture_run_messages
 from pydantic_ai.messages import ModelResponse
 from pydantic_ai.models import infer_model
 from pydantic_ai.settings import ModelSettings
@@ -582,17 +582,13 @@ def statement_page_for(pages, box):
 
 def response_cost(m):
     """One model response's cost in dollars: the provider's own figure when it reports one (OpenRouter puts it in
-    provider_details), else Pydantic AI's price table. NaN when neither knows the model."""
+    provider_details), else Pydantic AI's price table. None when neither knows it."""
     if (m.provider_details or {}).get("cost") is not None:
         return float(m.provider_details["cost"])
     try:
         return float(m.cost().total_price)
     except LookupError:
-        return float("nan")
-
-
-def run_cost(r):
-    return sum(response_cost(m) for m in r.new_messages() if isinstance(m, ModelResponse))
+        return None
 
 
 class Runner:
@@ -614,23 +610,37 @@ class Runner:
         agent = Agent(self.model, output_type=PromptedOutput(output_type) if self.prompted else output_type,
                       instructions=INSTRUCTIONS, retries=2, model_settings=self.settings)
         parts = [prompt] + [BinaryContent(png, media_type="image/png") for png in images]
+        c = self.cost.setdefault(doc, {"usd": 0.0, "cost_missing": 0, "input_tokens": 0, "output_tokens": 0,
+                                       "calls": 0, "failed_attempts": 0, "seconds": 0.0})
         async with self.sem:
             for attempt in range(6):
-                try:
-                    t0 = time.time()
-                    r = await agent.run(parts)
+                t0 = time.time()
+                # Every attempt is paid for, including one that fails after the model answered (output cut off at the
+                # token limit, or malformed after Pydantic AI's own retries), so count the responses of each.
+                with capture_run_messages() as messages:
+                    try:
+                        r = await agent.run(parts)
+                        error = None
+                    except Exception as e:  # rate limits, network errors, malformed output after retries
+                        error = e
+                for m in messages:
+                    if isinstance(m, ModelResponse):
+                        usd = response_cost(m)
+                        if usd is None:
+                            c["cost_missing"] += 1
+                        else:
+                            c["usd"] += usd
+                        c["input_tokens"] += m.usage.input_tokens
+                        c["output_tokens"] += m.usage.output_tokens
+                c["calls"] += 1
+                c["seconds"] += time.time() - t0
+                if error is None:
                     break
-                except Exception as e:  # rate limits, network errors, malformed output after retries
-                    if attempt == 5:
-                        raise
-                    print(f"  {doc}: retrying after {type(e).__name__}: {str(e)[:120]}")
-                    await asyncio.sleep(15 * (attempt + 1))
-        c = self.cost.setdefault(doc, {"usd": 0.0, "input_tokens": 0, "output_tokens": 0, "calls": 0, "seconds": 0.0})
-        c["usd"] += run_cost(r)
-        c["input_tokens"] += r.usage.input_tokens
-        c["output_tokens"] += r.usage.output_tokens
-        c["calls"] += 1
-        c["seconds"] += time.time() - t0
+                c["failed_attempts"] += 1
+                if attempt == 5:
+                    raise error
+                print(f"  {doc}: retrying after {type(error).__name__}: {str(error)[:120]}")
+                await asyncio.sleep(15 * (attempt + 1))
         return r.output
 
 
@@ -731,11 +741,10 @@ async def process(runner, path, out_dir):
                 missing = [c for c in table if c.startswith(box) and re.match(rf"{box}[A-Z]", c)
                            and c not in {ln.code.replace(" ", "").upper() for ln in lines.lines}]
                 f["statement_lines_missed"] = missing
-    # A model can return a valid but empty answer. That would read as every box blank, so the whole page goes to
-    # review instead.
-    page_review = None
-    if not any(f["raw"] for f in fields if not f["key"].startswith("payer")):
-        page_review = "the model read nothing on this page"
+    # A model can return a valid but empty or near-empty answer. Every box it leaves out would read as blank, so
+    # the whole page goes to review instead.
+    page_review = near_empty(main, fields)
+    if page_review:
         fields.append(field(main, "page", "The whole page", None, "", None, 0, [page_review]))
     for f in fields:
         f["status"] = "review" if f["reasons"] else "accepted"
@@ -756,8 +765,28 @@ async def process(runner, path, out_dir):
             "second_read": "none" if runner.model_only else ("Tesseract, box by box" if tp else "Docling"),
             "pages": page_files, "seconds": round(layout["seconds"] + c.get("seconds", 0), 1),
             "docling_seconds": layout["seconds"], "model_seconds": round(c.get("seconds", 0), 1),
-            "cost_usd": round(c.get("usd", 0), 6), "input_tokens": c.get("input_tokens", 0),
-            "output_tokens": c.get("output_tokens", 0), "model_calls": c.get("calls", 0), "fields": fields}
+            "cost_usd": round(c.get("usd", 0), 6), "cost_missing_responses": c.get("cost_missing", 0),
+            "input_tokens": c.get("input_tokens", 0), "output_tokens": c.get("output_tokens", 0),
+            "model_calls": c.get("calls", 0), "failed_attempts": c.get("failed_attempts", 0), "fields": fields}
+
+
+# An amount as printed: with a thousands comma or cents, so box numbers, years and form numbers don't count. Zero
+# amounts don't count either, since an empty box can print as 0.00.
+AMOUNT_WORD = re.compile(r"^[($-]*(\d{1,3}(,\d{3})+(\.\d\d)?|\d+\.\d\d)\)?$")
+
+
+def near_empty(page, fields):
+    """Why the whole page should go to review, or None. Docling's words give an independent count of the amounts
+    printed on the page, so an answer with far fewer values than that is treated like an empty one."""
+    read = [f for f in fields if f["raw"] and not f["key"].startswith("payer") and f["key"] != "page"]
+    if not read:
+        return "the model read nothing on this page"
+    printed = sum(1 for w in page.words if AMOUNT_WORD.match(w["text"]) and re.search(r"[1-9]", w["text"]))
+    if printed >= 8 and len(read) < printed / 4:
+        return f"the model read only {len(read)} values on a page that shows about {printed} amounts"
+    if all(f["reasons"] for f in read):
+        return "the model wasn't sure of any value on this page, so a box it left out may not be blank"
+    return None
 
 
 def slug(model_name):
@@ -798,7 +827,9 @@ async def main():
         "confidence_min": CONFIDENCE_MIN,
         "image_dpi": IMAGE_DPI, "documents": docs}, indent=1))
     total = sum(d["cost_usd"] for d in docs)
-    print(f"{model_name}: {len(docs)} documents, ${total:.4f} in all, ${total / max(1, len(docs)):.4f} per document")
+    missing = sum(d["cost_missing_responses"] for d in docs)
+    print(f"{model_name}: {len(docs)} documents, ${total:.4f} in all, ${total / max(1, len(docs)):.4f} per document"
+          + (f", plus {missing} responses with no known cost" if missing else ""))
     if failed:
         # Scoring a run with documents missing would make the results look better than they are.
         sys.exit(f"{len(failed)} documents failed and aren't in the results: {', '.join(failed)}. Run again.")

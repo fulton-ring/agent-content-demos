@@ -56,13 +56,19 @@ def main():
                        f"({pct(s['sent_to_review'], s['boxes_checked'])}) | {s['wrong']} | {s['wrong_caught_by_review']} "
                        f"| {s['silent_errors']} |")
         out.append("")
-    out += ["## Cost and time per document", "", "| Pipeline | Cost | Model time | Docling time | Total time |", "|---|---|---|---|---|"]
+    out += ["## Cost and time per document", "",
+            "Cost counts every attempt, including retries that failed. A document with any response of unknown cost is "
+            "left out of the average and counted in the last column.", "",
+            "| Pipeline | Cost | Model time | Docling time | Total time | Failed attempts | Documents with unknown cost |",
+            "|---|---|---|---|---|---|---|"]
     for name, m in loaded:
         if "cost_usd_per_document" in m:
-            out.append(f"| {name} | ${m['cost_usd_per_document']:.4f} | {m['model_seconds_per_document']}s "
-                       f"| {m['docling_seconds_per_document']}s | {m['seconds_per_document']}s |")
+            cost = "unknown" if m["cost_usd_per_document"] is None else f"${m['cost_usd_per_document']:.4f}"
+            out.append(f"| {name} | {cost} | {m['model_seconds_per_document']}s "
+                       f"| {m['docling_seconds_per_document']}s | {m['seconds_per_document']}s "
+                       f"| {m.get('failed_attempts', 0)} | {len(m.get('cost_unknown_documents', []))} |")
         else:
-            out.append(f"| {name} | $0 | none | none | {m['seconds_per_document']}s |")
+            out.append(f"| {name} | $0 | none | none | {m['seconds_per_document']}s | 0 | 0 |")
     out.append("")
     for name, m in loaded:
         if "statement_lines" in m:

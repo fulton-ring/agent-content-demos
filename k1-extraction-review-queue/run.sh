@@ -10,6 +10,11 @@ set -euo pipefail
 cd "$(dirname "$0")"
 FLAGS=" $* "
 
+# Check what the run needs before spending time on the virtualenv. Docling reads scanned pages with Tesseract, so it
+# is needed for every run, not only --tesseract.
+command -v tesseract >/dev/null || { echo "Tesseract is needed: apt install tesseract-ocr (or brew install tesseract)"; exit 1; }
+[ -n "${OPENROUTER_API_KEY:-}" ] || { echo "OPENROUTER_API_KEY is needed for the models in MODELS below"; exit 1; }
+
 if [ ! -d .venv ]; then
   python3 -m venv .venv
 fi
@@ -18,7 +23,6 @@ if ! .venv/bin/python -c "import pytesseract, docling, pydantic_ai, modal" 2>/de
   .venv/bin/pip install -q --extra-index-url https://download.pytorch.org/whl/cpu -r requirements.txt
 fi
 PY=.venv/bin/python
-[ -n "${OPENROUTER_API_KEY:-}" ] || { echo "OPENROUTER_API_KEY is needed for the models in MODELS below"; exit 1; }
 
 $PY generate.py      # made-up 1120-S and 1041 K-1s and brokerage 1099s, with their answer key
 $PY fetch_real.py    # real sample K-1s from the issuers' sites, plus scanned copies
@@ -70,7 +74,6 @@ else
 fi
 
 if [[ "$FLAGS" == *" --tesseract "* ]]; then
-  command -v tesseract >/dev/null || { echo "Tesseract is needed: apt install tesseract-ocr"; exit 1; }
   $PY extract.py && $PY evaluate.py > /dev/null && $PY report.py
   $PY extract_vlm.py openrouter:qwen/qwen3-vl-235b-a22b-instruct && $PY evaluate.py output/qwen3-vl-235b-a22b-instruct > /dev/null \
     && $PY report.py output/qwen3-vl-235b-a22b-instruct

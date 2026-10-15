@@ -14,7 +14,7 @@ It compares five current vision-language models, three of them open-weight, and 
 ./run.sh --screenshots # also takes screenshots of Gemini 3.8 Flash's review screen
 ```
 
-You need Python 3.10+, `OPENROUTER_API_KEY`, and for the OCR models `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` in the environment. Without the Modal credentials the OCR models are skipped. The script makes a virtualenv (Docling brings a CPU build of PyTorch; the virtualenv comes to about 2 GB), downloads the real sample K-1s, generates the made-up documents, runs Docling, runs the five models in parallel, pairs Gemini with Qwen 3.8 27B, scores everything and writes:
+You need Python 3.10+, the `tesseract` binary (`apt install tesseract-ocr` or `brew install tesseract`; Docling uses it to read the scanned pages, so every run needs it, not only `--tesseract`), `OPENROUTER_API_KEY`, and for the OCR models `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` in the environment. `run.sh` checks for Tesseract and the OpenRouter key before it builds anything. Without the Modal credentials the OCR models are skipped. The script makes a virtualenv (Docling brings a CPU build of PyTorch; the virtualenv comes to about 2 GB), downloads the real sample K-1s, generates the made-up documents, runs Docling, runs the five models in parallel, pairs Gemini with Qwen 3.8 27B, scores everything and writes:
 
 - `output/comparison.md`: every run side by side
 - `output/<model>-alone/index.html`: each model's review screen

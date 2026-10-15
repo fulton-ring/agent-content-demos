@@ -167,11 +167,16 @@ def main():
                "seconds_per_document": round(sum(d["seconds"] for d in data["documents"]) / max(1, len(data["documents"])), 1),
                "engine": data.get("tesseract") or data.get("model")}
     if any("cost_usd" in d for d in data["documents"]):
-        # A cost is NaN when neither the provider nor Pydantic AI's price table had one; average over the rest.
-        known = [d["cost_usd"] for d in data["documents"] if d["cost_usd"] == d["cost_usd"]]
+        # Some responses can have no known cost (neither the provider nor Pydantic AI's price table had one). Those
+        # documents are left out of the average and counted, so the gap is visible rather than read as free.
+        def complete(d):
+            return d["cost_usd"] == d["cost_usd"] and not d.get("cost_missing_responses")
+        known = [d["cost_usd"] for d in data["documents"] if complete(d)]
         metrics["cost_known_for_documents"] = len(known)
-        metrics["cost_usd_total"] = round(sum(known), 4)
-        metrics["cost_usd_per_document"] = round(metrics["cost_usd_total"] / max(1, len(known)), 5)
+        metrics["cost_unknown_documents"] = [d["file"] for d in data["documents"] if not complete(d)]
+        metrics["cost_usd_total"] = round(sum(d["cost_usd"] for d in data["documents"] if d["cost_usd"] == d["cost_usd"]), 4)
+        metrics["cost_usd_per_document"] = round(sum(known) / len(known), 5) if known else None
+        metrics["failed_attempts"] = sum(d.get("failed_attempts", 0) for d in data["documents"])
         metrics["model_seconds_per_document"] = round(sum(d["model_seconds"] for d in data["documents"]) / len(data["documents"]), 1)
         metrics["docling_seconds_per_document"] = round(sum(d["docling_seconds"] for d in data["documents"]) / len(data["documents"]), 1)
     stmt = statement_check(data)

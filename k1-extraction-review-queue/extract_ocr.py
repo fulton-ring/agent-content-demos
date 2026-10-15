@@ -29,7 +29,7 @@ import modal
 
 import ocr_modal
 from extract_vlm import (FORMS, K1_LABELS, LAYOUT, SAMPLES, Brokerage1099, LPage, Runner, k1_1065_labels, k1_kind,
-                         model_fields, page_png, slug)
+                         model_fields, near_empty, page_png, slug)
 
 HERE = Path(__file__).parent
 ENGINES = {"olmocr": "olmOCR 2 (allenai/olmOCR-2-7B-1025-FP8)",
@@ -200,9 +200,8 @@ async def run(engine, model_name, files):
             fields = model_fields(page, form, out, {})
         else:
             fields = model_fields(page, form, out, k1_1065_labels(year) if form == "1065" else K1_LABELS[form])
-        page_review = None
-        if not any(f["raw"] for f in fields if not f["key"].startswith("payer") and f["key"] != "page"):
-            page_review = "nothing was read on this page"
+        page_review = near_empty(page, fields)
+        if page_review:
             if not any(f["key"] == "page" for f in fields):
                 fields.append({"key": "page", "label": "The whole page", "value": None, "raw": "", "page": index,
                                "bbox": None, "confidence": 0, "reasons": [page_review]})
@@ -219,8 +218,9 @@ async def run(engine, model_name, files):
                 "seconds": round(gpu_seconds + c.get("seconds", 0), 1), "docling_seconds": 0.0, "ocr_seconds": gpu_seconds,
                 "model_seconds": round(c.get("seconds", 0), 1),
                 "cost_usd": round(c.get("usd", 0) + gpu_seconds * L4_USD_PER_SECOND, 6),
-                "ocr_cost_usd": round(gpu_seconds * L4_USD_PER_SECOND, 6), "input_tokens": c.get("input_tokens", 0),
-                "output_tokens": c.get("output_tokens", 0), "model_calls": c.get("calls", 0), "fields": fields}
+                "ocr_cost_usd": round(gpu_seconds * L4_USD_PER_SECOND, 6), "cost_missing_responses": c.get("cost_missing", 0),
+                "input_tokens": c.get("input_tokens", 0), "output_tokens": c.get("output_tokens", 0),
+                "model_calls": c.get("calls", 0), "failed_attempts": c.get("failed_attempts", 0), "fields": fields}
 
     results = await asyncio.gather(*(one(path, index) for path, index in jobs))
     docs = sorted((d for d in results if d), key=lambda d: d["file"])

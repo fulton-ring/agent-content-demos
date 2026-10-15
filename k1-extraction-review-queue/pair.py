@@ -31,6 +31,11 @@ def same(fa, fb):
     return agrees(fa["raw"], fb["raw"])
 
 
+def missing_cost(d):
+    """Responses with no known cost; runs from before this was counted mark them with a NaN cost."""
+    return d.get("cost_missing_responses", 0) + (0 if d["cost_usd"] == d["cost_usd"] else 1)
+
+
 def combine(da, db, na, nb, dir_a):
     fb = {f["key"]: f for f in db["fields"]}
     fields = []
@@ -51,7 +56,9 @@ def combine(da, db, na, nb, dir_a):
         f["status"] = "review" if f["reasons"] else "accepted"
     pages = {k: f"../{dir_a.name}/{v}" for k, v in da["pages"].items()}
     return dict(da, pages=pages, fields=fields, second_read=nb, page_review=da.get("page_review") or db.get("page_review"),
-                cost_usd=round(da["cost_usd"] + db["cost_usd"], 6),
+                cost_usd=round(sum(d["cost_usd"] for d in (da, db) if d["cost_usd"] == d["cost_usd"]), 6),
+                cost_missing_responses=missing_cost(da) + missing_cost(db),
+                failed_attempts=da.get("failed_attempts", 0) + db.get("failed_attempts", 0),
                 input_tokens=da["input_tokens"] + db["input_tokens"],
                 output_tokens=da["output_tokens"] + db["output_tokens"],
                 model_calls=da["model_calls"] + db["model_calls"],
@@ -77,8 +84,11 @@ def main():
         "models": [a["model"], b["model"]], "documents": docs}, indent=1))
     n = sum(len(d["fields"]) for d in docs)
     r = sum(f["status"] == "review" for d in docs for f in d["fields"])
-    print(f"{out.name}: {len(docs)} documents, {n} values, {r} to review, "
-          f"${sum(d['cost_usd'] for d in docs) / len(docs):.4f} per document")
+    known = [d["cost_usd"] for d in docs if not d["cost_missing_responses"]]
+    cost = f"${sum(known) / len(known):.4f} per document" if known else "no known cost"
+    unknown = len(docs) - len(known)
+    print(f"{out.name}: {len(docs)} documents, {n} values, {r} to review, {cost}"
+          + (f" ({unknown} documents with an unknown cost left out)" if unknown else ""))
 
 
 if __name__ == "__main__":
