@@ -35,10 +35,12 @@ def daylight_hours(lat_deg: np.ndarray, months: pd.DatetimeIndex) -> np.ndarray:
 def thornthwaite_pet(
     temp_c: np.ndarray, lat_deg: np.ndarray, months: pd.DatetimeIndex
 ) -> np.ndarray:
-    """Monthly PET (mm/month) by Thornthwaite, heat index from the whole-series climatology."""
-    climatology = pd.DataFrame(temp_c).groupby(months.month).mean().to_numpy()
-    heat_index = (np.maximum(climatology, 0) / 5) ** 1.514
-    heat_index = heat_index.sum(axis=0)
+    """Monthly PET (mm/month) by Thornthwaite, heat index computed per calendar year."""
+    terms = (np.maximum(temp_c, 0) / 5) ** 1.514
+    heat_index = (
+        pd.DataFrame(terms).groupby(np.asarray(months.year)).transform("sum").to_numpy()
+    )
+    del terms
     exponent = 6.75e-7 * heat_index**3 - 7.71e-5 * heat_index**2 + 1.792e-2 * heat_index + 0.49239
     correction = (
         daylight_hours(lat_deg, months) / 12 * (months.days_in_month.to_numpy()[:, None] / 30)
