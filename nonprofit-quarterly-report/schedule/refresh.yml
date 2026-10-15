@@ -1,0 +1,23 @@
+# Sample GitHub Actions workflow: rebuild the report every morning during the
+# submission window and publish output/. Copy to .github/workflows/ in the
+# repository that holds the inbox. Not active in this demo repository.
+name: Refresh quarterly report
+on:
+  schedule:
+    - cron: "0 11 * * 1-5"   # 6am Eastern (11:00 UTC), weekdays
+  workflow_dispatch: {}
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # In a real version this step pulls new site files from the shared
+      # drive, form tool or SFTP folder into inbox/<quarter>/.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python3 refresh.py
+        working-directory: nonprofit-quarterly-report
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: nonprofit-quarterly-report/output
