@@ -87,7 +87,7 @@ def drought_days(
     rows = (months >= span[0]) & (months <= span[1])
     days = months.days_in_month.to_numpy()[rows, None]
     count = ((index[rows] <= DROUGHT_SPEI) * days).sum(axis=0).astype(float)
-    valid = np.isfinite(index[rows]).any(axis=0)
+    valid = np.asarray(np.isfinite(index[rows]).any(axis=0))
     return count, float(days.sum()), valid
 
 
