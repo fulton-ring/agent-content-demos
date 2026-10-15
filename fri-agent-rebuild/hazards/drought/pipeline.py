@@ -14,6 +14,7 @@ from fri_rebuild import inputs
 
 SCALE_MONTHS = 3
 DROUGHT_SPEI = -1.6
+PSEUDO_DAYS = 30.0  # one month of drought days added to both numerator and denominator
 CALIBRATION = (pd.Timestamp("1950-01-01"), pd.Timestamp("2010-12-31"))
 HISTORICAL = (pd.Timestamp("1985-01-01"), pd.Timestamp("2014-12-31"))
 FUTURE = {
@@ -84,7 +85,9 @@ def drought_day_rate(
     rows = (months >= span[0]) & (months <= span[1])
     days = months.days_in_month.to_numpy()[rows, None]
     drought_days = ((index[rows] <= DROUGHT_SPEI) * days).sum(axis=0)
-    return drought_days / days.sum()
+    valid = np.isfinite(index[rows]).any(axis=0)
+    rate = (drought_days + PSEUDO_DAYS) / (days.sum() + 2 * PSEUDO_DAYS)
+    return np.where(valid, rate, np.nan)
 
 
 def county_mean(values: np.ndarray) -> np.ndarray:

@@ -10,11 +10,13 @@ import tempfile
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
+from typing import IO
 
 import h5py
 import numpy as np
 import requests
 
+from fri_rebuild import http
 from fri_rebuild.paths import cache_path
 
 BUCKET = "https://nex-gddp-cmip6.s3.us-west-2.amazonaws.com"
@@ -100,6 +102,23 @@ def monthly_means(daily: np.ndarray, year: int) -> np.ndarray:
     return np.stack([daily[months == m].mean(axis=0) for m in range(12)])
 
 
+def fetch(url: str, handle: IO[bytes], attempts: int = 4) -> None:
+    """Stream a file to `handle`, starting over if the connection drops midway."""
+    for attempt in range(attempts):
+        handle.seek(0)
+        handle.truncate()
+        try:
+            with http.session().get(url, stream=True, timeout=300) as response:
+                response.raise_for_status()
+                for block in response.iter_content(chunk_size=8 << 20):
+                    handle.write(block)
+            handle.flush()
+            return
+        except requests.exceptions.RequestException:
+            if attempt == attempts - 1:
+                raise
+
+
 def save_atomic(path: Path, array: np.ndarray) -> None:
     partial = path.with_name(path.stem + ".partial.npy")
     np.save(partial, array)
@@ -109,11 +128,7 @@ def save_atomic(path: Path, array: np.ndarray) -> None:
 def process(job: Job, key: str) -> str:
     """Download one file, cut the CONUS box and write the cached arrays."""
     with tempfile.NamedTemporaryFile(suffix=".nc", dir=cache_path("nex", "tmp", "x").parent) as tmp:
-        with requests.get(f"{BUCKET}/{key}", stream=True, timeout=300) as response:
-            response.raise_for_status()
-            for block in response.iter_content(chunk_size=8 << 20):
-                tmp.write(block)
-        tmp.flush()
+        fetch(f"{BUCKET}/{key}", tmp)
         with h5py.File(tmp.name) as nc:
             lat, lon = nc["lat"][:], nc["lon"][:]
             rows, cols = box_slices(lat, lon)

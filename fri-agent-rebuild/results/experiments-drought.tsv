@@ -1,0 +1,11 @@
+id	round	agent	parent	metric_log_mae	same_bin	pearson	status	seconds	cost_usd	description
+ac594d9	0	0	-	0.152099	0.9498	0.9506	keep	31	0	baseline (human-written)
+eda6fb3	1	1	ac594d9	0.143227	0.9529	0.95	keep	25	0.0431	Q1: add half-month pseudo-count to drought rates so zero-history cells are kept
+0032301	1	2	ac594d9	0.149614	0.9504	0.9508	discard	20	0.0425	County-level ratio of averaged rates (future/historical) then floor, instead of mean of cell ratios
+ff5f2e5	1	3	ac594d9	0.145780	0.9544	0.9424	discard	18	0.0473	Thornthwaite heat index from 1950-2010 calibration climatology instead of whole series
+abb4c42	2	1	eda6fb3	0.152099	0.9498	0.9506	discard	22	0.0603	Q1: replace pseudo-count with one-drought-month minimum historical rate (cap) for zero-history cells
+e7ad9d8	2	2	eda6fb3	0.143848	0.9526	0.95	discard	25	0.0450	Q2: floor each cell HM at 1 before the area-weighted county average
+439fd19	2	3	eda6fb3	0.143117	0.9526	0.95	discard	22	0.0462	Q3: SPEI-package Thornthwaite declination (0.4093, phase 1.405, mid-month day) for daylight
+2414552	3	1	eda6fb3	0.135351	0.9554	0.9493	keep	27	0.0506	Q1: raise pseudo-count from 15 to 30 drought days (one month) in event rates
+059d9b1	3	2	eda6fb3	0.138456	0.9559	0.9415	discard	23	0.0629	Thornthwaite heat index from 1950-2010 calibration climatology on top of pseudo-count
+14c274a	3	3	eda6fb3	0.138456	0.9559	0.9415	discard	19	0.0520	Q3: Thornthwaite heat index from 1950-2010 climatology, on top of pseudo-count
