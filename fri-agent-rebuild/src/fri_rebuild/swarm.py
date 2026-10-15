@@ -225,6 +225,23 @@ class Swarm:
                 ]
             )
             return None
+        if candidate.id in self.logged_ids():
+            self.log(
+                [
+                    candidate.id,
+                    round_number,
+                    candidate.agent,
+                    parent,
+                    "",
+                    "",
+                    "",
+                    "duplicate",
+                    0,
+                    f"{candidate.cost:.4f}",
+                    f"{proposal.description} (identical code already in the log; not rerun)",
+                ]
+            )
+            return None
         path = self.candidates / f"{candidate.id}.py"
         path.write_text(proposal.pipeline_code)
         outcome = run_pipeline(path, cache_path("runs", self.hazard, f"{candidate.id}.parquet"))
@@ -255,6 +272,9 @@ class Swarm:
                 lines[index] = "\t".join(fields)
                 break
         self.log_path.write_text("\n".join(lines) + "\n")
+
+    def logged_ids(self) -> set[str]:
+        return {row.split("\t")[0] for row in self.log_path.read_text().splitlines()[1:]}
 
     def last_round(self) -> int:
         rows = self.log_path.read_text().splitlines()[1:]
