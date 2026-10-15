@@ -12,6 +12,19 @@ from fri_rebuild import inputs
 
 PERIODS = ("MID", "LATE")
 
+FEMA_REGION = {
+    "CT": 1, "ME": 1, "MA": 1, "NH": 1, "RI": 1, "VT": 1,
+    "NJ": 2, "NY": 2, "PR": 2, "VI": 2,
+    "DE": 3, "DC": 3, "MD": 3, "PA": 3, "VA": 3, "WV": 3,
+    "AL": 4, "FL": 4, "GA": 4, "KY": 4, "MS": 4, "NC": 4, "SC": 4, "TN": 4,
+    "IL": 5, "IN": 5, "MI": 5, "MN": 5, "OH": 5, "WI": 5,
+    "AR": 6, "LA": 6, "NM": 6, "OK": 6, "TX": 6,
+    "IA": 7, "KS": 7, "MO": 7, "NE": 7,
+    "CO": 8, "MT": 8, "ND": 8, "SD": 8, "UT": 8, "WY": 8,
+    "AZ": 9, "CA": 9, "HI": 9, "NV": 9,
+    "AK": 10, "ID": 10, "OR": 10, "WA": 10,
+}
+
 
 def county_mean(values: np.ndarray) -> np.ndarray:
     weights, _ = inputs.county_weights()
@@ -27,12 +40,14 @@ def period_fwi(scenario: str, period: str) -> np.ndarray:
 
 
 def elasticity(historic_fwi: pd.Series) -> float:
-    """gamma: OLS of ln(wildfire EAL) on ln(FWI), fuel shares and state fixed effects."""
+    """gamma: OLS of ln(wildfire EAL) on ln(FWI), fuel shares and FEMA-region fixed effects."""
     baseline = inputs.baseline()
     fuels = inputs.county_fuel_shares().drop(columns="nonburnable")
     eal = baseline["WFIR_EALT"]
-    usable = (eal > 0) & (historic_fwi > 0) & fuels.notna().all(axis=1)
-    states = pd.get_dummies(baseline.loc[usable, "STATEABBRV"], drop_first=True, dtype=float)
+    regions = baseline["STATEABBRV"].map(FEMA_REGION)
+    usable = (eal > 0) & (historic_fwi > 0) & fuels.notna().all(axis=1) & regions.notna()
+    states = pd.get_dummies(regions[usable].astype(int), drop_first=True, dtype=float)
+    states.columns = [f"reg{c}" for c in states.columns]
     design = pd.concat(
         [historic_fwi[usable].map(np.log).rename("log_fwi"), fuels[usable], states], axis=1
     ).assign(const=1.0)
