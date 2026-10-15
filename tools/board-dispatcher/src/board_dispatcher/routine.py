@@ -1,4 +1,4 @@
-"""Starts a Spike worker session through the Claude Code routine API."""
+"""Starts a Research worker session through the Claude Code routine API."""
 
 import json
 import urllib.request
