@@ -30,6 +30,7 @@ class Policy(BaseModel):
             " and what they check. One or two sentences."
         )
     )
+    accounts: str = Field(description="Work accounts and vendor training settings. One sentence.")
     allowed_uses: list[Bullet] = Field(min_length=3, max_length=6)
     needs_approval: list[ApprovalRule] = Field(min_length=2, max_length=5)
     protected_information: str = Field(
@@ -53,7 +54,7 @@ SECTIONS: dict[str, list[str]] = {
     "Header": ["organization", "owner", "next_review"],
     "Why we have this policy": ["why"],
     "Who it covers": ["who_it_covers"],
-    "Tools we use": ["tools", "new_tools"],
+    "Tools we use": ["tools", "new_tools", "accounts"],
     "What you can use AI for": ["allowed_uses"],
     "Needs approval first": ["needs_approval"],
     "Off limits": ["protected_information", "off_limits"],

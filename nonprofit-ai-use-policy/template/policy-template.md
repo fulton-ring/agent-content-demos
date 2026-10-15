@@ -8,8 +8,9 @@
 
 ## Tools we use
 - [Tool name]: [what it's approved for, and whether it is approved for any protected information]
-- [Add one line per approved tool. Personal or free accounts are covered here too.]
+- [Add one line per approved tool. A personal or free account belongs here only if a leader has said staff may use it.]
 - **New tools, add-ons and AI features.** [Who approves a new tool, a browser extension, a plugin, an AI agent or an AI feature switched on inside existing software, and what they check first.]
+- **Accounts.** [Use a work account where we have one, and turn off any setting that lets the vendor train on what you type.]
 
 ## What you can use AI for
 - [Three to six everyday uses that are fine without asking, in this organization's own words.]
