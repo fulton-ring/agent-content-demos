@@ -34,7 +34,7 @@ def elasticity(historic_fwi: pd.Series) -> float:
     usable = (eal > 0) & (historic_fwi > 0) & fuels.notna().all(axis=1)
     states = pd.DataFrame(index=fuels.index[usable])
     design = pd.concat(
-        [historic_fwi[usable].map(np.log).rename("log_fwi"), fuels[usable], states], axis=1
+        [historic_fwi[usable].map(np.log).rename("log_fwi"), states], axis=1
     ).assign(const=1.0)
     coefficients, *_ = np.linalg.lstsq(
         design.to_numpy(), np.log(eal[usable].to_numpy()), rcond=None
