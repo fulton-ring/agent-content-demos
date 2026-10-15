@@ -22,8 +22,12 @@ def county_mean(values: np.ndarray) -> np.ndarray:
         return totals / covered
 
 
+def cell_fwi(scenario: str, period: str) -> np.ndarray:
+    return np.nanmean(inputs.fwi(scenario, period, "FWI_P75", ensemble="MME75"), axis=0)
+
+
 def period_fwi(scenario: str, period: str) -> np.ndarray:
-    return county_mean(np.nanmean(inputs.fwi(scenario, period), axis=0))
+    return county_mean(cell_fwi(scenario, period))
 
 
 def elasticity(historic_fwi: pd.Series) -> float:
@@ -50,6 +54,7 @@ def hazard_multipliers() -> pd.DataFrame:
     result = {}
     for warming, ssp in inputs.SSP.items():
         for period in PERIODS:
-            future = pd.Series(period_fwi(ssp, period), index=fips)
-            result[f"WFIR_{period}_{warming}_HM"] = (future / historic) ** gamma
+            ratio = cell_fwi(ssp, period) / cell_fwi("historical", "historical")
+            ratio = np.where(np.isfinite(ratio) & (ratio > 0), ratio, np.nan)
+            result[f"WFIR_{period}_{warming}_HM"] = county_mean(ratio**gamma)
     return pd.DataFrame(result, index=fips)

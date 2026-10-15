@@ -32,7 +32,7 @@ def elasticity(historic_fwi: pd.Series) -> float:
     fuels = inputs.county_fuel_shares().drop(columns="nonburnable")
     eal = baseline["WFIR_EALT"]
     usable = (eal > 0) & (historic_fwi > 0) & fuels.notna().all(axis=1)
-    states = pd.get_dummies(baseline.loc[usable, "STATEABBRV"], drop_first=True, dtype=float)
+    states = pd.DataFrame(index=fuels.index[usable])
     design = pd.concat(
         [historic_fwi[usable].map(np.log).rename("log_fwi"), fuels[usable], states], axis=1
     ).assign(const=1.0)
@@ -47,9 +47,12 @@ def hazard_multipliers() -> pd.DataFrame:
     _, fips = inputs.county_weights()
     historic = pd.Series(period_fwi("historical", "historical"), index=fips)
     gamma = elasticity(historic)
+    hist_cell = np.nanmean(inputs.fwi("historical", "historical"), axis=0)
     result = {}
     for warming, ssp in inputs.SSP.items():
         for period in PERIODS:
-            future = pd.Series(period_fwi(ssp, period), index=fips)
-            result[f"WFIR_{period}_{warming}_HM"] = (future / historic) ** gamma
+            future = np.nanmean(inputs.fwi(ssp, period), axis=0)
+            with np.errstate(invalid="ignore", divide="ignore"):
+                cell_hm = (future / hist_cell) ** gamma
+            result[f"WFIR_{period}_{warming}_HM"] = pd.Series(county_mean(cell_hm), index=fips)
     return pd.DataFrame(result, index=fips)
