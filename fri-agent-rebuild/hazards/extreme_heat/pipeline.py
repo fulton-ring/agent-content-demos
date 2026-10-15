@@ -2,7 +2,7 @@
 
 FRI Technical Documentation, Section 6: an extreme heat event-day is a day whose minimum
 temperature exceeds the historical (1976-2005) 95th or 99th percentile and whose heat index
-exceeds 298 K. HM = max(1, projected event-days / historical event-days), per county.
+exceeds 298 K. HM = max(1, projected event-days / historical days over percentile), per county.
 """
 
 import numpy as np
@@ -56,7 +56,9 @@ def hazard_multipliers() -> pd.DataFrame:
     result = {}
     for name, percentile in PERCENTILES.items():
         thresholds = np.nanpercentile(history, percentile, axis=0)
-        past = county_mean(event_days("historical", "historical", thresholds))
+        # Denominator: historical days with tasmin over the percentile only.
+        past_counts = (history > thresholds).sum(axis=0).astype(float)
+        past = county_mean(past_counts)
         for warming, ssp in inputs.SSP.items():
             for period in ("MID", "LATE"):
                 future = county_mean(event_days(ssp, period, thresholds))
