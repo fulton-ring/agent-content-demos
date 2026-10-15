@@ -46,7 +46,9 @@ def elasticity(historic_fwi: pd.Series) -> float:
     fuels = inputs.county_fuel_shares().drop(columns="nonburnable")
     eal = baseline["WFIR_EALT"]
     usable = (eal > 0) & (historic_fwi > 0) & fuels.notna().all(axis=1)
-    states = pd.get_dummies(baseline.loc[usable, "STATEABBRV"].map(FEMA_REGION), drop_first=True, dtype=float)
+    states = pd.get_dummies(
+        baseline.loc[usable, "STATEABBRV"].map(FEMA_REGION), drop_first=True, dtype=float
+    )
     design = pd.concat(
         [historic_fwi[usable].map(np.log).rename("log_fwi"), fuels[usable], states], axis=1
     ).assign(const=1.0)

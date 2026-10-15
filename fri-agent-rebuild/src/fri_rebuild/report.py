@@ -1,9 +1,11 @@
 """Run each hazard's final pipeline, score it on training and held-out states, and summarize the
-agent experiment logs. Writes results/scores.csv, results/largest_differences.csv and
-results/swarm_summary.csv.
+agent experiment logs. Writes results/scores.csv, results/largest_differences.csv,
+results/swarm_summary.csv and results/kept_pipelines_held_out.csv (every pipeline the loop kept,
+scored on held-out states after the fact, plus the Claude Code subagent comparison).
 """
 
 import time
+from pathlib import Path
 
 import pandas as pd
 
@@ -47,6 +49,45 @@ def swarm_summary(hazard: str) -> dict[str, object]:
     }
 
 
+def final_and_baseline_scores(key: pd.DataFrame, hazard: str) -> pd.DataFrame:
+    """Training and held-out metrics for the human baseline and every kept pipeline."""
+    log = pd.read_csv(RESULTS_DIR / f"experiments-{hazard}.tsv", sep="\t")
+    kept = log[log["status"].isin(["keep"])].drop_duplicates("id")
+    rows = []
+    for _, entry in kept.iterrows():
+        pipeline = RESULTS_DIR / "candidates" / hazard / f"{entry['id']}.py"
+        rows.append(
+            summarize_pipeline(key, pipeline, hazard, f"{entry['id']} {entry['description']}")
+        )
+    return pd.DataFrame(rows)
+
+
+def summarize_pipeline(key: pd.DataFrame, pipeline: Path, hazard: str, label: str) -> dict:
+    rebuilt = load_pipeline(pipeline).hazard_multipliers()
+    result, _ = score.score(key, rebuilt, ("train", "held_out"))
+    means = result.groupby("subset")[["log_mae", "same_bin", "pearson"]].mean()
+    return {
+        "hazard": hazard,
+        "pipeline": label,
+        "train_log_mae": round(means.loc["train", "log_mae"], 4),
+        "held_out_log_mae": round(means.loc["held_out", "log_mae"], 4),
+        "train_same_bin": round(means.loc["train", "same_bin"], 4),
+        "held_out_same_bin": round(means.loc["held_out", "same_bin"], 4),
+        "held_out_pearson": round(means.loc["held_out", "pearson"], 4),
+    }
+
+
+def claude_code_comparison(key: pd.DataFrame) -> pd.DataFrame:
+    """Score the final files of the Claude Code subagent loop (wildfire) the same way."""
+    folder = RESULTS_DIR / "claude-code-subagents" / "wildfire"
+    return pd.DataFrame(
+        [
+            summarize_pipeline(key, path, "wildfire", f"Claude Code subagent {path.stem}")
+            for path in sorted(folder.glob("agent*.py"))
+        ]
+    )
+
+
 def main() -> None:
     key = answer_key.conus(answer_key.load())
     scores, details, timings = [], [], []
@@ -64,6 +105,11 @@ def main() -> None:
     summary = pd.DataFrame([swarm_summary(h) for h in HAZARDS]).merge(pd.DataFrame(timings))
     summary.to_csv(RESULTS_DIR / "swarm_summary.csv", index=False)
     print(summary.to_string(index=False))
+    progress = pd.concat(
+        [*(final_and_baseline_scores(key, h) for h in HAZARDS), claude_code_comparison(key)]
+    )
+    progress.to_csv(RESULTS_DIR / "kept_pipelines_held_out.csv", index=False)
+    print(progress.to_string(index=False))
 
 
 if __name__ == "__main__":
