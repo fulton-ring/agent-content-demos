@@ -3,9 +3,9 @@
 import argparse
 from pathlib import Path
 
-from policy_builder import checks, render
+from policy_builder import checks, published, render
 from policy_builder.fill import DEFAULT_MODEL, Drafter, RunMeta
-from policy_builder.report import write_reports
+from policy_builder.report import write_published, write_reports
 from policy_builder.schema import Policy
 
 PROJECT = Path(__file__).resolve().parents[2]
@@ -87,9 +87,15 @@ def main() -> None:
     parser.add_argument(
         "--reuse", action="store_true", help="Re-render and re-check saved policies instead of calling the model"
     )
+    parser.add_argument(
+        "--skip-published", action="store_true", help="Don't download and measure the published templates"
+    )
     parser.add_argument("calls", nargs="*", type=Path, help="Call notes to build (default: every file in calls/)")
     args = parser.parse_args()
     SCREENSHOTS.mkdir(exist_ok=True)
     build_template_pages()
     built = [build_policy(call, args.model, args.reuse) for call in args.calls or sorted(CALLS.glob("*.md"))]
     write_reports(OUTPUT, built)
+    if not args.skip_published:
+        ours = [published.measure_pdf(p.organization, OUTPUT / r.slug / "policy.pdf") for p, r in built]
+        write_published(OUTPUT, ours + published.measure_published(PROJECT / ".cache" / "published"))
