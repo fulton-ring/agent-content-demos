@@ -31,7 +31,7 @@ def swarm_summary(hazard: str) -> dict[str, object]:
     if not path.exists():
         return {"hazard": hazard}
     log = pd.read_csv(path, sep="\t")
-    agents = log[log["round"] > 0]
+    agents = log[(log["round"] > 0) & (log["status"] != "resume")]
     tested = agents["metric_log_mae"].notna()
     baseline = log.loc[log["round"] == 0, "metric_log_mae"].iloc[0]
     return {
@@ -41,9 +41,10 @@ def swarm_summary(hazard: str) -> dict[str, object]:
         "ran": int(tested.sum()),
         "kept": int((agents["status"] == "keep").sum()),
         "crashed": int((agents["status"] == "crash").sum()),
+        "duplicates": int((agents["status"] == "duplicate").sum()),
         "rejected": int((agents["status"] == "rejected").sum()),
         "baseline_train_log_mae": baseline,
-        "best_train_log_mae": log["metric_log_mae"].min(),
+        "best_train_log_mae": log.loc[log["status"] == "keep", "metric_log_mae"].min(),
         "pipeline_minutes": round(log["seconds"].sum() / 60, 1),
         "model_cost_usd": round(log["cost_usd"].sum(), 2),
     }
