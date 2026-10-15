@@ -11,7 +11,7 @@ Rules for every coding agent that works in this repo. Read this file first, then
 
 ## How work is assigned
 
-- Work arrives as a GitHub issue on the [Agent work](https://github.com/orgs/fulton-ring/projects/1) board. The label `agent:research` (or the older `agent:spike`) means a Claude Research worker owns it. Reading research needs no branch or PR; a spike ships as a folder and a PR.
+- Work arrives as a GitHub issue on the [Agent work](https://github.com/orgs/fulton-ring/projects/1) board. The label `agent:research` means a Claude Research worker owns it. Reading research needs no branch or PR; a spike ships as a folder and a PR.
 - The board's Status column says who is doing what: Backlog, Ready, In progress, Needs founder, Review, Done. A dispatcher starts a worker on each Ready card every 15 minutes and moves it to In progress.
 - You can't reach the board directly. To move your card, add a label to the issue and the dispatcher applies it within 15 minutes: `move:ready`, `move:review`, `move:needs-founder` or `move:backlog`.
 - Work only the issue you were given. Read the issue and all its comments before you start.
