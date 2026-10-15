@@ -11,6 +11,7 @@ import pandas as pd
 from fri_rebuild import inputs
 
 PERIODS = ("MID", "LATE")
+ENSEMBLE = "MME75"
 
 FEMA_REGION = {
     "CT": 1, "ME": 1, "MA": 1, "NH": 1, "RI": 1, "VT": 1,
@@ -36,7 +37,9 @@ def county_mean(values: np.ndarray) -> np.ndarray:
 
 
 def period_fwi(scenario: str, period: str) -> np.ndarray:
-    return county_mean(np.nanmean(inputs.fwi(scenario, period), axis=0))
+    return county_mean(
+        np.nanmean(inputs.fwi(scenario, period, ensemble=ENSEMBLE), axis=0)
+    )
 
 
 def elasticity(historic_fwi: pd.Series) -> float:
