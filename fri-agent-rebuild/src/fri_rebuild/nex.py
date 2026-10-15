@@ -37,7 +37,7 @@ MONTHLY_YEARS = {
     "ssp245": range(2015, 2101),
     "ssp585": range(2015, 2101),
 }
-DAILY_VARIABLES = ("tasmin", "tas", "hurs")
+DAILY_VARIABLES = ("tasmin", "tasmax", "tas", "hurs")
 MONTHLY_VARIABLES = ("tas", "pr")
 
 
@@ -161,7 +161,7 @@ def plan_jobs() -> list[Job]:
             for year in years:
                 daily = (variable, scenario, year) in jobs
                 jobs[(variable, scenario, year)] = Job(variable, scenario, year, daily, True)
-    order = {"tasmin": 0, "tas": 1, "pr": 2, "hurs": 3}
+    order = {"tasmin": 0, "tas": 1, "pr": 2, "hurs": 3, "tasmax": 4}
     return sorted(jobs.values(), key=lambda job: order[job.variable])
 
 

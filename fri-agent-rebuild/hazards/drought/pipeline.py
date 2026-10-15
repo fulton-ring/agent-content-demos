@@ -37,9 +37,7 @@ def thornthwaite_pet(
 ) -> np.ndarray:
     """Monthly PET (mm/month) by Thornthwaite, heat index computed per calendar year."""
     terms = (np.maximum(temp_c, 0) / 5) ** 1.514
-    heat_index = (
-        pd.DataFrame(terms).groupby(np.asarray(months.year)).transform("sum").to_numpy()
-    )
+    heat_index = pd.DataFrame(terms).groupby(np.asarray(months.year)).transform("sum").to_numpy()
     del terms
     exponent = 6.75e-7 * heat_index**3 - 7.71e-5 * heat_index**2 + 1.792e-2 * heat_index + 0.49239
     correction = (
@@ -111,9 +109,7 @@ def hazard_multipliers() -> pd.DataFrame:
         precip_mm = precip * months.days_in_month.to_numpy()[:, None]
         index = spei(precip_mm - thornthwaite_pet(temp, lat, months), months)
         past_days, past_total, past_valid = drought_days(index, months, HISTORICAL)
-        past_rate = np.where(
-            past_valid, np.maximum(past_days, MIN_HIST_DAYS) / past_total, np.nan
-        )
+        past_rate = np.where(past_valid, np.maximum(past_days, MIN_HIST_DAYS) / past_total, np.nan)
         for period, span in FUTURE.items():
             fut_days, fut_total, fut_valid = drought_days(index, months, span)
             fut_rate = np.where(fut_valid, fut_days / fut_total, np.nan)

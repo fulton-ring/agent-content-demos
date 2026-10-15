@@ -28,8 +28,8 @@ HIGHER is SSP5-8.5. You edit `pipeline.py`; nothing else.
 
 ## What we know about the data you get
 
-- `inputs.daily(variable, scenario, period)`: float32 (days, cells); `tasmin`, `tas` in deg C,
-  `hurs` in %. NaN where the cell has no land data. NEX files here are 0.25 degree (the
+- `inputs.daily(variable, scenario, period)`: float32 (days, cells); `tasmin`, `tasmax`, `tas` in
+  deg C, `hurs` in % (daily mean relative humidity). NaN where the cell has no land data. NEX files here are 0.25 degree (the
   documentation says 30 arcsec; FEMA probably used a different product or resampling).
 - `inputs.county_weights()`: sparse (counties x cells) intersection areas in km^2, and the FIPS
   index. `inputs.cell_coordinates()` gives cell lat/lon.
@@ -49,3 +49,16 @@ HIGHER is SSP5-8.5. You edit `pipeline.py`; nothing else.
 5. How should counties with zero historical event-days be handled (the published HM is never
    blank)?
 6. Anything else the log suggests: look at which states and columns have the largest errors.
+
+## Note from the person running the loop (added after round 4)
+
+The loop stalled at a training metric of 0.207 for three rounds, so a person added two things:
+
+- `tasmax` (daily maximum temperature) is now available. It was missing before only because we
+  skipped downloading it; FEMA's text says "daily average temperature" for the heat index, but
+  that has not been tested against alternatives.
+- What the current best gets wrong, from training states only: N95 correlates at 0.97 and N99 at
+  0.81. Multipliers are too low in the Northeast (NH, NY, VT, PA about 0.75-0.8x FEMA) and,
+  for N99, in OK and AR (0.64x), and too high for N99 in KY, TN, VA (1.3-1.5x). The pattern
+  points at how strict the heat index filter is in humid versus cooler places, and at how the
+  99th percentile is defined.

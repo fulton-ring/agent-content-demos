@@ -7,6 +7,7 @@ scores, and returns a complete new pipeline file. The harness rejects code that 
 answer key, runs each candidate, and keeps the best one if it beats the current best.
 
 Usage: python -m fri_rebuild.swarm <hazard> [--rounds N] [--agents N] [--budget USD]
+       [--resume NOTE]
 """
 
 import argparse
@@ -58,7 +59,8 @@ Hard rules (a candidate that breaks them is rejected without being run):
 - The pipeline must finish in under 20 minutes on 4 CPU cores and 16 GB of RAM. Loading one
   variable for one 30-year period is about 0.6 GB as float32; free arrays you no longer need.
 
-Make one focused change per experiment so the log shows what helped. Return the complete file.
+Make one focused change per experiment so the log shows what helped. Never resubmit an idea
+the log already shows as tested. Return the complete file.
 """
 
 
@@ -254,34 +256,40 @@ class Swarm:
                 break
         self.log_path.write_text("\n".join(lines) + "\n")
 
-    async def run(self, rounds: int, patience: int) -> None:
+    def last_round(self) -> int:
+        rows = self.log_path.read_text().splitlines()[1:]
+        return max((int(row.split("\t")[1]) for row in rows), default=0)
+
+    async def run(self, rounds: int, patience: int, resume_note: str | None) -> None:
+        """Run the loop. With resume_note, continue an existing log from the kept pipeline."""
         best_code = self.pipeline.read_text()
         best_id = code_id(best_code)
         (self.candidates / f"{best_id}.py").write_text(best_code)
-        baseline = run_pipeline(
+        start = self.last_round() + 1 if resume_note else 1
+        start_run = run_pipeline(
             self.pipeline, cache_path("runs", self.hazard, f"{best_id}.parquet")
         )
-        if baseline.metric is None:
-            sys.exit(f"baseline pipeline failed:\n{baseline.summary}")
+        if start_run.metric is None:
+            sys.exit(f"starting pipeline failed:\n{start_run.summary}")
         self.log(
             [
                 best_id,
-                0,
+                start - 1,
                 0,
                 "-",
-                f"{baseline.metric:.6f}",
-                baseline.same_bin,
-                baseline.pearson,
-                "keep",
-                f"{baseline.seconds:.0f}",
+                f"{start_run.metric:.6f}",
+                start_run.same_bin,
+                start_run.pearson,
+                "resume" if resume_note else "keep",
+                f"{start_run.seconds:.0f}",
                 "0",
-                "baseline (human-written)",
+                f"resume: {resume_note}" if resume_note else "baseline (human-written)",
             ]
         )
-        best_metric, best_summary = baseline.metric, baseline.summary
+        best_metric, best_summary = start_run.metric, start_run.summary
         notes: list[str] = []
         stale = 0
-        for round_number in range(1, rounds + 1):
+        for round_number in range(start, start + rounds):
             if self.spent >= self.budget:
                 print(f"budget reached: ${self.spent:.2f}")
                 break
@@ -339,9 +347,10 @@ def main() -> None:
     parser.add_argument("--agents", type=int, default=3)
     parser.add_argument("--budget", type=float, default=4.0)
     parser.add_argument("--patience", type=int, default=3)
+    parser.add_argument("--resume", metavar="NOTE", help="continue the existing log; NOTE says why")
     args = parser.parse_args()
     swarm = Swarm(args.hazard, args.agents, args.budget)
-    asyncio.run(swarm.run(args.rounds, args.patience))
+    asyncio.run(swarm.run(args.rounds, args.patience, args.resume))
 
 
 if __name__ == "__main__":
