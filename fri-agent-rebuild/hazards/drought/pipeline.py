@@ -14,7 +14,7 @@ from fri_rebuild import inputs
 
 SCALE_MONTHS = 3
 DROUGHT_SPEI = -1.6
-PSEUDO_DAYS = 15.0  # half a month of drought days added to both numerator and denominator
+MIN_HIST_DAYS = 15.0  # detection floor on historical drought days (denominator only)
 CALIBRATION = (pd.Timestamp("1950-01-01"), pd.Timestamp("2010-12-31"))
 HISTORICAL = (pd.Timestamp("1985-01-01"), pd.Timestamp("2014-12-31"))
 FUTURE = {
@@ -81,15 +81,14 @@ def spei(balance: np.ndarray, months: pd.DatetimeIndex) -> np.ndarray:
     return result
 
 
-def drought_day_rate(
+def drought_days(
     index: np.ndarray, months: pd.DatetimeIndex, span: tuple[pd.Timestamp, pd.Timestamp]
-) -> np.ndarray:
+) -> tuple[np.ndarray, float, np.ndarray]:
     rows = (months >= span[0]) & (months <= span[1])
     days = months.days_in_month.to_numpy()[rows, None]
-    drought_days = ((index[rows] <= DROUGHT_SPEI) * days).sum(axis=0)
+    count = ((index[rows] <= DROUGHT_SPEI) * days).sum(axis=0).astype(float)
     valid = np.isfinite(index[rows]).any(axis=0)
-    rate = (drought_days + PSEUDO_DAYS) / (days.sum() + 2 * PSEUDO_DAYS)
-    return np.where(valid, rate, np.nan)
+    return count, float(days.sum()), valid
 
 
 def county_mean(values: np.ndarray) -> np.ndarray:
@@ -111,10 +110,15 @@ def hazard_multipliers() -> pd.DataFrame:
         precip, _ = inputs.monthly("pr", ssp)
         precip_mm = precip * months.days_in_month.to_numpy()[:, None]
         index = spei(precip_mm - thornthwaite_pet(temp, lat, months), months)
-        past = drought_day_rate(index, months, HISTORICAL)
+        past_days, past_total, past_valid = drought_days(index, months, HISTORICAL)
+        past_rate = np.where(
+            past_valid, np.maximum(past_days, MIN_HIST_DAYS) / past_total, np.nan
+        )
         for period, span in FUTURE.items():
+            fut_days, fut_total, fut_valid = drought_days(index, months, span)
+            fut_rate = np.where(fut_valid, fut_days / fut_total, np.nan)
             with np.errstate(divide="ignore", invalid="ignore"):
-                ratio = drought_day_rate(index, months, span) / past
+                ratio = fut_rate / past_rate
             cell_hm = np.where(np.isfinite(ratio), ratio, np.nan)
             result[f"DRGT_{period}_{warming}_HM"] = np.maximum(1.0, county_mean(cell_hm))
     return pd.DataFrame(result, index=fips)
