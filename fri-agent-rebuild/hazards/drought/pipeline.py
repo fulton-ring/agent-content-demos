@@ -14,7 +14,7 @@ from fri_rebuild import inputs
 
 SCALE_MONTHS = 3
 DROUGHT_SPEI = -1.6
-PSEUDO_DAYS = 30.0  # one month of drought days added to both numerator and denominator
+PSEUDO_DAYS = 15.0  # half a month of drought days added to both numerator and denominator
 CALIBRATION = (pd.Timestamp("1950-01-01"), pd.Timestamp("2010-12-31"))
 HISTORICAL = (pd.Timestamp("1985-01-01"), pd.Timestamp("2014-12-31"))
 FUTURE = {
