@@ -40,16 +40,13 @@ def period_fwi(scenario: str, period: str) -> np.ndarray:
 
 
 def elasticity(historic_fwi: pd.Series) -> float:
-    """gamma: OLS of ln(wildfire EAL) on ln(FWI), fuel shares and FEMA-region fixed effects."""
+    """gamma: OLS of ln(wildfire EAL) on ln(FWI) and fuel shares, no spatial fixed effects."""
     baseline = inputs.baseline()
     fuels = inputs.county_fuel_shares().drop(columns="nonburnable")
     eal = baseline["WFIR_EALT"]
-    regions = baseline["STATEABBRV"].map(FEMA_REGION)
-    usable = (eal > 0) & (historic_fwi > 0) & fuels.notna().all(axis=1) & regions.notna()
-    states = pd.get_dummies(regions[usable].astype(int), drop_first=True, dtype=float)
-    states.columns = [f"reg{c}" for c in states.columns]
+    usable = (eal > 0) & (historic_fwi > 0) & fuels.notna().all(axis=1)
     design = pd.concat(
-        [historic_fwi[usable].map(np.log).rename("log_fwi"), fuels[usable], states], axis=1
+        [historic_fwi[usable].map(np.log).rename("log_fwi"), fuels[usable]], axis=1
     ).assign(const=1.0)
     coefficients, *_ = np.linalg.lstsq(
         design.to_numpy(), np.log(eal[usable].to_numpy()), rcond=None
