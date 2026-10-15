@@ -42,7 +42,7 @@ def elasticity(historic_fwi: pd.Series) -> float:
         [
             historic_fwi[usable].map(np.log).rename("log_fwi"),
             fuels[usable],
-            np.log(burnable[usable]).rename("log_burnable"),
+            burnable[usable].map(np.log).rename("log_burnable"),
         ],
         axis=1,
     ).assign(const=1.0)
