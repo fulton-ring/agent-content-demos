@@ -1,6 +1,6 @@
 # Board dispatcher
 
-Starts a Claude Spike worker on each Ready card on the [Agent work](https://github.com/orgs/fulton-ring/projects/1) board. The `Board dispatcher` GitHub Action runs it every 15 minutes, and right away whenever a `move:*` label is added to an issue.
+Starts a Claude Research worker on each Ready card on the [Agent work](https://github.com/orgs/fulton-ring/projects/1) board. The `Board dispatcher` GitHub Action runs it every 15 minutes, and right away whenever a `move:*` label is added to an issue.
 
 Cloud agent sessions can't reach the org's project board, so agents signal on the issue and the dispatcher moves the card. Each run, first:
 
@@ -34,8 +34,8 @@ DRY_RUN=1 GH_TOKEN=... SPIKE_WORKER_TOKEN=... WORKER_ROUTINE_ID=trig_01QFJTcXruu
 | Variable | Meaning |
 | --- | --- |
 | `GH_TOKEN` | Fine-grained token with Projects read/write on the org and Issues read/write on this repo (Actions secret `AGENT_BOARD_TOKEN`) |
-| `SPIKE_WORKER_TOKEN` | API token for the Spike worker routine (Actions secret `SPIKE_WORKER_TOKEN`) |
-| `WORKER_ROUTINE_ID` | The Spike worker routine |
+| `SPIKE_WORKER_TOKEN` | API token for the Research worker routine (Actions secret `SPIKE_WORKER_TOKEN`) |
+| `WORKER_ROUTINE_ID` | The Research worker routine |
 | `PROJECT_OWNER`, `PROJECT_NUMBER` | The board |
 | `REPO` | Only issues from this repo are started |
 | `MAX_IN_PROGRESS` | Cap on Claude cards In progress (default 5) |
