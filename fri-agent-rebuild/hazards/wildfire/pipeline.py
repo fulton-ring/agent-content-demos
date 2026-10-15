@@ -12,6 +12,7 @@ from fri_rebuild import inputs
 
 PERIODS = ("MID", "LATE")
 ENSEMBLE = "MME75"
+VARIABLE = "FWI_P95"
 
 FEMA_REGION = {
     "CT": 1, "ME": 1, "MA": 1, "NH": 1, "RI": 1, "VT": 1,
@@ -38,7 +39,9 @@ def county_mean(values: np.ndarray) -> np.ndarray:
 
 def period_fwi(scenario: str, period: str) -> np.ndarray:
     return county_mean(
-        np.nanmean(inputs.fwi(scenario, period, ensemble=ENSEMBLE), axis=0)
+        np.nanmean(
+            inputs.fwi(scenario, period, variable=VARIABLE, ensemble=ENSEMBLE), axis=0
+        )
     )
 
 
