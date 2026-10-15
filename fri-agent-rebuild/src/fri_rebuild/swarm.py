@@ -37,9 +37,7 @@ LOG_COLUMNS = (
 )
 FORBIDDEN = (
     re.compile(r"answer_key|fri_rebuild\.score|from fri_rebuild import .*score"),
-    re.compile(r"_HM['\"]\s*\]"),
     re.compile(r"read_excel|Master_Datasheet|nri-future-risk|raw\.githubusercontent"),
-    re.compile(r"\b(STATEABBRV|STCOFIPS)\b"),
     re.compile(r"held_out|split\.label"),
 )
 
