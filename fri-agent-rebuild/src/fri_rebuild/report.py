@@ -65,16 +65,13 @@ def final_and_baseline_scores(key: pd.DataFrame, hazard: str) -> pd.DataFrame:
 def summarize_pipeline(key: pd.DataFrame, pipeline: Path, hazard: str, label: str) -> dict:
     rebuilt = load_pipeline(pipeline).hazard_multipliers()
     result, _ = score.score(key, rebuilt, ("train", "held_out"))
-    means = result.groupby("subset")[["log_mae", "same_bin", "pearson"]].mean()
-    return {
-        "hazard": hazard,
-        "pipeline": label,
-        "train_log_mae": round(means.loc["train", "log_mae"], 4),
-        "held_out_log_mae": round(means.loc["held_out", "log_mae"], 4),
-        "train_same_bin": round(means.loc["train", "same_bin"], 4),
-        "held_out_same_bin": round(means.loc["held_out", "same_bin"], 4),
-        "held_out_pearson": round(means.loc["held_out", "pearson"], 4),
-    }
+    row: dict = {"hazard": hazard, "pipeline": label}
+    for subset in ("train", "held_out"):
+        part = result[result["subset"] == subset]
+        row[f"{subset}_log_mae"] = round(float(part["log_mae"].mean()), 4)
+        row[f"{subset}_same_bin"] = round(float(part["same_bin"].mean()), 4)
+        row[f"{subset}_pearson"] = round(float(part["pearson"].mean()), 4)
+    return row
 
 
 def claude_code_comparison(key: pd.DataFrame) -> pd.DataFrame:
