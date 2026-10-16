@@ -337,6 +337,53 @@ NRI v1.19 tract drought EAL × tract HM. Outputs are in `results/tracts/`.
   6 km, is the finest hazard here and could support a tract layer about four times finer. We did
   not build one.
 
+## Reverse engineering FEMA's coastal flooding values (answer key open)
+
+The blind rebuild failed for coastal flooding, so we studied FEMA's published coastal multipliers
+directly (`python -m fri_rebuild.forensics`, outputs in `results/forensics/`). This part reads
+the answer key on purpose; it says what structure produced FEMA's numbers, not whether agents can
+find it.
+
+**What the published values show:**
+
+- **Zero means "no projection", and FEMA's own ratings treat it as 1.**
+  - 120 counties with real coastal flood losses today are published with HM = 0. They are mostly
+    Great Lakes counties, which have no sea-level gauges, plus inland Louisiana and others; East
+    Baton Rouge has $1.2M of annual coastal-flood loss.
+  - For all 120, FEMA's projected-loss rating equals the rating of today's loss, which is what
+    HM = 1 gives. The published HM column says these counties' future coastal losses are zero,
+    and the ratings say they are unchanged.
+- **17 counties have 0 < HM < 1, which FEMA's documented formula cannot produce.** Examples:
+  Effingham, GA at 0.013 for mid-century, Quebradillas, PR at 0.012, Williamsburg, SC at 0.03.
+  - Equation 4 is HM = sum of (sub-type frequency factor x sub-type share of EAL). Under rising
+    seas, flooding cannot get rarer, and shares that sum to 1 cannot give less than 1.
+  - The published values only make sense if the shares often sum to well under 1, e.g. if EAL
+    outside the minor/moderate/major flood zones got a factor of 0 instead of 1.
+  - Ratings floor HM at 1, so this understatement does not show up in the ratings for these 17.
+    It would also pull down counties whose HM stays above 1, and that cannot be checked from the
+    published data.
+- **The structure itself checks out.** Counties sharing a tide gauge lie exactly in a
+  3-dimensional subspace of the four scenario values, as "gauge factor per sub-type x county
+  weight" requires:
+  - Magueyes Island, PR (14 counties), Astoria, OR (5) and Tacoma, WA (4) all score 0.0000 on
+    the rank test.
+  - Random groups of the same counties score 0.004-0.020.
+  - The fits also show the weights do not sum to a constant.
+- **Late century saturates on the Atlantic and Gulf coasts.** For 314 of 356 counties the two
+  late-century scenarios (1.0 m and 2.0 m of sea-level rise) give identical multipliers. The 42
+  exceptions are on the Pacific coast and in Puerto Rico and the Virgin Islands.
+  - That is what happens when today's flood levels fall below the shortest return period in the
+    2022 report's return-level tables under both scenarios.
+  - A recipe built that way, from the report's return-level curves and median sea-level rise
+    capped at the 0.1-year level, reproduces this pattern and FEMA's scale (factors up to 1,000).
+    It does not reproduce the 36 counties with four distinct values: median error 17%, best 4%.
+- **Not resolved:** the exact recipe. That includes which return periods define each sub-type,
+  how frequencies are capped or extrapolated, which sea-level series and base year were used,
+  and how gauges without their own sea-level projection were handled.
+- **One retraction during the analysis.** An early subspace test seemed to match an uncapped
+  recipe to within 0.06°. That recipe produces factors as large as 10^24, which made the angle
+  meaningless, so we dropped the test.
+
 ## What failed or wasn't covered
 
 - **Hurricane wind** was not attempted. FEMA's input is Applied Research Associates'
