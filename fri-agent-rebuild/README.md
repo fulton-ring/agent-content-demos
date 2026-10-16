@@ -544,8 +544,10 @@ variants.
   - The building model's own damage-today ranks tracts much as NRI does (rank correlation
     0.75).
   - In absolute terms it is about 260 times NRI's coastal EAL ($321M against $1.24M a year).
-    It counts storm-tide damage that NRI files under hurricane, and it has no defences. Only
-    its ratios are used.
+    Surge is not the reason: NRI v1.19 removed its separate SLOSH hurricane-surge sub-type,
+    which NOAA's flood-probability layers now cover. The gap is method. NRI multiplies flooded
+    developed area per Census block by an empirical historic loss ratio. The pilot applies a full
+    depth-damage curve to every building and ignores defences. Only its ratios are used.
 - **Late century the bathtub breaks down, as FEMA's method does.**
   - By 2100, the 1.2-2.1 m rises put much of the county below today's yearly water levels.
   - Tract multipliers spread to 6-60x (lower) and 10-970x (higher), and 9-90 of 94 tracts end
@@ -567,6 +569,23 @@ variants.
   - Defences: the Battery seawall and the drainage tunnels.
   - Other Charleston-area gauges (only 8665530 is used).
   - NOAA's sea-level-rise inundation layers, which handle connectivity, are the next refinement.
+- **Where FEMA's method handles hydrology** (NRI Data Version and Update Documentation,
+  December 2025):
+  - **The NRI baseline (EAL) carries the local detail.**
+    - NRI v1.19's high-tide sub-types intersect NOAA's minor, moderate and major
+      flood-probability rasters with each Census block's developed area.
+    - Its 1% and 0.2% sub-types use FEMA's 2021 flood maps (NFHL). Those come from engineering
+      studies that include surge and waves.
+    - Since v1.18, levee-protected areas get a 1-in-500-year frequency.
+    - FEMA's documentation does not say whether NOAA's rasters account for connectivity.
+  - **The FRI multiplier carries almost none.**
+    - Each county takes its nearest tide gauge, "based purely on geographic distance". The only
+      adjustment is clipping out levee-protected areas.
+    - It has no water-level variation within a county, no waves and no connectivity. On our
+      reading of the weights, the floodplain sub-types get no factor at all.
+  - **So the spatial hydrology is on the side NRI refreshes.** A tract multiplier applied to
+    NRI's tract EAL keeps that detail. The pilot's building model adds a little more inside the
+    county, but only up to the limits of one gauge.
 
 ## What failed or wasn't covered
 
