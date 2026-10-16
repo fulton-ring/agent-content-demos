@@ -21,23 +21,44 @@ Spike for [issue #16](https://github.com/fulton-ring/agent-content-demos/issues/
 
 ## How to run it
 
-You need [uv](https://docs.astral.sh/uv/) and an OpenRouter key. A full run makes four to eight model calls and costs about $0.50.
+You need [uv](https://docs.astral.sh/uv/), an OpenRouter key and a Chromium for printing. A full run of the four calls costs about $0.80 and takes about 6 minutes.
+
+**Chromium.** Either let Playwright download its own:
+
+```sh
+uv run playwright install --only-shell chromium
+```
+
+Playwright launches Chromium headless, and headless runs use Playwright's separate headless shell, so that is what to install. Or skip the download and point `CHROMIUM_PATH` at a Chromium or Chrome binary you already have, for example `export CHROMIUM_PATH=/usr/bin/chromium`.
 
 ```sh
 cd nonprofit-ai-use-policy
 uv sync
-uv run playwright install chromium   # skip if you set CHROMIUM_PATH to a Chromium you already have
 export OPENROUTER_API_KEY=...
+export NLTK_ALLOW_PROXIED_URLOPEN=1   # only behind a proxy; see below
 uv run build-policies
 ```
 
 That one command does all of this:
 
 1. Renders the blank template and the call questions to HTML and PDF.
-2. Fills the template from each file in `calls/` with one typed model call: Pydantic AI, `anthropic/claude-sonnet-5.5` through OpenRouter, temperature 0. The output is validated against the `Policy` schema in `src/policy_builder/schema.py`, and Pydantic AI retries when validation fails.
-3. Prints each policy to a Letter PDF with Chromium. If it spills onto a second page, it asks the model to cut it down (`prompts/shorten-policy.md`), at most twice.
-4. Checks each policy: pages, how full the page is, reading grade, whether every template section is filled, names that don't appear in the call, time and cost.
-5. Downloads the published templates listed under Sources and measures them the same way. The PDFs are cached in `.cache/`, which is not committed. Pass `--skip-published` to skip this step.
+2. **Drafts** each policy from its file in `calls/` with a typed model call: Pydantic AI, `anthropic/claude-sonnet-5.5` through OpenRouter, temperature 0, prompt in `prompts/fill-policy.md`. The output is validated against the `Policy` schema in `src/policy_builder/schema.py`. Pydantic AI retries when validation fails, at most twice.
+3. **Fits** it to a page. It prints a Letter PDF with Chromium, and if the policy spills onto a second page it asks the model to cut it down (`prompts/shorten-policy.md`), at most twice.
+4. **Checks** it against the call. A second typed call (`prompts/review-policy.md`, low reasoning effort) labels every statement as supported by the call, a template default, unsupported, or contradicting the call or another part of the policy, and lists what the policy missed. The output is validated against `FidelityReview` in `src/policy_builder/review.py`.
+5. **Revises** it once if the check found anything unsupported or contradicting (`prompts/revise-policy.md`). It then fits it to a page again and runs the check again. There is one revise pass at most, so whatever the second check still finds stays in the policy and in the report.
+6. Measures each policy: pages, how full the page is, reading grade, whether every template section is filled, names that don't appear in the call, and time and cost for drafting and checking separately.
+7. Downloads the published templates listed under Sources and measures them the same way. The PDFs are cached in `.cache/`, which is not committed. Pass `--skip-published` to skip this step.
+
+Model calls per policy: at least 2 to draft and check. Usually there are more: each schema retry, shorten pass and revise pass adds one, and a revise adds a second check. In the runs below it took 4 to 8 calls per policy.
+
+Outputs go to `output/`, or to `POLICY_OUTPUT_DIR` if set:
+
+- `<organization>/policy.{json,html,pdf}`, plus `review.json` with both checks and `run.json` with time and cost;
+- `checks.md` and `checks.json`;
+- `fidelity-findings.md` with every problem the checks found;
+- `side-by-side.md`;
+- `published-comparison.md`;
+- `screenshots/`.
 
 Useful options:
 

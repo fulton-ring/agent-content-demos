@@ -1,6 +1,7 @@
 """One command: render the template and questions, then draft each call's policy, fit it to a page and check it."""
 
 import argparse
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -12,8 +13,8 @@ from policy_builder.schema import Policy
 
 PROJECT = Path(__file__).resolve().parents[2]
 CALLS = PROJECT / "calls"
-OUTPUT = PROJECT / "output"
-SCREENSHOTS = PROJECT / "screenshots"
+OUTPUT = Path(os.environ.get("POLICY_OUTPUT_DIR", PROJECT / "output"))
+SCREENSHOTS = OUTPUT / "screenshots"
 MAX_SHORTEN_PASSES = 2
 
 
@@ -124,7 +125,7 @@ def main() -> None:
     )
     parser.add_argument("calls", nargs="*", type=Path, help="Call notes to build (default: every file in calls/)")
     args = parser.parse_args()
-    SCREENSHOTS.mkdir(exist_ok=True)
+    SCREENSHOTS.mkdir(parents=True, exist_ok=True)
     build_template_pages()
     built = [build_policy(call, args.model, args.reuse) for call in args.calls or sorted(CALLS.glob("*.md"))]
     write_reports(OUTPUT, built)
