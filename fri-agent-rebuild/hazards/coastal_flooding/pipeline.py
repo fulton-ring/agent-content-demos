@@ -15,16 +15,16 @@ from fri_rebuild import inputs
 SEVERITIES = ("minor", "moderate", "major")
 SCENARIOS = {"LOWER": "intermediate", "HIGHER": "high"}
 DECADES = {"MID": 2050, "LATE": 2100}
-CURRENT_YEARS = (2001, 2020)
+CURRENT_DECADE = 2020
 
 
 def station_frequencies() -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Current (observed mean) and projected flood days per year, by station and severity."""
+    """Current (2020 decade of projections) and projected flood days per year."""
     tables = inputs.coastal_tables()
-    observed = tables["htf_observed"]
-    recent = observed[observed["year"].between(*CURRENT_YEARS)]
-    current = recent.groupby("station")[list(SEVERITIES)].mean()
     projected = tables["htf_decadal"]
+    base = projected[(projected["scenario"] == "intermediate") & (projected["decade"] == CURRENT_DECADE)]
+    current = base.pivot_table(index="station", columns="severity", values="days")
+    current = current.reindex(columns=list(SEVERITIES))
     return current, projected
 
 
@@ -44,14 +44,16 @@ def hazard_multipliers() -> pd.DataFrame:
     stations = projected.drop_duplicates("station")[["station", "lat", "lon"]]
     stations = stations[stations["station"].isin(current.index)]
     nearest = nearest_station(stations)
-    share = current.div(current.sum(axis=1), axis=0)
+    total = current.sum(axis=1)
+    share = current.div(total.where(total > 0), axis=0)
     result = {}
     for warming, scenario in SCENARIOS.items():
         for period, decade in DECADES.items():
             rows = projected[(projected["scenario"] == scenario) & (projected["decade"] == decade)]
             future = rows.pivot_table(index="station", columns="severity", values="days")
+            future = future.reindex(index=current.index, columns=list(SEVERITIES))
             with np.errstate(divide="ignore", invalid="ignore"):
-                factor = future[list(SEVERITIES)] / current[list(SEVERITIES)]
+                factor = future / current[list(SEVERITIES)].where(current > 0)
             station_hm = (factor.where(share > 0) * share).sum(axis=1, min_count=1)
             result[f"CFLD_{period}_{warming}_HM"] = nearest.map(station_hm)
     return pd.DataFrame(result)
