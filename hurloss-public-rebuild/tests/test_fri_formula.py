@@ -20,9 +20,7 @@ def test_exceedance_counts_every_category_reached() -> None:
 
 
 def test_banded_counts_only_the_peak_category() -> None:
-    frequencies = fri_formula.category_frequencies(
-        wind([[52.0]]), np.array([0.1]), banded=True
-    )
+    frequencies = fri_formula.category_frequencies(wind([[52.0]]), np.array([0.1]), banded=True)
     np.testing.assert_allclose(frequencies[0], [0, 0, 0.1, 0, 0])
 
 

@@ -6,6 +6,8 @@ the same settings skip the wind computation.
 
 import logging
 import os
+from collections.abc import Callable, Generator
+from contextlib import contextmanager
 from dataclasses import dataclass
 
 import numpy as np
@@ -50,26 +52,46 @@ def near_box(tracks: TCTracks) -> TCTracks:
 
 
 def workers() -> int:
-    return max(1, int(os.environ.get("HURLOSS_WORKERS", os.cpu_count() or 1)))
+    count = int(os.environ.get("HURLOSS_WORKERS", os.cpu_count() or 1))
+    if count < 1:
+        raise ValueError("HURLOSS_WORKERS must be at least 1")
+    return count
 
 
-def wind_fields(tracks: TCTracks, grid: Grid, name: str) -> TropCyclone:
-    """CLIMADA wind fields on the grid points, cached under `name`."""
-    target = cache_path("hazard", f"{name}.h5")
-    if target.exists():
-        return TropCyclone.from_hdf5(target)
-    centroids = Centroids(lat=grid.lat, lon=grid.lon)
-    tracks.equal_timestep(time_step_h=TIME_STEP_H)
-    LOG.info("wind fields for %s: %d tracks on %d points", name, tracks.size, grid.lat.size)
+@contextmanager
+def process_pool() -> Generator[pathos.pools.ProcessPool]:
     pool = pathos.pools.ProcessPool(nodes=workers())
     try:
-        hazard = TropCyclone.from_tracks(
-            tracks, centroids=centroids, pool=pool, ignore_distance_to_coast=True
-        )
+        yield pool
     finally:
         pool.close()
         pool.join()
         pool.clear()
+
+
+def hourly(tracks: TCTracks, pool: pathos.pools.ProcessPool) -> TCTracks:
+    """Resample tracks to the wind-field time step, in parallel."""
+    tracks.equal_timestep(time_step_h=TIME_STEP_H, pool=pool)
+    return tracks
+
+
+def wind_fields(
+    make_tracks: Callable[[pathos.pools.ProcessPool], TCTracks], grid: Grid, name: str
+) -> TropCyclone:
+    """CLIMADA wind fields on the grid points, cached under `name`.
+
+    `make_tracks` builds hourly tracks; it only runs when the cache is empty.
+    """
+    target = cache_path("hazard", f"{name}.h5")
+    if target.exists():
+        return TropCyclone.from_hdf5(target)
+    centroids = Centroids(lat=grid.lat, lon=grid.lon)
+    with process_pool() as pool:
+        tracks = make_tracks(pool)
+        LOG.info("wind fields for %s: %d tracks on %d points", name, tracks.size, grid.lat.size)
+        hazard = TropCyclone.from_tracks(
+            tracks, centroids=centroids, pool=pool, ignore_distance_to_coast=True
+        )
     hazard.pool = None
     partial = target.with_suffix(".partial.h5")
     hazard.write_hdf5(partial)

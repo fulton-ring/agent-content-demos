@@ -5,6 +5,7 @@ import os
 
 import xarray as xr
 from climada.hazard import TCTracks
+from pathos.pools import ProcessPool
 
 from hurloss_rebuild import hazard
 from hurloss_rebuild.grid import Grid
@@ -27,15 +28,18 @@ def env_int(name: str, default: int, low: int, high: int) -> int:
 
 def historical(grid: Grid, tag: str) -> Events:
     """IBTrACS 1900-2024 plus CLIMADA's perturbed copies (random-walk tracks, land decay)."""
-    copies = env_int("HURLOSS_SYNTHETIC_COPIES", 9, 0, 49)
+    copies = env_int("HURLOSS_SYNTHETIC_COPIES", 19, 0, 49)
     name = f"ibtracs_{HISTORY[0]}_{HISTORY[1]}_x{copies + 1}_{tag}"
-    tracks = hazard.near_box(ibtracs.tracks(*HISTORY))
-    if copies:
-        tracks.equal_timestep(time_step_h=hazard.TIME_STEP_H)
-        tracks.calc_perturbed_trajectories(
-            nb_synth_tracks=copies, use_global_decay_params=True, seed=SEED
-        )
-    fields = hazard.wind_fields(tracks, grid, name)
+
+    def make_tracks(pool: ProcessPool) -> TCTracks:
+        tracks = hazard.hourly(hazard.near_box(ibtracs.tracks(*HISTORY)), pool)
+        if copies:
+            tracks.calc_perturbed_trajectories(
+                nb_synth_tracks=copies, use_global_decay_params=True, seed=SEED, pool=pool
+            )
+        return tracks
+
+    fields = hazard.wind_fields(make_tracks, grid, name)
     years = HISTORY[1] - HISTORY[0] + 1
     return hazard.events(fields, HISTORY, rate=1.0 / (years * (copies + 1)))
 
@@ -45,14 +49,18 @@ def west_negative(track: xr.Dataset) -> xr.Dataset:
     return track.assign_coords(lon=((track.lon + 180) % 360) - 180)
 
 
-def storm_set(model: str | None, grid: Grid, tag: str) -> Events:
-    """STORM North Atlantic tracks; `model` None is the present climate."""
-    files = env_int("HURLOSS_STORM_FILES", 2, 1, storm.FILES_PER_SET)
-    label = model or "present"
-    name = f"storm_{label}_{files}k_{tag}"
+def storm_tracks(model: str | None, files: int, pool: ProcessPool) -> TCTracks:
     parts = [TCTracks.from_simulations_storm(storm.fetch(model, i)) for i in range(files)]
     tracks = TCTracks(data=[west_negative(track) for part in parts for track in part.data])
-    fields = hazard.wind_fields(hazard.near_box(tracks), grid, name)
+    return hazard.hourly(hazard.near_box(tracks), pool)
+
+
+def storm_set(model: str | None, grid: Grid, tag: str) -> Events:
+    """STORM North Atlantic tracks; `model` None is the present climate."""
+    files = env_int("HURLOSS_STORM_FILES", 5, 1, storm.FILES_PER_SET)
+    label = model or "present"
+    name = f"storm_{label}_{files}k_{tag}"
+    fields = hazard.wind_fields(lambda pool: storm_tracks(model, files, pool), grid, name)
     period = STORM_PRESENT_YEARS if model is None else STORM_FUTURE_YEARS
     events = hazard.events(fields, period, rate=1.0 / (files * storm.YEARS_PER_FILE))
     LOG.info("STORM %s: %d events near the grid", label, events.wind.shape[0])

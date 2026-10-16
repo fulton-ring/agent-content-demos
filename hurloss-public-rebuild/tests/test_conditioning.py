@@ -25,7 +25,7 @@ def test_frequency_only_hits_knutson_totals() -> None:
     strong_change = conditioning.knutson_percent("cat45", SCENARIO, "NA", events.years) / 100
     assert scaled.frequency.sum() == pytest.approx(events.frequency.sum() * (1 + all_change))
     assert scaled.frequency[1] == pytest.approx(0.01 * (1 + strong_change))
-    assert (scaled.wind != events.wind).nnz == 0
+    np.testing.assert_array_equal(scaled.wind.toarray(), events.wind.toarray())
 
 
 def test_intensity_variant_scales_every_wind_by_the_same_factor() -> None:

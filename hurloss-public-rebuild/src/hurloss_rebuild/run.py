@@ -9,9 +9,20 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
+import geopandas as gpd
+import numpy as np
 import pandas as pd
 
-from hurloss_rebuild import baseline, conditioning, event_sets, forensics, grid, rebuild
+from hurloss_rebuild import (
+    ara_white_paper,
+    baseline,
+    conditioning,
+    event_sets,
+    figures,
+    forensics,
+    grid,
+    rebuild,
+)
 from hurloss_rebuild.hazard import Events
 from hurloss_rebuild.paths import results_dir
 from hurloss_rebuild.scoring import metrics
@@ -43,10 +54,16 @@ def write(table: pd.DataFrame, name: str, index: bool = False) -> Path:
 
 
 def physical_methods(
-    history: Events, present: Events, futures: list[Events], point_county: pd.Series
+    history: Events,
+    present: Events,
+    futures: list[Events],
+    point_county: pd.Series,
+    regions: np.ndarray,
 ) -> dict[str, pd.DataFrame]:
     """Unfloored intensity ratios per county for each public conditioning route."""
     storm_ratio = rebuild.ensemble_ratio(present, futures, point_county)
+    today = rebuild.county_intensity(history, point_county)
+    ara = rebuild.county_intensity(ara_white_paper.condition(history, regions), point_county)
     return {
         "knutson_frequency": rebuild.conditioned_ratios(
             history, point_county, conditioning.frequency_only
@@ -55,6 +72,7 @@ def physical_methods(
             history, point_county, conditioning.intensity_and_frequency
         ),
         "storm_ssp585": pd.DataFrame({"MID_HIGHER": storm_ratio}),
+        "ara_figure_1": pd.DataFrame({"MID_HIGHER": rebuild.ratio(ara, today)}),
     }
 
 
@@ -83,6 +101,32 @@ def score_all(
     return pd.concat(scores, ignore_index=True), pd.concat(details)
 
 
+def draw(
+    shapes: gpd.GeoDataFrame,
+    key: pd.DataFrame,
+    ratios: dict[str, pd.DataFrame],
+    details: pd.DataFrame,
+) -> None:
+    published = {
+        f"FEMA published, {s}": key[f"HRCN_{s}_HM"].where(lambda v: v > 0)
+        for s in ("MID_HIGHER", "LATE_HIGHER")
+    }
+    rebuilt = {
+        "Public: STORM SSP5-8.5 2050 ratio": ratios["storm_ssp585"]["MID_HIGHER"],
+        "Public: Knutson frequency, late higher": ratios["knutson_frequency"]["LATE_HIGHER"],
+    }
+    figures.county_maps(shapes, published, results_dir() / "map_published.png", 1.0, 2.6)
+    figures.county_maps(shapes, rebuilt, results_dir() / "map_rebuilt_ratio.png", 0.6, 1.6)
+    pairs = [
+        ("storm_ssp585", "MID_HIGHER"),
+        ("ara_figure_1", "MID_HIGHER"),
+        ("knutson_frequency", "LATE_HIGHER"),
+        ("knutson_intensity", "LATE_HIGHER"),
+    ]
+    held_out = details[details["subset"] == "held_out"]
+    figures.published_vs_rebuilt(held_out, pairs, results_dir() / "scatter_held_out.png")
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
     timer = Timer()
@@ -91,6 +135,7 @@ def main() -> None:
     key = answer_key.conus(timer.run("answer key", answer_key.load))
     write(forensics.level_summary(key), "answer_key_levels.csv")
     write(forensics.zero_with_losses(key), "answer_key_zero_with_losses.csv", index=True)
+    write(ara_white_paper.compare_with_published(key), "ara_white_paper.csv", index=True)
     shapes = timer.run("counties", counties.load)
     points = timer.run("grid", lambda: grid.build(shapes, step))
     LOG.info("%d grid points cover %d counties", points.lat.size, points.point_county.nunique())
@@ -102,13 +147,16 @@ def main() -> None:
         table = baseline.county_table(events, points.point_county, nri_table)
         write(table, f"baseline_{label}_by_county.csv", index=True)
         write(baseline.agreement(table).assign(event_set=label), f"baseline_{label}.csv")
+    regions = ara_white_paper.point_regions(points.point_county, shapes["STUSPS"])
     ratios = timer.run(
-        "conditioning", lambda: physical_methods(history, present, futures, points.point_county)
+        "conditioning",
+        lambda: physical_methods(history, present, futures, points.point_county, regions),
     )
     tables = rebuilt_tables(ratios, key)
     scores, details = timer.run("scoring", lambda: score_all(tables, key))
     write(scores, "scores.csv")
     write(details, "scores_by_county.csv", index=True)
+    draw(shapes, key, ratios, details)
     write(pd.DataFrame(timer.rows), "timings.csv")
 
 
