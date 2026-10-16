@@ -22,6 +22,12 @@ SCENARIOS = ("1.0 - MED", "2.0 - MED")
 YEARS = (2050, 2100)
 CAP_PER_YEAR = 10.0
 TAIL_POINTS = 6
+# Where each gauge's minor/moderate/major thresholds come from:
+# "published": CO-OPS thresholds, or the nearest gauge's when a gauge has none.
+# "formula": NOAA's derived thresholds from the tide range (Sweet et al. 2018) for every gauge.
+# "formula_missing": published thresholds where they exist, the formula elsewhere.
+THRESHOLD_SOURCE = "published"
+FORMULA = ((0.04, 0.50), (0.03, 0.80), (0.04, 1.17))  # (x GT, + metres) above MHHW
 
 
 def frequency(level: float, levels: np.ndarray, periods: np.ndarray) -> float:
@@ -65,11 +71,21 @@ def rises(gauge: pd.Series) -> dict[tuple[str, int], float]:
     }
 
 
+def formula_thresholds(gauge: pd.Series) -> np.ndarray:
+    datums = coastal.tables()["tidal_datums"]
+    gt = float(datums.loc[datums["station"] == str(gauge["St"]), "gt_m"].iloc[0])
+    return np.array([slope * gt + intercept for slope, intercept in FORMULA])
+
+
 def thresholds(gauge: pd.Series) -> np.ndarray:
-    """NOAA minor, moderate and major thresholds, from the nearest gauge that has them."""
+    """NOAA minor, moderate and major thresholds (m above MHHW) for one gauge."""
+    if THRESHOLD_SOURCE == "formula":
+        return formula_thresholds(gauge)
     tables = coastal.tables()
     known = tables["flood_thresholds"].dropna()
     own = known[known["station"].astype(str) == str(gauge["St"])]
+    if own.empty and THRESHOLD_SOURCE == "formula_missing":
+        return formula_thresholds(gauge)
     if own.empty:
         curves = tables["extreme_water_levels"]
         candidates = curves[curves["St"].astype(str).isin(set(known["station"].astype(str)))]

@@ -109,6 +109,20 @@ def flood_thresholds(stations: list[str]) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def tidal_datums(stations: list[str]) -> pd.DataFrame:
+    """Great diurnal tide range (GT) and MHHW per station, in metres, from CO-OPS datums."""
+    rows = []
+    for station in stations:
+        try:
+            datums = get_json(f"{STATION_API}/{station}/datums.json?units=metric")
+        except Exception:  # noqa: BLE001 - stations without published datums stay blank
+            rows.append({"station": station})
+            continue
+        values = {d["name"]: d["value"] for d in datums.get("datums", [])}
+        rows.append({"station": station, "gt_m": values.get("GT"), "mhhw_m": values.get("MHHW")})
+    return pd.DataFrame(rows)
+
+
 def tables() -> dict[str, pd.DataFrame]:
     """All coastal tables, cached as parquet."""
     builders = {
@@ -133,6 +147,11 @@ def tables() -> dict[str, pd.DataFrame]:
         )
         flood_thresholds(stations).to_parquet(path)
     result["flood_thresholds"] = pd.read_parquet(path)
+    path = cache_path("coastal", "tidal_datums.parquet")
+    if not path.exists():
+        stations = sorted(str(s) for s in result["extreme_water_levels"]["St"].dropna())
+        tidal_datums(stations).to_parquet(path)
+    result["tidal_datums"] = pd.read_parquet(path)
     return result
 
 

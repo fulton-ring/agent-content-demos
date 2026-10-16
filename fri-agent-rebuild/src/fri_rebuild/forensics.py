@@ -9,9 +9,11 @@ structure produced them and where they disagree with FEMA's own documentation:
 4. Whether counties that share a tide gauge lie in a 3-dimensional subspace, as
    HM = sum over sub-types of (gauge factor x county weight) requires. Groups with all four
    scenario values distinct are compared with random groups of the same counties.
-5. Whether the multipliers follow the coastal flooding footprint of the previous NRI release
+5. How far NRI v1.20 (December 2025) has moved coastal flood EAL from v1.19.0, the baseline
+   FEMA's multipliers were applied to.
+6. Whether the multipliers follow the coastal flooding footprint of the previous NRI release
    (v1.18.1, November 2021) rather than v1.19.0, the baseline they were applied to.
-6. How well one candidate recipe for the gauge factors, built from the 2022 Sea Level Rise
+7. How well one candidate recipe for the gauge factors, built from the 2022 Sea Level Rise
    Technical Report (return-level curve, median relative sea level rise, frequencies capped at
    the curve's shortest return period), reproduces each county with non-negative weights.
 
@@ -100,6 +102,47 @@ def previous_release() -> pd.DataFrame:
         table["STCOFIPS"] = table["STCOFIPS"].str.zfill(5)
         table[["STCOFIPS", "NRI_VER", "CFLD_EALT"]].to_parquet(target)
     return pd.read_parquet(target).set_index("STCOFIPS")
+
+
+NRI_V120_COUNTIES = (
+    "https://services.arcgis.com/XG15cJAlne2vxtgt/arcgis/rest/services/"
+    "National_Risk_Index_Counties/FeatureServer/0/query"
+)
+
+
+def current_release() -> pd.DataFrame:
+    """NRI v1.20 (December 2025) county coastal flood EAL, from FEMA's ArcGIS feature service."""
+    target = cache_path("forensics", "nri_v1_20_counties.parquet")
+    if not target.exists():
+        rows, offset = [], 0
+        while True:
+            params = {
+                "where": "1=1",
+                "outFields": "STCOFIPS,NRI_VER,CFLD_EALT",
+                "returnGeometry": "false",
+                "resultOffset": offset,
+                "resultRecordCount": 2000,
+                "f": "json",
+            }
+            response = http.session().get(NRI_V120_COUNTIES, params=params, timeout=120)
+            response.raise_for_status()
+            features = response.json()["features"]
+            rows += [feature["attributes"] for feature in features]
+            if len(features) < 2000:
+                break
+            offset += 2000
+        pd.DataFrame(rows).to_parquet(target)
+    return pd.read_parquet(target).set_index("STCOFIPS")
+
+
+def baseline_drift(table: pd.DataFrame) -> pd.DataFrame:
+    """Coastal flood EAL in NRI v1.19.0 (FEMA's baseline) against v1.20, with FEMA's HM."""
+    current = current_release()["CFLD_EALT"].rename("CFLD_EALT_v1_20")
+    rows = table[["STATEABBRV", "COUNTY", "CFLD_EALT", COLUMNS[0]]].join(current, how="outer")
+    rows["coastal_in_v1_19"] = rows["CFLD_EALT"].fillna(0) > 0
+    rows["coastal_in_v1_20"] = rows["CFLD_EALT_v1_20"].fillna(0) > 0
+    rows["ratio_v1_20_over_v1_19"] = rows["CFLD_EALT_v1_20"] / rows["CFLD_EALT"]
+    return rows[rows["coastal_in_v1_19"] | rows["coastal_in_v1_20"]]
 
 
 def footprint(table: pd.DataFrame) -> pd.DataFrame:
@@ -234,6 +277,7 @@ def main() -> None:
         "coastal_hm_below_one.csv": below_one(table, gauges),
         "coastal_late_equality_by_state.csv": late_equality(table),
         "coastal_footprint_v1_18_1.csv": footprint(table),
+        "coastal_baseline_drift_v1_20.csv": baseline_drift(answer_key.load()),
         "coastal_gauge_rank_test.csv": subspace_test(table, gauges),
         "coastal_recipe_fit.csv": recipe_fit(table, gauges),
     }
