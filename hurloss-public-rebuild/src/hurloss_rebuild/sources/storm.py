@@ -13,6 +13,7 @@ from pathlib import Path
 
 from remotezip import RemoteZip
 
+from hurloss_rebuild import http
 from hurloss_rebuild.paths import cache_path
 
 PRESENT_ZIP = (
@@ -46,7 +47,7 @@ def fetch(model: str | None, index: int) -> Path:
     if target.exists():
         return target
     url = PRESENT_ZIP if model is None else FUTURE_DATASET + FUTURE_ZIPS[model]
-    with RemoteZip(url) as archive:
+    with RemoteZip(url, session=http.session()) as archive:
         matches = [info for info in archive.infolist() if info.filename.endswith("/" + name)]
         matches += [info for info in archive.infolist() if info.filename == name]
         if len(matches) != 1:
