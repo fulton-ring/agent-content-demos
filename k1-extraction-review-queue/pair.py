@@ -73,22 +73,28 @@ def main():
     b = json.loads((dir_b / "extracted.json").read_text())
     na, nb = name_of(dir_a), name_of(dir_b)
     docs_b = {d["file"]: d for d in b["documents"]}
-    missing = [d["file"] for d in a["documents"] if d["file"] not in docs_b]
-    if missing or len(a["documents"]) != len(b["documents"]):
-        sys.exit(f"the two runs don't cover the same documents: {missing or 'different counts'}")
-    docs = [combine(d, docs_b[d["file"]], na, nb, dir_a) for d in a["documents"]]
+    # A document either model failed on can't be checked by both, so it counts as failed for the pair too.
+    docs = [combine(d, docs_b[d["file"]], na, nb, dir_a) for d in a["documents"] if d["file"] in docs_b]
+    if not docs:
+        sys.exit("the two runs have no documents in common")
+    done = {d["file"] for d in docs}
+    failed = {f["file"]: f["error"] for run in (a, b) for f in run.get("failed_documents", [])}
+    failed.update({d["file"]: "only one model read it" for run in (a, b) for d in run["documents"]
+                   if d["file"] not in done and d["file"] not in failed})
     out = HERE / "output" / f"pair-{na}+{nb}"
     out.mkdir(parents=True, exist_ok=True)
     (out / "extracted.json").write_text(json.dumps({
         "pipeline": "two vision-language models that must agree", "model": f"{a['model']} checked by {b['model']}",
-        "models": [a["model"], b["model"]], "documents": docs}, indent=1))
+        "models": [a["model"], b["model"]], "documents": docs,
+        "failed_documents": [{"file": f, "error": e} for f, e in sorted(failed.items())]}, indent=1))
     n = sum(len(d["fields"]) for d in docs)
     r = sum(f["status"] == "review" for d in docs for f in d["fields"])
     known = [d["cost_usd"] for d in docs if not d["cost_missing_responses"]]
     cost = f"${sum(known) / len(known):.4f} per document" if known else "no known cost"
     unknown = len(docs) - len(known)
     print(f"{out.name}: {len(docs)} documents, {n} values, {r} to review, {cost}"
-          + (f" ({unknown} documents with an unknown cost left out)" if unknown else ""))
+          + (f" ({unknown} documents with an unknown cost left out)" if unknown else "")
+          + (f"; {len(failed)} documents failed: {', '.join(sorted(failed))}" if failed else ""))
 
 
 if __name__ == "__main__":

@@ -28,7 +28,7 @@ from pathlib import Path
 import modal
 
 import ocr_modal
-from extract_vlm import (FORMS, K1_LABELS, LAYOUT, SAMPLES, Brokerage1099, LPage, Runner, k1_1065_labels, k1_kind,
+from extract_vlm import (FORMS, K1_LABELS, LAYOUT, PARTIAL_EXIT, SAMPLES, Brokerage1099, LPage, Runner, k1_1065_labels, k1_kind,
                          model_fields, near_empty, page_png, slug)
 
 HERE = Path(__file__).parent
@@ -184,6 +184,8 @@ async def run(engine, model_name, files):
     out_dir = HERE / "output" / f"{engine}+{slug(model_name)}"
     (out_dir / "pages").mkdir(parents=True, exist_ok=True)
 
+    failures = {}
+
     async def one(path, index):
         page = next(p for p in layouts[path] if p.index == index)
         o = ocr[(path.name, index)]
@@ -191,7 +193,8 @@ async def run(engine, model_name, files):
         try:
             form, year, out = await structure(runner, path, page, text, engine)
         except Exception as e:
-            print(f"{path.name}: failed: {type(e).__name__}: {str(e)[:200]}")
+            failures[path.name] = f"{type(e).__name__}: {str(e)[:200]}"
+            print(f"{path.name}: failed: {failures[path.name]}")
             return None
         if form is None:
             fields = [{"key": "page", "label": "The whole page", "value": None, "raw": "", "page": index, "bbox": None,
@@ -224,16 +227,22 @@ async def run(engine, model_name, files):
 
     results = await asyncio.gather(*(one(path, index) for path, index in jobs))
     docs = sorted((d for d in results if d), key=lambda d: d["file"])
-    failed = [path.name for (path, _i), d in zip(jobs, results) if not d]
+    failed = [{"file": path.name, "error": failures.get(path.name, "no result")}
+              for (path, _i), d in zip(jobs, results) if not d]
     (out_dir / "extracted.json").write_text(json.dumps({
         "pipeline": "OCR, then a text model alone", "label": f"{engine} OCR + {slug(model_name)} on the text",
-        "model": model_name, "ocr": ENGINES[engine], "documents": docs}, indent=1))
+        "model": model_name, "ocr": ENGINES[engine], "documents": docs,
+        "failed_documents": failed}, indent=1))
     for d in docs:
         n = sum(f["status"] == "review" for f in d["fields"])
         print(f"{d['file']:38s} {str(d['form']):6s} {len(d['fields']):3d} values, {n:2d} to review, ${d['cost_usd']:.4f}")
     print(f"{out_dir.name}: {len(docs)} documents")
+    if not docs:
+        sys.exit(f"{out_dir.name}: every document failed, so there are no results")
     if failed:
-        sys.exit(f"{len(failed)} documents failed and aren't in the results: {', '.join(failed)}. Run again.")
+        # Scored on the documents that finished, with the failed ones listed, as in extract_vlm.py.
+        print(f"{out_dir.name}: {len(failed)} documents failed every retry: {', '.join(f['file'] for f in failed)}")
+        sys.exit(PARTIAL_EXIT)
 
 
 def main():

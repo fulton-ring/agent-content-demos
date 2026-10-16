@@ -69,6 +69,7 @@ IMAGE_DPI = 200  # what the model sees
 CONFIDENCE_MIN = 0.9
 PARALLEL = 6
 THINKING = "low"
+PARTIAL_EXIT = 3  # some documents failed every retry; the rest are in the results
 
 
 # ---------------------------------------------------------------- what the model returns
@@ -807,12 +808,15 @@ async def main():
         files = [f for f in files if any(a in f.name for a in args[1:])]
     runner = Runner(model_name, prompted)
     runner.model_only = model_only
+    failures = {}
 
     async def one(path):
         try:
             d = await process(runner, path, out_dir)
         except Exception as e:
-            print(f"{path.name}: failed: {type(e).__name__}: {str(e)[:200]}")
+            error = f"{type(e).__name__}: {str(e)[:200]}"
+            print(f"{path.name}: failed: {error}")
+            failures[path.name] = error
             return None
         if d:
             n_review = sum(f["status"] == "review" for f in d["fields"])
@@ -822,18 +826,24 @@ async def main():
 
     results = await asyncio.gather(*(one(p) for p in files))
     docs = sorted((d for d in results if d), key=lambda d: d["file"])
-    failed = [p.name for p, d in zip(files, results) if not d]
+    failed = [{"file": name, "error": failures.get(name, "no result")} for name in
+              (p.name for p, d in zip(files, results) if not d)]
     (out_dir / "extracted.json").write_text(json.dumps({
         "pipeline": "vision-language model alone" if model_only else "Docling + vision-language model", "model": model_name, "thinking": THINKING,
         "confidence_min": CONFIDENCE_MIN,
-        "image_dpi": IMAGE_DPI, "documents": docs}, indent=1))
+        "image_dpi": IMAGE_DPI, "documents": docs, "failed_documents": failed}, indent=1))
     total = sum(d["cost_usd"] for d in docs)
     missing = sum(d["cost_missing_responses"] for d in docs)
     print(f"{model_name}: {len(docs)} documents, ${total:.4f} in all, ${total / max(1, len(docs)):.4f} per document"
           + (f", plus {missing} responses with no known cost" if missing else ""))
+    if not docs:
+        sys.exit(f"{model_name}: every document failed, so there are no results")
     if failed:
-        # Scoring a run with documents missing would make the results look better than they are.
-        sys.exit(f"{len(failed)} documents failed and aren't in the results: {', '.join(failed)}. Run again.")
+        # The run is scored on the documents that finished; the failed ones are listed in extracted.json and every
+        # report, so a model that can't read some documents doesn't look better than it is. run.sh reads this exit
+        # code as "partial results" rather than as a crash.
+        print(f"{model_name}: {len(failed)} documents failed every retry: {', '.join(f['file'] for f in failed)}")
+        sys.exit(PARTIAL_EXIT)
 
 
 if __name__ == "__main__":

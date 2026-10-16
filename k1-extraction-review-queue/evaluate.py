@@ -165,7 +165,9 @@ def main():
                "made_up": summarize([r for r in rows if r["group"] == "made-up"]),
                "by_source": {f"{st} / {g} / {lv}": summarize(rs) for (st, g, lv), rs in sorted(by.items(), reverse=True)},
                "seconds_per_document": round(sum(d["seconds"] for d in data["documents"]) / max(1, len(data["documents"])), 1),
-               "engine": data.get("tesseract") or data.get("model")}
+               "engine": data.get("tesseract") or data.get("model"),
+               # Documents the model failed on every retry: not scored above, so the counts are over the rest.
+               "failed_documents": [f["file"] for f in data.get("failed_documents", [])]}
     if any("cost_usd" in d for d in data["documents"]):
         # Some responses can have no known cost (neither the provider nor Pydantic AI's price table had one). Those
         # documents are left out of the average and counted, so the gap is visible rather than read as free.

@@ -37,18 +37,36 @@ MODELS=(
   "openrouter:z-ai/glm-5.3-flash glm-5.3-flash"
   "openrouter:google/gemma-4-31b-it gemma-4-31b-it"
 )
+# The pair (below) and the screenshots need these two. The other models are for comparison: if one fails on some
+# documents it is scored on the rest and its failed documents are listed; if it produces nothing it is left out.
+REQUIRED=" gemini-3.8-flash qwen3.8-27b "
+PARTIAL=3  # extract_vlm.py's exit code when some documents failed every retry
 pids=()
 for m in "${MODELS[@]}"; do
   set -- $m
   id=$1; name=$2; shift 2
+  rm -rf "output/$name-alone"  # so a model that crashes can't leave an earlier run's results to be scored
   $PY extract_vlm.py "$id" --model-only "$@" > "output-$name.log" 2>&1 &
   pids+=($!)
 done
-for p in "${pids[@]}"; do wait "$p" || { echo "a model run failed; see output-*.log"; exit 1; }; done
-for m in "${MODELS[@]}"; do
-  set -- $m
-  $PY evaluate.py "output/$2-alone" > /dev/null
-  $PY report.py "output/$2-alone"
+scored=()
+for i in "${!MODELS[@]}"; do
+  set -- ${MODELS[$i]}
+  name=$2
+  status=0
+  wait "${pids[$i]}" || status=$?
+  if [ "$status" -eq "$PARTIAL" ]; then
+    echo "$name: some documents failed every retry and aren't scored; see output-$name.log"
+  elif [ "$status" -ne 0 ]; then
+    echo "$name produced no results; see output-$name.log"
+    [[ "$REQUIRED" == *" $name "* ]] && exit 1
+    continue
+  fi
+  scored+=("$name")
+done
+for name in "${scored[@]}"; do
+  $PY evaluate.py "output/$name-alone" > /dev/null
+  $PY report.py "output/$name-alone"
 done
 
 for pair in "gemini-3.8-flash qwen3.8-27b"; do
@@ -65,7 +83,14 @@ if [ -n "${MODAL_TOKEN_ID:-}" ]; then
   export MODAL_IMAGE_BUILDER_VERSION=2025.06
   .venv/bin/modal run ocr_modal.py::download
   for engine in olmocr granite-docling; do
-    $PY extract_ocr.py $engine openrouter:google/gemini-3.8-flash > "output-$engine.log" 2>&1 || { echo "$engine failed; see output-$engine.log"; exit 1; }
+    rm -rf "output/$engine+gemini-3.8-flash"
+    status=0
+    $PY extract_ocr.py $engine openrouter:google/gemini-3.8-flash > "output-$engine.log" 2>&1 || status=$?
+    if [ "$status" -ne 0 ] && [ "$status" -ne "$PARTIAL" ]; then
+      echo "$engine produced no results; see output-$engine.log"
+      continue
+    fi
+    [ "$status" -eq 0 ] || echo "$engine: some documents failed every retry and aren't scored; see output-$engine.log"
     $PY evaluate.py "output/$engine+gemini-3.8-flash" > /dev/null
     $PY report.py "output/$engine+gemini-3.8-flash"
   done

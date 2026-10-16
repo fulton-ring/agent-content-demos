@@ -57,19 +57,26 @@ def main():
                        f"| {s['silent_errors']} |")
         out.append("")
     out += ["## Cost and time per document", "",
-            "Cost counts every attempt, including retries that failed. A document with any response of unknown cost is "
-            "left out of the average and counted in the last column.", "",
-            "| Pipeline | Cost | Model time | Docling time | Total time | Failed attempts | Documents with unknown cost |",
-            "|---|---|---|---|---|---|---|"]
+            ("Cost counts every attempt, including retries that failed. A document with any response of unknown cost "
+             "is left out of the average and counted. A failed document is one the model couldn't read on any retry; "
+             "it isn't scored in the tables above."), "",
+            ("| Pipeline | Cost | Model time | Docling time | Total time | Failed attempts "
+             "| Documents with unknown cost | Failed documents |"),
+            "|---|---|---|---|---|---|---|---|"]
     for name, m in loaded:
         if "cost_usd_per_document" in m:
             cost = "unknown" if m["cost_usd_per_document"] is None else f"${m['cost_usd_per_document']:.4f}"
             out.append(f"| {name} | {cost} | {m['model_seconds_per_document']}s "
                        f"| {m['docling_seconds_per_document']}s | {m['seconds_per_document']}s "
-                       f"| {m.get('failed_attempts', 0)} | {len(m.get('cost_unknown_documents', []))} |")
+                       f"| {m.get('failed_attempts', 0)} | {len(m.get('cost_unknown_documents', []))} "
+                       f"| {len(m.get('failed_documents', []))} |")
         else:
-            out.append(f"| {name} | $0 | none | none | {m['seconds_per_document']}s | 0 | 0 |")
+            out.append(f"| {name} | $0 | none | none | {m['seconds_per_document']}s | 0 | 0 | 0 |")
     out.append("")
+    for name, m in loaded:
+        if m.get("failed_documents"):
+            out.append(f"Failed documents, {name}: " + ", ".join(m["failed_documents"]) + ".")
+            out.append("")
     for name, m in loaded:
         if "statement_lines" in m:
             st = m["statement_lines"]
