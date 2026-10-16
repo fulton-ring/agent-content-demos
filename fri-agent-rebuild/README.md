@@ -480,6 +480,94 @@ missing from 1 as the floodplain share. The variants are:
   - FEMA's multipliers were never refit to v1.19.0 (see the v1.18.1 footprint above). Applying
     them to v1.20 would widen the mismatch.
 
+## Pilot: coastal multipliers by tract, built from buildings (Charleston County, SC)
+
+FEMA publishes coastal multipliers per county only, so every building in a county gets the same
+percentage change. This pilot tests whether finer data changes the answer, with the idea of
+republishing at census tract level: NRI's tract EAL (the economic side, refreshed each release)
+times a tract multiplier (the climate side, which changes slowly). Run it with
+`uv run python -m fri_rebuild.structure_pilot` (any county and gauge can be passed; Charleston
+County 45019 and gauge 8665530 are the defaults). Outputs are in `results/structure_pilot/`:
+tract table, county summary, map and log. Only tract aggregates are written, no building
+records.
+
+**How it works.** This is a scenario model, not FEMA's method and not a forecast.
+
+- **Buildings.** All 166,665 buildings in the USACE National Structure Inventory, each with
+  ground elevation (USGS 3DEP, NAVD88), foundation height and structure plus contents value.
+  First-floor height above high tide (MHHW) uses the gauge's CO-OPS datums (MHHW is 0.80 m
+  above NAVD88).
+- **Water levels.** The gauge's 2022 return-level curve, the same curve FEMA's recipe reads,
+  shifted up by the same median sea level rise: 0.37/0.49 m by 2050 and 1.16/2.09 m by 2100
+  (lower/higher).
+- **Damage.** Expected annual damage from the yearly highest water and a generic depth-damage
+  curve (USACE EGM 04-01). A tract's multiplier is the sum of its buildings' future damage over
+  the sum of today's damage.
+- **Sensitivity variants.** "step" counts any water at the first floor as a total loss.
+  "ground" ignores foundation height.
+- **Left out.** 244 buildings ($952M) sit below today's 1-year water level. In this model they
+  flood every year already; they are mostly piers and port structures in V zones, ground
+  elevations taken over water, or buildings behind defences. A first version kept them and
+  counted up to 10 floods a year. They then dominated their tracts, pinned those multipliers
+  near 1, and made the tract spread look three times wider (1.1x-10.5x) than it is. That
+  version was a modelling artefact, not a finding.
+
+**Results, mid-century (the only horizon we'd stand behind).** Ranges are across the three
+variants.
+
+| | Mid-century, lower | Mid-century, higher |
+|---|---|---|
+| FEMA county multiplier | 4.81 | 7.60 |
+| Building model, whole county | 3.16-4.83 | 4.25-7.46 |
+| Tract multipliers (min-max, depth-damage curve) | 2.45-4.55 | 3.19-6.96 |
+| Tract vs its own county value | 0.54x-1.38x | 0.42x-1.52x |
+| Tracts more than 2x from FEMA's county value | 0 of 94 | 1-7 of 94 |
+| Sum of tract projected loss (NRI tract EAL x tract HM) | $4.1M-5.3M/yr | $5.6M-8.1M/yr |
+| FEMA county projected loss (county EAL x county HM) | $5.97M/yr | $9.42M/yr |
+| Tract ranking vs one county multiplier for all (Spearman) | 0.98-0.99 | 0.98-0.99 |
+
+- **Within the county the multiplier varies about ±30-50%, not by multiples.**
+  - Two kinds of tract score lowest, at 2.5-2.9x:
+    - Inland tracts toward Summerville and Ladson, which only the rarest floods reach. Rare
+      floods grow more slowly as the sea rises.
+    - The lowest-lying tracts: the tip of the peninsula and the Neck. In this model they already
+      flood almost every year, and a yearly chance cannot grow much past that.
+  - The highest, at 4.1-4.6x, sit in between: the Isle of Palms, Kiawah/Seabrook, Mount
+    Pleasant, West Ashley and the Ashley River side of North Charleston. Their buildings are
+    reached by today's 5-50 year floods, and those floods become several times more frequent.
+  - **This pattern depends on the convention of one damaging flood a year.** FEMA's recipe
+    instead counts flood days, capped at 10 a year. Under that convention the lowest tracts
+    would score highest. The convention would need settling before anything is published.
+- **The economic side drives where the losses are.**
+  - NRI tract EAL runs from $0 to $113K. Using a tract multiplier instead of one county value
+    barely reorders tracts (rank correlation 0.98-0.99).
+  - The building model's own damage-today ranks tracts much as NRI does (rank correlation
+    0.75).
+  - In absolute terms it is about 260 times NRI's coastal EAL ($321M against $1.24M a year).
+    It counts storm-tide damage that NRI files under hurricane, and it has no defences. Only
+    its ratios are used.
+- **Late century the bathtub breaks down, as FEMA's method does.**
+  - By 2100, the 1.2-2.1 m rises put much of the county below today's yearly water levels.
+  - Tract multipliers spread to 6-60x (lower) and 10-970x (higher), and 9-90 of 94 tracts end
+    up more than 2x from FEMA's capped county value.
+  - These figures show the method's limit, not a loss estimate.
+- **Building level vs tract level.**
+  - Building data is useful for computing a tract multiplier: it shows where buildings sit
+    relative to the water.
+  - Publishing below tract level would claim precision the inputs do not have:
+    - one tide gauge for the whole county;
+    - a 10 m elevation model;
+    - modelled foundation heights;
+    - no flow paths or defences.
+  - The structure inventory also contains modelled values for individual private buildings.
+- **Not covered.**
+  - Local differences in water level: tidal amplification up the rivers, and surge and waves
+    on the open coast.
+  - Hydrologic connectivity, i.e. whether low ground is actually connected to the water.
+  - Defences: the Battery seawall and the drainage tunnels.
+  - Other Charleston-area gauges (only 8665530 is used).
+  - NOAA's sea-level-rise inundation layers, which handle connectivity, are the next refinement.
+
 ## What failed or wasn't covered
 
 - **Hurricane wind** was not attempted. FEMA's input is Applied Research Associates'
@@ -512,6 +600,7 @@ missing from 1 as the floodplain share. The variants are:
     `forensics/recipes/`.
   - The loop: `swarm.py`.
   - Outputs: `report.py`, `downscale.py`; `prepare.py` downloads everything.
+  - Charleston pilot: `structure_pilot.py` (tract coastal multipliers from building records).
 - `hazards/<hazard>/program.md` and `pipeline.py`: the human brief (with any dated
   interventions) and the final pipeline, for `extreme_heat` (NEX), `extreme_heat_loca2`,
   `drought`, `wildfire` and `coastal_flooding`.
@@ -520,5 +609,6 @@ missing from 1 as the floodplain share. The variants are:
 - `results/scores.csv`, `results/largest_differences.csv`, `results/swarm_summary.csv`,
   `results/kept_pipelines_held_out.csv`, `results/county_hm_<hazard>.csv`: clean-run outputs.
 - `results/tracts/`: the California tract table, the roll-up table and the map.
+- `results/structure_pilot/`: the Charleston County tract table, summary, map and log.
 - `results/claude-code-subagents/`: the Claude Code comparison runs for wildfire and coastal
   flooding.
