@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{{ p.organization }} AI use policy</title>
+<style>{{ css }}</style>
+</head>
+<body>
+<div class="sheet">
+<header>
+  <h1>{{ p.organization }} AI use policy</h1>
+  <div class="meta">Draft for board review · Effective when the board approves it · Owner: {{ p.owner }} · Next review: {{ p.next_review }}</div>
+</header>
+<div class="lede">
+  <p><strong>Why we have this policy.</strong> {{ p.why }}</p>
+  <p><strong>Who it covers.</strong> {{ p.who_it_covers }}</p>
+</div>
+<div class="columns">
+<section>
+  <h2>Tools we use</h2>
+  <ul>
+    {% for t in p.tools %}<li><strong>{{ t.name }}:</strong> {{ t.approved_for }}</li>{% else %}<li>No AI tool is approved yet.</li>{% endfor %}
+    <li><strong>New tools, add-ons and AI features.</strong> {{ p.new_tools }}</li>
+    <li><strong>Accounts.</strong> {{ p.accounts }}</li>
+  </ul>
+</section>
+<section>
+  <h2><span class="dot go"></span>What you can use AI for</h2>
+  <ul>
+    <li><strong>Everyone, now.</strong> {{ p.everyone_now }}</li>
+    {% for b in p.allowed_uses %}<li>{{ b }}</li>{% endfor %}
+  </ul>
+</section>
+<section>
+  <h2><span class="dot ask"></span>Needs approval first</h2>
+  <ul>{% for r in p.needs_approval %}<li>{{ r.use }} — <em>{{ r.approver }}</em></li>{% endfor %}</ul>
+</section>
+<section>
+  <h2><span class="dot stop"></span>Off limits</h2>
+  <ul>
+    <li><strong>Never put this into an AI tool</strong> unless the tool is approved for it above: {{ p.protected_information }}</li>
+    {% for b in p.off_limits %}<li>{{ b }}</li>{% endfor %}
+  </ul>
+</section>
+<section>
+  <h2>Check everything before it goes out</h2>
+  <ul>{% for b in p.check_before_it_goes_out %}<li>{{ b }}</li>{% endfor %}</ul>
+</section>
+<section>
+  <h2>Decisions about people</h2>
+  <ul>{% for b in p.decisions_about_people %}<li>{{ b }}</li>{% endfor %}</ul>
+</section>
+<section>
+  <h2>Being open about AI</h2>
+  <ul>{% for b in p.being_open %}<li>{{ b }}</li>{% endfor %}</ul>
+</section>
+<section>
+  <h2>If something goes wrong</h2>
+  <ul>{% for b in p.if_something_goes_wrong %}<li>{{ b }}</li>{% endfor %}</ul>
+</section>
+<section>
+  <h2>Who owns this policy</h2>
+  <ul>{% for b in p.who_owns_this %}<li>{{ b }}</li>{% endfor %}</ul>
+</section>
+{% if p.open_questions %}
+<section class="open">
+  <h2>Open questions for the board</h2>
+  <ul>{% for b in p.open_questions %}<li>{{ b }}</li>{% endfor %}</ul>
+</section>
+{% endif %}
+</div>
+<footer>Sample policy for an invented organization, drafted by Fulton Ring from a mock 30-minute call. Not legal advice; not reviewed by a real nonprofit.</footer>
+</div>
+</body>
+</html>
