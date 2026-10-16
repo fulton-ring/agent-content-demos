@@ -26,7 +26,7 @@ from hurloss_rebuild import (
 from hurloss_rebuild.hazard import Events
 from hurloss_rebuild.paths import results_dir
 from hurloss_rebuild.scoring import metrics
-from hurloss_rebuild.sources import answer_key, counties, nri
+from hurloss_rebuild.sources import answer_key, counties, nri, storm
 
 LOG = logging.getLogger("hurloss")
 
@@ -161,6 +161,8 @@ def main() -> None:
         "nri_v1_19_eal": key["HRCN_EALT"],
     }
     write(forensics.rank_against(key, hazard_level), "published_vs_hazard_level.csv")
+    by_gcm = dict(zip(storm.FUTURE_ZIPS, futures, strict=True))
+    write(rebuild.gcm_spread(present, by_gcm, points.point_county), "storm_gcm_ratios.csv")
     regions = ara_white_paper.point_regions(points.point_county, shapes["STUSPS"])
     ratios = timer.run(
         "conditioning",

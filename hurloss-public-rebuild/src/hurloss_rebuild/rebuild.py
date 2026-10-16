@@ -67,3 +67,21 @@ def plus_one(ratios: pd.DataFrame) -> pd.DataFrame:
 
 def drop_nonfinite(table: pd.DataFrame) -> pd.DataFrame:
     return table.replace([np.inf, -np.inf], np.nan)
+
+
+def gcm_spread(
+    present: Events, futures: dict[str, Events], point_county: pd.Series
+) -> pd.DataFrame:
+    """Per GCM and for the equal-weight ensemble: quantiles of the county intensity ratio."""
+    today = county_intensity(present, point_county)
+    ratios = {
+        name: ratio(county_intensity(events, point_county), today)
+        for name, events in futures.items()
+    }
+    ratios["ensemble"] = ensemble_ratio(present, list(futures.values()), point_county)
+    rows = [
+        {"gcm": name, "counties": int(values.notna().sum())}
+        | {f"q{int(q * 100):02d}": values.quantile(q) for q in (0.05, 0.25, 0.5, 0.75, 0.95)}
+        for name, values in ratios.items()
+    ]
+    return pd.DataFrame(rows)
