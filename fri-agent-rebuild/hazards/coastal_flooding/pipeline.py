@@ -16,8 +16,8 @@ SEVERITIES = ("minor", "moderate", "major")
 SCENARIOS = {"LOWER": "intermediate", "HIGHER": "high"}
 DECADES = {"MID": 2050, "LATE": 2100}
 CURRENT_DECADES = (2030,)
-# Midpoints of the documented annual-chance bands: minor 50-100%, moderate 2-10%, major 1%.
-ANNUAL_CHANCE = pd.Series({"minor": 0.75, "moderate": 0.06, "major": 0.01})
+# Documented annual-chance bands: minor 50-100% (upper end, 1-year flood), moderate 2-10%, major 1%.
+ANNUAL_CHANCE = pd.Series({"minor": 1.0, "moderate": 0.06, "major": 0.01})
 
 
 def saturate(days):
