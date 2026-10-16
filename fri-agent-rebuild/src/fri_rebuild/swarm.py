@@ -54,7 +54,7 @@ Hard rules (a candidate that breaks them is rejected without being run):
 - Never read the published multipliers, the answer key, the scorer, or the train/held-out split.
   No per-state or per-county adjustments, lookup tables, or constants fitted to the published
   values. Scores on other states are hidden from you and are what decides success.
-- Use only `fri_rebuild.inputs` for data, plus numpy, pandas and scipy.
+- Use only `fri_rebuild.inputs` for data, plus numpy, pandas, scipy and geopandas.
 - Keep `hazard_multipliers()` returning the same columns, indexed by county FIPS.
 - The pipeline must finish in under 20 minutes on 4 CPU cores and 16 GB of RAM. Loading one
   variable for one 30-year period is about 0.6 GB as float32; free arrays you no longer need.

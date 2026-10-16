@@ -6,6 +6,7 @@ shaped (time, cell). Cell order matches the columns of `county_weights()`.
 
 from functools import cache
 
+import geopandas as gpd
 import numpy as np
 import pandas as pd
 from scipy import sparse
@@ -184,3 +185,29 @@ def loca2_county_weights() -> tuple[sparse.csr_matrix, pd.Index]:
 
     _, weights, fips = loca2.county_weights()
     return weights, fips
+
+
+def coastal_tables() -> dict[str, pd.DataFrame]:
+    """NOAA tide-gauge tables for coastal flooding (see fri_rebuild.coastal for sources).
+
+    Keys: htf_decadal (projected flood days/year by station, decade 2020-2100, severity and 2022
+    scenario: low, intLow, intermediate, intHigh, high), htf_observed (observed flood days per
+    meteorological year and severity), extreme_water_levels (187 gauges: return levels in m above
+    MHHW for 0.1-100 year return periods, adjusted to 2000), sea_level_projections (relative sea
+    level rise in cm by scenario and decade, per gauge and 1-degree grid) and flood_thresholds
+    (NOAA minor/moderate/major thresholds in m above MHHW).
+    """
+    from fri_rebuild import coastal
+
+    return coastal.tables()
+
+
+def county_shapes() -> gpd.GeoDataFrame:
+    """CONUS county polygons (a GeoDataFrame, EPSG:4269) indexed by FIPS."""
+    _, fips = _conus_county_weights()
+    return geo.counties().loc[fips]
+
+
+def points(table: pd.DataFrame, lon: str = "lon", lat: str = "lat") -> gpd.GeoDataFrame:
+    """Turn a table with lon/lat columns into a point GeoDataFrame (EPSG:4326)."""
+    return geo.points(table, lon, lat)

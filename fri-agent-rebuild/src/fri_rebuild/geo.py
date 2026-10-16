@@ -79,3 +79,10 @@ def area_weights(
         pd.DataFrame({"area_id": rows}).to_parquet(ids_path)
     ids = pd.Index(pd.read_parquet(ids_path)["area_id"])
     return sparse.csr_matrix(sparse.load_npz(target)), ids
+
+
+def points(table: pd.DataFrame, lon: str = "lon", lat: str = "lat") -> gpd.GeoDataFrame:
+    """A GeoDataFrame (EPSG:4326) of the table's rows placed at their lon/lat columns."""
+    geometry = gpd.points_from_xy(table[lon].astype(float), table[lat].astype(float))
+    # geopandas ships no type stubs that agree with pandas-stubs' DataFrame overloads.
+    return gpd.GeoDataFrame(table, geometry=geometry, crs="EPSG:4326")  # ty: ignore[no-matching-overload]
