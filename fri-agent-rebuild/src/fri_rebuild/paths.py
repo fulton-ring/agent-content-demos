@@ -6,6 +6,7 @@ from pathlib import Path
 PROJECT_DIR = Path(__file__).resolve().parents[2]
 RESULTS_DIR = PROJECT_DIR / "results"
 HAZARDS_DIR = PROJECT_DIR / "hazards"
+EXPERIMENTS_DIR = PROJECT_DIR / "experiments"
 
 
 def cache_dir() -> Path:

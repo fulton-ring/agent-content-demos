@@ -1,6 +1,11 @@
-"""Download every input once into the cache (outside the repo). Safe to rerun."""
+"""Download every input once into the cache (outside the repo). Safe to rerun.
 
-from fri_rebuild import answer_key, coastal, fwi, geo, inputs, landfire, loca2, nex, nri
+Usage: uv run fri-prepare
+"""
+
+from fri_rebuild import inputs
+from fri_rebuild.scoring import answer_key
+from fri_rebuild.sources import fwi, geo, landfire, loca2, nex, nri, tide_gauges
 
 
 def main() -> None:
@@ -14,7 +19,7 @@ def main() -> None:
     lat, lon = inputs.grid()
     geo.area_weights(counties.loc[key.index], lat, lon, "counties")
     landfire.fuel_shares(counties.loc[key.index], "counties")
-    coastal.tables()
+    tide_gauges.tables()
     loca2.build_all()
     print("inputs ready")
 

@@ -38,14 +38,25 @@ is where each landed on the 12 states the agents never saw:
 ./run.sh
 ```
 
-`run.sh` needs [uv](https://docs.astral.sh/uv/) and about 35 GB of free disk. It does three
+`run.sh` needs [uv](https://docs.astral.sh/uv/) and about 35 GB of free disk. It does two
 things:
 
-1. Downloads every input into `~/.cache/fri-agent-rebuild` (set `FRI_CACHE` to move it). Nothing
-   downloaded goes into the repo.
-2. Runs each hazard's final pipeline (`hazards/<hazard>/pipeline.py`) and scores it against
-   FEMA's published county values on training and held-out states.
-3. Builds the tract-level output.
+1. Downloads every input into `~/.cache/fri-agent-rebuild` (`uv run fri-prepare`; set
+   `FRI_CACHE` to move it). Nothing downloaded goes into the repo.
+2. Runs the five [marimo](https://marimo.io) notebooks in `notebooks/` as scripts. Each one
+   writes its own folder under `results/`:
+
+| Notebook | What it does | Writes |
+|---|---|---|
+| `rebuild.py` | Runs each hazard's final pipeline (`hazards/<hazard>/pipeline.py`), scores it against FEMA's published county values on training and held-out states, and summarizes the agent logs | `results/rebuild/` |
+| `tracts.py` | The census-tract layer (California drought by default) | `results/tracts/` |
+| `coastal_forensics.py` | Reverse engineering FEMA's coastal multipliers (answer key open) | `results/coastal_forensics/` |
+| `coastal_scenarios.py` | What-if coastal multipliers (scenarios, not findings) | `results/coastal_scenarios/` |
+| `charleston_pilot.py` | Coastal multipliers by tract, built from buildings | `results/charleston/` |
+
+To read or change one interactively, run `uv run marimo edit notebooks/<name>.py`. The
+notebooks only call functions in `src/fri_rebuild/`, so the same code backs scripts, notebooks
+and the agent harness.
 
 The first run takes most of a day, almost all of it climate downloads on this 4-core machine:
 
@@ -60,12 +71,14 @@ The agent loop is not part of `run.sh`, because it costs money and gives differe
 run. To run it for one hazard (needs `OPENROUTER_API_KEY`):
 
 ```bash
-uv run python -m fri_rebuild.swarm drought --rounds 8 --agents 3 --budget 3
+uv run fri-swarm drought --rounds 8 --agents 3 --budget 3
 ```
 
 The numbers in this README come from one clean run: a fresh clone of the branch with every cached
 input deleted except the already-reduced NEX, FWI and LOCA2 arrays. Re-downloading those would
-have taken several more hours. Its console output is in `results/clean_run.log`.
+have taken several more hours. That run predates the move to notebooks (same code, older
+layout); its console output is in the git history
+(`git show 03f4c80:fri-agent-rebuild/results/clean_run.log`).
 
 ## Where the data comes from
 
@@ -74,7 +87,7 @@ have taken several more hours. Its console output is in `results/clean_run.log`.
 | Answer key | `NRI_Future_Risk_Master_Datasheet_12052024.xlsx` from [fulton-ring/nri-future-risk](https://github.com/fulton-ring/nri-future-risk) at commit `c5cc0d6` | FEMA's own datasheet, downloaded before the tool was taken down in February 2025. It has county HMs, PAL ratings and the NRI v1.19 EAL each multiplier was applied to. Downloaded at run time. |
 | Methodology | *National Risk Index: Future Risk Technical Documentation* (FEMA, December 2024) | [Archived copy at Harvard EELP](https://eelp.law.harvard.edu/wp-content/uploads/2025/03/NRI_Future_Risk_Technical_Document.pdf). Each hazard's `program.md` quotes the relevant section. |
 | Drought, NEX extreme heat | [NASA NEX-GDDP-CMIP6](https://registry.opendata.aws/nex-gddp-cmip6/) (AWS open data), MPI-ESM1-2-HR r1i1p1f1, historical, SSP2-4.5, SSP5-8.5 | Daily `tasmin`, `tasmax`, `tas`, `hurs` and `pr` at 0.25 degrees. We take the newest file version per year (mostly v2.0). |
-| LOCA2 extreme heat | [LOCA2](https://cirrus.ucsd.edu/~pierce/LOCA2/NAmer/MPI-ESM1-2-HR/0p0625deg/r1i1p1f1/) (UCSD), MPI-ESM1-2-HR r1i1p1f1, daily `tasmin` at 1/16 degree | We read only the days of each 30-year period, one gzip chunk per day, over HTTP. For each of the 220,047 cells that overlap a county, we keep a histogram of daily `tasmin` in 0.1 °C bins (`loca2.py`). |
+| LOCA2 extreme heat | [LOCA2](https://cirrus.ucsd.edu/~pierce/LOCA2/NAmer/MPI-ESM1-2-HR/0p0625deg/r1i1p1f1/) (UCSD), MPI-ESM1-2-HR r1i1p1f1, daily `tasmin` at 1/16 degree | We read only the days of each 30-year period, one gzip chunk per day, over HTTP. For each of the 220,047 cells that overlap a county, we keep a histogram of daily `tasmin` in 0.1 °C bins (`sources/loca2.py`). |
 | Wildfire | [NEX-GDDP-CMIP6 Fire Weather Index](https://data.nas.nasa.gov/gddpimpact/FWI/) (NASA "GDDP-IMPACT" portal), yearly multi-model-ensemble files MME25/50/75 | The portal is missing 4-7 of the 30 years in each period, and those years are skipped. MME50 has 122 of 150 years. |
 | Fuels | LANDFIRE LF2022 FBFM40, from the [LANDFIRE ImageServer](https://lfps.usgs.gov/arcgis/rest/services/Landfire_LF2022/LF2022_FBFM40_CONUS/ImageServer) | Resampled to 500 m (nearest neighbour), because the 30 m national file is 3.4 GB. |
 | Coastal flooding | NOAA CO-OPS [decadal high-tide-flooding projections](https://api.tidesandcurrents.noaa.gov/dpapi/prod/webapi/htf/htf_projection_decadal.json) (110 gauges), observed annual flood counts, flood thresholds; the 2022 Sea Level Rise Technical Report [data files](https://cdn.oceanservice.noaa.gov/oceanserviceprod/hazards/sealevelrise/Sea_Level_Rise_Datasets_2022.zip) | The report's extreme water level table covers exactly the 187 gauges FEMA cites. Its sea level projections cover 126 gauges plus a 1-degree grid. |
@@ -87,7 +100,7 @@ but we did not try to rebuild them.
 
 ## How it works
 
-- **Answer key and scoring** (`answer_key.py`, `score.py`): we put rebuilt multipliers into
+- **Answer key and scoring** (`scoring/answer_key.py`, `scoring/metrics.py`): we put rebuilt multipliers into
   FEMA's fixed NRI rating bins. The upper edge of each bin is the largest EAL observed in that
   rating, as in Section 3.2 of the technical document. Applied to FEMA's own multipliers, this
   reproduces 100% of the published PAL ratings, so "same rating bin" means the same thing FEMA's
@@ -98,7 +111,7 @@ but we did not try to rebuild them.
     help a score.
   - Counties whose published HM is exactly 0 cannot be scored in log terms and are left out.
     Only coastal flooding has any: 109 of its 407 CONUS counties.
-- **Train/held-out split** (`split.py`): every fourth state in FIPS order is held out. That is 12
+- **Train/held-out split** (`scoring/split.py`): every fourth state in FIPS order is held out. That is 12
   states and 896 counties: AZ, CT, GA, IA, ME, MN, NE, NM, OH, RI, TX and WA. The agents only ever
   see training-state scores (2,212 counties). Held-out scores are computed after the loop ends.
 - **Inputs** (`inputs.py`): a read-only API the pipelines use for climate arrays, histograms,
@@ -108,7 +121,7 @@ but we did not try to rebuild them.
   may change. Next to it, `program.md` is the human-written brief: what FEMA's document says, what
   the data looks like, and the open questions, numbered so agents can split them. Dated notes at
   the end of a brief are where a person stepped in.
-- **The loop** (`swarm.py`), modelled on [karpathy/autoresearch](https://github.com/karpathy/autoresearch):
+- **The loop** (`agents/swarm.py`), modelled on [karpathy/autoresearch](https://github.com/karpathy/autoresearch):
   - Each round, three agents (Pydantic AI, `anthropic/claude-sonnet-5.5` through OpenRouter)
     propose in parallel. Each gets `program.md`, the current best pipeline, its training scores
     (including the worst training states), the full experiment log and notes on earlier
@@ -119,13 +132,13 @@ but we did not try to rebuild them.
     identical to an earlier run. It runs each candidate in a subprocess and keeps the best one if
     it beats the current best by more than 0.002.
   - The loop stops after a set number of rounds with no improvement or at its budget. Every
-    proposal is logged in `results/experiments-<hazard>.tsv`, and its code is kept in
-    `results/candidates/<hazard>/<id>.py`.
+    proposal is logged in `experiments/swarm/<hazard>.tsv`, and its code is kept in
+    `experiments/swarm/candidates/<hazard>/<id>.py`.
 
 ## Results (one clean run)
 
-Mean over the four scenarios. Per-scenario numbers are in `results/scores.csv`; the five largest
-misses per column and subset are in `results/largest_differences.csv`.
+Mean over the four scenarios. Per-scenario numbers are in `results/rebuild/scores.csv`; the five
+largest misses per column and subset are in `results/rebuild/largest_differences.csv`.
 
 | Hazard | Subset | Counties | Same rating bin | Pearson | Mean abs log error | Median rebuilt/published |
 |---|---|---|---|---|---|---|
@@ -198,7 +211,7 @@ NEX extreme heat split by threshold, held-out:
   - The agents then moved to the MME75 ensemble and the 95th-percentile FWI statistic, added a
     log-burnable-share control and burnable-share weights. Each step helped on training states.
     On held-out states those steps lowered correlation (0.993 → 0.960) while improving log error
-    a little (0.111 → 0.072). `results/kept_pipelines_held_out.csv` scores every kept step.
+    a little (0.111 → 0.072). `results/rebuild/kept_pipelines_held_out.csv` scores every kept step.
 - **NEX extreme heat** (0.347 → 0.207, 21 experiments, $0.92). The one kept change was dividing
   by the historical number of days over the percentile, without the heat-index condition. That
   matches FEMA's equation 9 more literally. Nothing after it helped.
@@ -221,7 +234,7 @@ NEX extreme heat split by threshold, held-out:
 We ran two hazards a second way: Claude Code subagents (Sonnet), each starting from the human
 baseline with the same rules and `program.md`, and steered to different open questions.
 
-- Each ran 6-10 experiments in its own copy (`results/claude-code-subagents/<hazard>/`).
+- Each ran 6-10 experiments in its own copy (`experiments/claude-code-subagents/<hazard>/`).
 - Each took 2-3 minutes and 42-62k tokens.
 - Unlike the Pydantic AI agents, they could read the data and run code themselves.
 
@@ -277,7 +290,7 @@ the agent framework this repo prescribes, and compared it with Claude Code subag
    three proposals. The guard banned the text `_HM"]`, which every pipeline writes for its own
    output columns, and banned `STATEABBRV`, which FEMA's state fixed effects need. The person
    removed both patterns and restarted. That run is kept in
-   `results/experiments-wildfire-guard-bug.tsv` ($0.06).
+   `experiments/swarm/wildfire-guard-bug.tsv` ($0.06).
 4. **Kept code needed tidying.** The final wildfire pipeline left an unused table behind, and two
    kept pipelines each had one type-check error. The person fixed them without changing results.
    The harness does not lint candidates.
@@ -308,7 +321,7 @@ fixed, and every kept change is a method choice we can read in the diff.
 
 ## Below the county: census tracts
 
-`python -m fri_rebuild.downscale drought DRGT_LATE_HIGHER_HM 06 CA` reruns the final drought
+`notebooks/tracts.py` reruns the final drought
 pipeline with 2020 California tract polygons in place of county polygons. Each tract's multiplier
 is the area-weighted mean of the 0.25-degree cells it overlaps. Tract projected annual loss is
 NRI v1.19 tract drought EAL × tract HM. Outputs are in `results/tracts/`.
@@ -340,7 +353,7 @@ NRI v1.19 tract drought EAL × tract HM. Outputs are in `results/tracts/`.
 ## Reverse engineering FEMA's coastal flooding values (answer key open)
 
 The blind rebuild failed for coastal flooding, so we studied FEMA's published coastal multipliers
-directly (`python -m fri_rebuild.forensics`, outputs in `results/forensics/`). This part reads
+directly (`notebooks/coastal_forensics.py`, outputs in `results/coastal_forensics/`). This part reads
 the answer key on purpose; it says what structure produced FEMA's numbers, not whether agents can
 find it.
 
@@ -388,9 +401,10 @@ find it.
 **The recipe, found by search.**
 
 Three Claude Code subagents searched for a recipe that reproduces FEMA's numbers from public NOAA
-data (`python -m fri_rebuild.recipe_score <recipe.py>`). Two of them, starting from different
-angles, converged on the same one, saved as `forensics/recipes/noaa_thresholds.py`. The search
-logs are `forensics/recipes/agent*.tsv`.
+data (`uv run fri-recipe-score <recipe.py>`). Two of them, starting from different angles,
+converged on the same one, now `src/fri_rebuild/coastal/recipe.py`. Their recipes and search
+logs are in `experiments/coastal-recipe-search/`; `results/coastal_forensics/recipe_scores.csv`
+scores the recipe and its threshold variants against the return-period baseline.
 
 - **Sub-types are NOAA's thresholds, not return periods.** They are NOAA's minor, moderate and
   major flood thresholds at each gauge (about 0.5, 0.8 and 1.2 m above high tide), not the
@@ -417,7 +431,7 @@ logs are `forensics/recipes/agent*.tsv`.
 - **What the recipe implies about the county weights:**
   - With the factors known, each county's sub-type weights can be solved. For the 279 counties
     fit within 1%, the weights sum to a median of 0.57, and 82% sum to less than 0.95
-    (`results/forensics/coastal_weights_threshold_recipe.csv`).
+    (`results/coastal_forensics/recipe_weights.csv`).
   - NRI v1.19.0 defines five coastal flooding sub-types: NOAA's three high-tide-flooding zones
     plus FEMA's 1% and 0.2% annual-chance floodplains (its Technical Documentation, chapter 7).
   - The Future Risk formula adjusts only the three high-tide sub-types. If the floodplain share of
@@ -431,8 +445,8 @@ logs are `forensics/recipes/agent*.tsv`.
 
 ### What-if: the floodplain share, and how stale the inputs are
 
-These are scenarios built on FEMA's own numbers (`python -m fri_rebuild.coastal_scenarios`,
-`results/forensics/coastal_scenarios_*.csv`). They show how much the dropped floodplain share
+These are scenarios built on FEMA's own numbers (`notebooks/coastal_scenarios.py`,
+`results/coastal_scenarios/`). They show how much the dropped floodplain share
 could matter. They are not FEMA's values and not forecasts.
 
 For the 279 counties the recipe fits within 1%, we treat the part of each county's weights
@@ -471,7 +485,7 @@ missing from 1 as the floodplain share. The variants are:
   - The extreme water level curves are the 2022 report's.
 - **The NRI baseline did shift.** NRI v1.20 (December 2025) moved coastal flood EAL a long way
   from v1.19.0, the baseline FEMA applied its multipliers to
-  (`results/forensics/coastal_baseline_drift_v1_20.csv`):
+  (`results/coastal_forensics/baseline_drift_v1_20.csv`):
   - National coastal flood EAL fell from $1.28B to $0.99B a year.
   - 73% of the 463 counties with coastal flood EAL in both releases changed by more than 2x
     either way; the middle half ranges from 0.21x to 2.5x.
@@ -485,10 +499,11 @@ missing from 1 as the floodplain share. The variants are:
 FEMA publishes coastal multipliers per county only, so every building in a county gets the same
 percentage change. This pilot tests whether finer data changes the answer, with the idea of
 republishing at census tract level: NRI's tract EAL (the economic side, refreshed each release)
-times a tract multiplier (the climate side, which changes slowly). Run it with
-`uv run python -m fri_rebuild.structure_pilot` (any county and gauge can be passed; Charleston
-County 45019 and gauge 8665530 are the defaults). Outputs are in `results/structure_pilot/`:
-tract table, county summary, map and log. Only tract aggregates are written, no building
+times a tract multiplier (the climate side, which changes slowly). It is
+`notebooks/charleston_pilot.py` (method in `src/fri_rebuild/coastal/buildings.py`); any county
+and gauge can be passed with `-- --fips <county> --gauge <station>`. Outputs are in
+`results/charleston/`: tract table, county summary and map. Only tract aggregates are written,
+no building
 records.
 
 **How it works.** This is a scenario model, not FEMA's method and not a forecast.
@@ -610,24 +625,28 @@ variants.
 
 ## Files
 
-- `run.sh`: the one command.
-- `src/fri_rebuild/`: shared code.
-  - Inputs: `nex.py`, `loca2.py`, `fwi.py`, `landfire.py`, `coastal.py`, `nri.py`, `geo.py`,
-    `inputs.py`.
-  - Scoring: `answer_key.py`, `split.py`, `score.py`, `experiment.py`.
-  - Forensics (answer key open): `forensics.py`, `recipe_score.py`; recipes in
-    `forensics/recipes/`.
-  - The loop: `swarm.py`.
-  - Outputs: `report.py`, `downscale.py`; `prepare.py` downloads everything.
-  - Charleston pilot: `structure_pilot.py` (tract coastal multipliers from building records).
-- `hazards/<hazard>/program.md` and `pipeline.py`: the human brief (with any dated
-  interventions) and the final pipeline, for `extreme_heat` (NEX), `extreme_heat_loca2`,
-  `drought`, `wildfire` and `coastal_flooding`.
-- `results/experiments-<hazard>.tsv`: every experiment (id, round, agent, parent, training
-  metrics, status, seconds, cost, description). `results/candidates/` holds the code of each one.
-- `results/scores.csv`, `results/largest_differences.csv`, `results/swarm_summary.csv`,
-  `results/kept_pipelines_held_out.csv`, `results/county_hm_<hazard>.csv`: clean-run outputs.
-- `results/tracts/`: the California tract table, the roll-up table and the map.
-- `results/structure_pilot/`: the Charleston County tract table, summary, map and log.
-- `results/claude-code-subagents/`: the Claude Code comparison runs for wildfire and coastal
-  flooding.
+```
+run.sh                      the one command: download inputs, run every notebook
+pyproject.toml, uv.lock     uv project; CLIs fri-prepare, fri-swarm, fri-experiment, fri-recipe-score
+notebooks/                  marimo notebooks, one per analysis (table under "How to run it")
+src/fri_rebuild/            shared function modules
+  inputs.py                 the read-only data API the hazard pipelines (and agents) use
+  sources/                  downloads and reductions: nex, loca2, fwi, landfire, nri, geo, tide_gauges
+  scoring/                  answer_key (FEMA's published values, rating bins), split, metrics
+  agents/                   swarm (the agent loop) and experiment (runs and scores one candidate)
+  coastal/                  forensics, recipe (the recovered FEMA recipe), recipe_score,
+                            scenarios (what-if), buildings (Charleston pilot)
+  rebuild.py, tracts.py     scoring the final pipelines; the census-tract layer
+  maps.py, pipeline.py      tract maps; loading pipeline and recipe files
+  prepare.py, paths.py, http.py
+hazards/<hazard>/           program.md (the human brief, with dated interventions) and
+                            pipeline.py (the final kept pipeline), for extreme_heat (NEX),
+                            extreme_heat_loca2, drought, wildfire and coastal_flooding
+experiments/                what the agents did, kept as a record (not linted)
+  swarm/<hazard>.tsv        every experiment: id, round, agent, parent, training metrics,
+                            status, seconds, cost, description
+  swarm/candidates/         the code of each proposal
+  claude-code-subagents/    the Claude Code comparison runs (wildfire, coastal flooding)
+  coastal-recipe-search/    the three recipe-search agents' recipes and logs
+results/                    notebook outputs, one folder per notebook
+```

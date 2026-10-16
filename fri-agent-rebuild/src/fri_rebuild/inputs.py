@@ -11,8 +11,9 @@ import numpy as np
 import pandas as pd
 from scipy import sparse
 
-from fri_rebuild import answer_key, geo, nex
 from fri_rebuild.paths import cache_path
+from fri_rebuild.scoring import answer_key
+from fri_rebuild.sources import geo, nex
 
 PERIODS = {"historical": (1976, 2005), "MID": (2036, 2065), "LATE": (2070, 2099)}
 SSP = {"LOWER": "ssp245", "HIGHER": "ssp585"}
@@ -147,7 +148,7 @@ def fwi(scenario: str, period: str, variable: str = "FWI", ensemble: str = "MME5
     variable: FWI (annual mean), FWI_P25/P50/P75/P95, FWI_N15/N30/N45 (days above 15/30/45),
     FWI_NP95, FWI_Nmid, FFMC, DMC, DC, ISI, BUI. ensemble: MME25, MME50 or MME75.
     """
-    from fri_rebuild import fwi as fwi_source
+    from fri_rebuild.sources import fwi as fwi_source
 
     cells = cell_index()
     rows = []
@@ -160,7 +161,7 @@ def fwi(scenario: str, period: str, variable: str = "FWI", ensemble: str = "MME5
 
 def county_fuel_shares() -> pd.DataFrame:
     """Share of LANDFIRE LF2022 FBFM40 fuel-model groups in each county (500 m sampling)."""
-    from fri_rebuild import landfire
+    from fri_rebuild.sources import landfire
 
     _, fips = county_weights()
     return landfire.fuel_shares(geo.counties().loc[fips], "counties")
@@ -174,21 +175,21 @@ def loca2_histogram(scenario: str, period: str) -> tuple[np.ndarray, np.ndarray]
     a last row counting days with no data. scenario is 'historical', 'ssp245' or 'ssp585';
     period is 'historical', 'MID' or 'LATE'.
     """
-    from fri_rebuild import loca2
+    from fri_rebuild.sources import loca2
 
     return loca2.EDGES, np.load(loca2.histogram_path(scenario, period))
 
 
 def loca2_county_weights() -> tuple[sparse.csr_matrix, pd.Index]:
     """County x cell intersection areas (km^2) for the LOCA2 cells in `loca2_histogram`."""
-    from fri_rebuild import loca2
+    from fri_rebuild.sources import loca2
 
     _, weights, fips = loca2.county_weights()
     return weights, fips
 
 
 def coastal_tables() -> dict[str, pd.DataFrame]:
-    """NOAA tide-gauge tables for coastal flooding (see fri_rebuild.coastal for sources).
+    """NOAA tide-gauge tables for coastal flooding (sources: fri_rebuild.sources.tide_gauges).
 
     Keys: htf_decadal (projected flood days/year by station, decade 2020-2100, severity and 2022
     scenario: low, intLow, intermediate, intHigh, high), htf_observed (observed flood days per
@@ -197,9 +198,9 @@ def coastal_tables() -> dict[str, pd.DataFrame]:
     level rise in cm by scenario and decade, per gauge and 1-degree grid) and flood_thresholds
     (NOAA minor/moderate/major thresholds in m above MHHW).
     """
-    from fri_rebuild import coastal
+    from fri_rebuild.sources import tide_gauges
 
-    return coastal.tables()
+    return tide_gauges.tables()
 
 
 def county_shapes() -> gpd.GeoDataFrame:

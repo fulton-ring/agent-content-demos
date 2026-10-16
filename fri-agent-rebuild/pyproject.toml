@@ -8,6 +8,7 @@ dependencies = [
     "fsspec>=2024.6",
     "geopandas>=1.0",
     "h5py>=3.11",
+    "marimo>=0.25.1",
     "matplotlib>=3.9",
     "numpy>=2.0",
     "openpyxl>=3.1",
@@ -20,6 +21,12 @@ dependencies = [
     "scipy>=1.14",
     "shapely>=2.0",
 ]
+
+[project.scripts]
+fri-prepare = "fri_rebuild.prepare:main"
+fri-swarm = "fri_rebuild.agents.swarm:main"
+fri-experiment = "fri_rebuild.agents.experiment:main"
+fri-recipe-score = "fri_rebuild.coastal.recipe_score:main"
 
 [dependency-groups]
 dev = [
@@ -38,11 +45,15 @@ packages = ["src/fri_rebuild"]
 
 [tool.ruff]
 line-length = 100
-# Agent proposals are kept verbatim as an experiment record, not as maintained code.
-extend-exclude = ["results/candidates", "results/claude-code-subagents", "forensics/recipes/agent*.py"]
+# Agent proposals are kept as an experiment record, not as maintained code.
+extend-exclude = ["experiments"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
 
+[tool.ruff.lint.per-file-ignores]
+# A bare expression at the end of a marimo cell is what the cell displays.
+"notebooks/*" = ["B018"]
+
 [tool.ty.src]
-exclude = ["results/candidates", "results/claude-code-subagents", "forensics/recipes/agent*.py"]
+exclude = ["experiments"]
