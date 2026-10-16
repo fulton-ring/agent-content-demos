@@ -63,8 +63,13 @@ def hazard_multipliers() -> pd.DataFrame:
     result = {}
     for warming, scenario in SCENARIOS.items():
         for period, decade in DECADES.items():
-            rows = projected[(projected["scenario"] == scenario) & (projected["decade"] == decade)]
-            future_days = rows.pivot_table(index="station", columns="severity", values="days")
+            window = [decade - 10, decade, decade + 10]
+            rows = projected[
+                (projected["scenario"] == scenario) & (projected["decade"].isin(window))
+            ]
+            future_days = rows.pivot_table(
+                index="station", columns="severity", values="days", aggfunc="mean"
+            )
             future_days = future_days.reindex(index=current.index, columns=list(SEVERITIES))
             future = saturate(future_days)
             with np.errstate(divide="ignore", invalid="ignore"):
