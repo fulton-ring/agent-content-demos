@@ -6,17 +6,23 @@ Spike for [issue #16](https://github.com/fulton-ring/agent-content-demos/issues/
 
 ## What's here
 
-- [`template/policy-template.md`](template/policy-template.md): the blank one-page template ([PDF](output/template/policy-template.pdf)).
+- [`template/policy-template.md`](template/policy-template.md): the blank template ([PDF](output/template/policy-template.pdf)).
 - [`template/call-questions.md`](template/call-questions.md): the six questions we ask on the call, each mapped to the sections it fills ([PDF](output/template/call-questions.pdf)).
 - [`calls/`](calls): four mock call transcripts, each labelled as invented:
   - Cedar Valley Family Center, a mid-sized family services nonprofit and the main sample;
   - Northgate Community Food Bank;
   - Bright Futures After School;
   - Eastside Community Health Clinic.
-- `output/<organization>/policy.{json,html,pdf}`: the policy drafted from each call. Also `output/checks.md` with the checks, `output/side-by-side.md` with how the policies differ, and `output/published-comparison.md` with length and reading level against published policies.
-- [`screenshots/`](screenshots): a PNG of each policy, the template and the questions.
-- [`prompts/`](prompts): the two prompts sent to the model, committed as run.
-- [`review/`](review): an independent statement-by-statement check of the policies against their calls.
+- [`output/`](output): the clean-checkout run, which is the main result:
+  - `<organization>/policy.{json,html,pdf}`: each drafted policy;
+  - `checks.md`: the checks and the automated fidelity check;
+  - `fidelity-findings.md`: every problem that check found;
+  - `side-by-side.md`: how the policies differ;
+  - `published-comparison.md`: length and reading level against published policies;
+  - `screenshots/`: a PNG of each policy, the template and the questions.
+- [`rerun/`](rerun): a second full run of the same command, from the same commit, kept to show how much reruns vary.
+- [`prompts/`](prompts): the four prompts sent to the model (draft, shorten, check, revise), committed as run.
+- [`review/`](review): two hand reviews of earlier versions, kept for the record (see "Does it say what the call said?").
 - `src/policy_builder/`: the code.
 
 ## How to run it
@@ -70,33 +76,46 @@ The readability check fetches the CMU Pronouncing Dictionary through NLTK the fi
 
 ## What it showed
 
-Yes, with an edit. One call's worth of notes is enough to fill every section of a one-page policy that is specific to the organization: its tools, its data, the people who say yes, and the decisions still open. The policies read at about a seventh-grade level. Every published template we compared runs four to eleven pages at a college reading level. But the drafts aren't ready to send as they come out. An independent check found a few places in each where one section contradicts another or an open question, so a person has to read and fix each draft before the board sees it.
+Yes, with a read-through. One call's worth of notes fills every section of a one-page policy that is specific to the organization: its tools, its data, who owns the policy, who says yes, what everyone may do today, and the decisions still open. The policies read at about a seventh-grade level. Every published template we compared runs four to eleven pages at a college reading level.
 
-![Cedar Valley Family Center policy](screenshots/cedar-valley-family-center.png)
+The drafts still aren't ready to send unread. The command now checks each draft against its call, and revises it once. After that, 0 to 3 statements per policy still contradict the call or another section, along with about 5 points from the call that the policy missed. Some of those are real, and some are the checker being strict. A person reading for 15 minutes catches them.
 
-Renders: [Cedar Valley](output/cedar-valley-family-center/policy.pdf) · [Northgate food bank](output/northgate-food-bank/policy.pdf) · [Bright Futures after-school](output/bright-futures-after-school/policy.pdf) · [Eastside clinic](output/eastside-community-health-clinic/policy.pdf) · [blank template](output/template/policy-template.pdf) · [call questions](output/template/call-questions.pdf). Screenshots of each are in [`screenshots/`](screenshots).
+![Cedar Valley Family Center policy](output/screenshots/cedar-valley-family-center.png)
+
+Renders: [Cedar Valley](output/cedar-valley-family-center/policy.pdf) · [Northgate food bank](output/northgate-food-bank/policy.pdf) · [Bright Futures after-school](output/bright-futures-after-school/policy.pdf) · [Eastside clinic](output/eastside-community-health-clinic/policy.pdf) · [blank template](output/template/policy-template.pdf) · [call questions](output/template/call-questions.pdf). Screenshots of each are in [`output/screenshots/`](output/screenshots).
+
+### What changed after the first review
+
+The spike manager's review of the first version found that the Cedar Valley sample wasn't usable as written. It had no owner, nothing allowed for the 77 staff outside the Copilot pilot, and several sections that contradicted each other. It also found that rerunning the command brought back problems a hand review had marked as fixed. We changed four things:
+
+- **The questions now ask for an owner and for what everyone may do now.** Question 4 asks for one person who owns the policy day to day. Question 1 asks what everyone may do before any tool is chosen.
+- **The template has an "Everyone, now" line with a default.** If the call doesn't settle it, the default is any AI tool, through a work email, for work with no information about a real person in it, unless the call said no. A missing owner defaults to the executive director until the board names one. Candid warns that "fear-based policies drive AI use underground", and the first version did exactly that.
+- **The Cedar Valley mock call settles both.** The first version of the call left the owner and interim use open, so the policy was faithful to the call but useless to staff. In the new version, Dana names Luis as owner and allows ChatGPT or Copilot for work with no real person in it. Luis says the Copilot pilot may hold donor names. That is a change to the invented input, made because the call questions now ask for these things.
+- **The command checks and revises its own drafts,** so the fidelity numbers below come from the command, not from a hand review of one run.
 
 ### The checks
 
-From the run in `output/`, which we made from a clean checkout following the steps above ([`output/checks.md`](output/checks.md)):
+From the run in `output/`, made from a clean checkout following the steps above ([`output/checks.md`](output/checks.md)). The second run in `rerun/` is shown after the slash where it differs.
 
-| Policy | Pages | Page fill | Words | Reading grade (FK) | Sections filled | Open questions | Model calls | Seconds | Cost |
+| Policy | Pages | Page fill | Words | Reading grade (FK) | Sections filled | Shorten passes | Model calls | Seconds | Cost |
 |---|---|---|---|---|---|---|---|---|---|
-| Cedar Valley Family Center | 1 | 85% | 416 | 6.7 | 12/12 | 4 | 2 | 80 | $0.15 |
-| Northgate Community Food Bank | 1 | 86% | 394 | 6.6 | 12/12 | 4 | 2 | 98 | $0.14 |
-| Bright Futures After School | 1 | 92% | 462 | 6.3 | 12/12 | 4 | 2 | 67 | $0.12 |
-| Eastside Community Health Clinic | 1 | 94% | 459 | 7.0 | 12/12 | 4 | 2 | 110 | $0.19 |
+| Cedar Valley Family Center | 1 / 1 | 93% / 93% | 435 / 404 | 6.5 / 7.1 | 12/12 | 2 / 1 | 6 / 5 | 124 / 110 | $0.27 / $0.23 |
+| Northgate Community Food Bank | 1 / 1 | 89% / 95% | 413 / 416 | 6.1 / 7.5 | 12/12 | 0 / 0 | 4 / 5 | 111 / 112 | $0.21 / $0.25 |
+| Bright Futures After School | 1 / 1 | 93% / 90% | 469 / 452 | 7.3 / 7.0 | 12/12 | 0 / 0 | 5 / 6 | 88 / 118 | $0.20 / $0.27 |
+| Eastside Community Health Clinic | 1 / 1 | 88% / 90% | 391 / 420 | 7.9 / 7.5 | 12/12 | 0 / 0 | 5 / 5 | 123 / 126 | $0.27 / $0.28 |
 
 What each column means:
 
 - **Pages** counts pages in the printed Letter PDF.
 - **Page fill** is the height of the content against the printable height of one page, measured in Chromium with print styles.
 - **Reading grade** is Flesch-Kincaid from textstat, with each bullet scored as a sentence.
-- **Sections filled** counts the 12 template sections whose fields are all non-empty with no leftover `[placeholder]`. Open questions are optional and not counted.
-- **Model calls** are 2 because Pydantic AI retried once on every policy after a schema check failed, usually too many items in a list.
-- **Seconds and cost** cover every model call for that policy. The cost is what OpenRouter reported. Most of the time and cost is the model's reasoning: about 8,000 to 15,000 output tokens per policy for roughly 450 words of policy.
+- **Sections filled** counts the 12 template sections whose fields are all non-empty, with no leftover `[placeholder]`, "not yet named" or "None" row. An empty tools list is allowed when nothing is approved, and open questions are optional.
+- **Shorten passes** shows how often the fit-to-page pass fired. It fired only for Cedar Valley, in both runs, because its call now carries more decisions. Every other first draft fit.
+- **Model calls, seconds and cost** cover drafting, schema retries, shortening, both checks and the revise pass. Drafting is about 70% of the cost. A run of all four cost $0.96 and $1.03, as reported by OpenRouter.
 
-The checks also look for capitalized words in tool names and approvers that don't appear in the call. In this run they found none. `checks.md` shows "None" for Bright Futures because its only tool line is literally "None yet", so that one is a false positive.
+The checks also flag capitalized words in tool names, approvers and the owner that don't appear in the call. The only hit in either run is "Executive" for the clinic. Its call names no owner, so the policy uses the template default, "Executive director, until the board names an owner."
+
+The blank template prints at two pages, because its bracketed guidance is longer than any filled policy. Every filled policy is one page.
 
 ### Against published policies
 
@@ -104,7 +123,7 @@ Every row below is measured the same way: text pulled from the PDF with pypdf, t
 
 | Document | Pages | Words | Reading grade (FK) | Reading ease |
 |---|---|---|---|---|
-| Our four policies | 1 each | 520–589 | 7.4–8.1 | 61–64 |
+| Our four policies | 1 each | 518–597 | 6.8–8.5 | 56–66 |
 | Center for Nonprofit AI template | 5 | 1,148 | 11.0 | 42 |
 | Fundraising.AI governance template | 4 | 722 | 16.4 | 7 |
 | Community IT acceptable use template | 5 | 1,564 | 16.3 | 18 |
@@ -116,19 +135,38 @@ The published templates still have their bracketed placeholders and instructions
 
 ### Does it say what the call said?
 
-Two independent reviews read every statement in each policy against its call. They mark it as supported by the call, the template's cautious default, unsupported, or contradicting the call or the rest of the policy. They also list what the policy missed. The first review covered run 1 ([`review/fidelity-run1.md`](review/fidelity-run1.md)). We changed the prompt in response and reviewed the final run ([`review/fidelity-run2.md`](review/fidelity-run2.md)).
+`build-policies` now checks every draft with a second typed model call. It reads the call, the drafting rules and the template, and gives each statement in the policy one label: supported by the call, a template default, unsupported, or contradicting the call or another section. It also lists what the policy missed. If anything is unsupported or contradicts, one revise pass fixes those statements and the check runs again. Both checks are saved in `review.json`, and every finding is in [`output/fidelity-findings.md`](output/fidelity-findings.md).
 
-| Run | Statements | Supported | Default | Unsupported | Contradicts | Missed |
-|---|---|---|---|---|---|---|
-| Run 1 | 130 | 101 | 22 | 4 | 3 | 10 |
-| Final run | 128 | 98 | 24 | 2 | 4 | 7 |
+Totals over the four policies, for both runs:
 
-Neither run invented a tool, law, agreement or person. Every named approver appears in the call with the same role. The problems changed in kind between the runs:
+| Run | Pass | Statements | Supported | Default | Unsupported | Contradicts | Missed |
+|---|---|---|---|---|---|---|---|
+| `output/` | first draft | 133 | 93 | 29 | 2 | 9 | 22 |
+| `output/` | after revise | 127 | 95 | 29 | 0 | 3 | 19 |
+| `rerun/` | first draft | 128 | 89 | 29 | 2 | 8 | 21 |
+| `rerun/` | after revise | 128 | 92 | 29 | 2 | 5 | 20 |
 
-- **Run 1** listed tools the call said weren't approved. The clinic's policy listed ChatGPT, OpenEvidence and UpToDate as approved after its COO said the scribe was "the only approved AI". It also gave one person a decision the call had left to the board. We added rules to the prompt: only approved tools go in the tools list; an open question can't appear as settled anywhere else or get an approver; a "no" said on the call goes under off limits; and sections must agree with each other.
-- **The final run** fixed those. What's left is sections disagreeing with each other. The worst case is Bright Futures: it says "never paste a child's information into AI" and also lets the director and the district approve AI use with student data. The food bank's policy leaves volunteers out of "who it covers" because whether they may *use* AI was left open. Those are exactly the edits a person makes in a short review, and they're why we wouldn't send a draft unread.
+Per policy after the revise pass, as unsupported and contradicts, `output/` then `rerun/`:
 
-The stricter rules have a cost. Cedar Valley's teachers use ChatGPT every day, but nobody approved it, so it now sits in the board's open questions rather than under allowed uses. That is faithful to the call ("Officially, nothing"), but it leaves the policy's allowed-uses list short until the board decides.
+- Cedar Valley: 0 and 2, then 1 and 1.
+- Northgate: 0 and 0, then 0 and 1.
+- Bright Futures: 0 and 1, then 0 and 3.
+- Eastside: 0 and 0, then 1 and 0.
+
+What this shows:
+
+- **The check fires on every draft.** All 8 first drafts had at least one problem, so the revise pass ran on all of them.
+- **Revising helps, but not reliably.** In the first run it cut problems from 11 to 3. In the second it cut them from 10 to 7. Bright Futures came out of its revise with a different set of three contradictions.
+- **Reruns vary.** The same commit gives different problem counts, and different problems, on each run. Neither run invented a tool, law, agreement or person.
+- **What the check still finds in Cedar Valley.**
+  - Both runs flag "Copilot is for pilot license holders only" against the call's "anyone can use ChatGPT or Copilot". That is a license limit rather than a contradiction a staff member would trip over.
+  - The first run also lists "Client data in a tool approved for it" as needing approval when no tool is approved for client data. That one is real: a reader would ask which tool.
+  - The second run flags "AI may only help with wording or ideas" on emergency-fund decisions. Dana wanted AI nowhere near those decisions.
+- **What the check misses.** The clinic's call says the AI scribe is "the only approved AI". Both clinic policies still apply the template's "Everyone, now" default, so any tool may be used for work with no patient or person in it. The checker didn't flag that, and it should have. The default is a deliberate choice for organizations that say nothing. A clinic that says "only the scribe" may mean no, and a person should ask.
+
+The checker is the same model family as the drafter, run at low reasoning effort to keep it cheap. It is strict and sometimes pedantic. For example, it flags a template default as unsupported unless the drafting rules spell the default out. Its counts are a guide to where to read, not a score.
+
+**The earlier hand reviews.** [`review/fidelity-run1.md`](review/fidelity-run1.md) and [`review/fidelity-run2.md`](review/fidelity-run2.md) are two statement-by-statement reviews of the *first* version's committed outputs, made by hand by a separate Claude session. They reviewed one pinned run each, and they don't describe what the command produces now. The spike manager's rerun of that version brought back problems the second review had marked as fixed. That is why the check is now part of the command.
 
 ### How the policies differ
 
@@ -142,12 +180,12 @@ The stricter rules have a cost. Cedar Valley's teachers use ChatGPT every day, b
 - **Approved tools**:
   - The clinic approves only the AI scribe, under a business associate agreement.
   - The food bank approves Gemini, which comes with Google Workspace.
-  - Cedar Valley approves only its Copilot pilot.
+  - Cedar Valley approves its Copilot pilot, which may hold donor names, and ChatGPT through a work email for work with no real person in it.
   - The after-school program approves none yet.
 - **Red lines**:
   - No chatbot answering SNAP eligibility.
   - Never use AI for mandated reporting of suspected abuse.
-  - Providers read every word of a scribe note before signing.
+  - AI never makes a clinical decision or signs a note.
   - No AI images passed off as real families or hungry people.
 - **Open questions**:
   - Homework-hour AI use, for the board and principals.
@@ -165,7 +203,7 @@ We compared our template clause by clause with four published nonprofit template
 | Who approves a new tool | ✓ (named person) | ~ (supervisor, Legal) | ✓ (named title) | ~ | ✓ | ✓ (supervisor) | ✓ |
 | AI features switched on inside existing software | ✓ | ~ (vendors with embedded AI) | – | – | – | ✓ | ✓ |
 | Browser extensions, plugins and agents | ✓ | – | ~ ("automating approval") | ✓ (scope names plugins, autonomous AI) | – | – | – |
-| Everyday uses that need no permission | ✓ (in the org's own words) | ~ (Exhibit B by function) | ✓ (low risk tier) | – | ✓ (tier 1) | ✓ (use matrix) | – |
+| Everyday uses that need no permission | ✓ (in the org's own words, plus an "everyone, now" line) | ~ (Exhibit B by function) | ✓ (low risk tier) | – | ✓ (tier 1) | ✓ (use matrix) | – |
 | Uses that need approval, each with an approver | ✓ | ~ | ✓ (moderate tier) | – | ✓ (tier 2, e.g. grant narratives) | ✓ | ✓ |
 | Protected data named for this organization | ✓ (filled from the call) | ~ (generic: employee, client, vendor data) | ~ (generic) | ~ ("personal and sensitive data") | ✓ (donor, client, health, personnel, HIPAA, FERPA) | ✓ (generic categories) | ✓ |
 | Human review before anything goes out; sender is responsible | ✓ | ✓ | ✓ | ✓ (high-stakes only) | ✓ | ✓ | ✓ |
@@ -192,17 +230,20 @@ We compared our template clause by clause with four published nonprofit template
 
 ## What didn't work
 
-- **The first drafts didn't fit.** On run 1, three of four policies spilled onto a second page (105–115% of a page) with a 550-word budget in the prompt. Lowering the budget to 450 words fixed it, and the shorten-to-fit pass is there as a backstop. On an intermediate run the clinic's policy needed two shorten passes. On the final run none did.
-- **Faithfulness needed prompt rules.** See the two reviews above. The rules we added fixed tools being listed as approved and open decisions being settled. They didn't stop sections contradicting each other.
-- **Schema retries on every policy.** Each policy needed one retry because a list went over its limit. That is cheap, but the limits could go in the prompt too.
+- **The first version's sample wasn't usable.** It was faithful to its call, but it had no owner and gave most staff nothing they were allowed to do. Strict "don't settle what the call didn't settle" rules produce a policy of open questions unless the call questions ask for interim answers. We fixed the questions and the template, and changed the Cedar Valley call to answer them.
+- **One revise pass doesn't clear the check.** Three to seven contradictions remain across four policies, depending on the run. A second pass would cost about $0.10 more per policy, but the second run's revise sometimes traded one problem for another.
+- **The checker misses things.** It missed the clinic's "only approved AI" against the everyone-now default, in both runs.
+- **Early fit problems.** In the first version, three of four drafts spilled onto a second page at a 550-word budget. The budget is now 420 words. Cedar Valley still needs one or two shorten passes because its call settles more.
+- **A first test of the revise pass made things worse:** 3 problems before it, 5 after. The revise prompt now says to fix by correcting or removing, never by adding rules or approvers. The drafting schema had also required at least three approval items, and that pushed the model to invent approvers. It now asks for two to five.
 - **The readability library needed a workaround.** textstat 0.7.13 counts syllables with NLTK's CMU dictionary, which NLTK refuses to fetch through a proxy unless you opt in. Older textstat versions fail on Python 3.11 because `pkg_resources` is missing.
-- **Total spend for the spike** was about $1.77 of the $5 budget: one test fill, three full runs including the clean-checkout run, and one debugging call. All costs are as reported by OpenRouter.
+- **Total spend** was about $4.95 of the $5 budget. The first version cost $1.77. The spike manager's rerun cost $0.58. Two Cedar Valley test runs of the new pipeline cost $0.61, and the two full runs here cost $1.99. All costs are as reported by OpenRouter.
 
 ## What it doesn't show
 
 - **No real nonprofit has reviewed any of this.** The organizations, the calls and the people are invented, by the same team that wrote the template. Real calls are messier, and a real operations lead may find the policies too blunt, too thin, or wrong about how their organization works. That is the test that would settle the question, and this spike can't run it.
 - The calls were written knowing the six questions, so every call answers them. A real call may skip a question, and the policy would then lean on template defaults and open questions.
-- We didn't time a person editing a draft, so "hours, not days" for the free offer is still unmeasured. It took the model one to two minutes per draft. The reviews suggest a person still needs to fix three to five things in each.
+- We didn't time a person editing a draft, so "hours, not days" for the free offer is still unmeasured. It took the model about two minutes per draft. The automated check suggests a person still needs to fix zero to three contradictions and look at about five missed points in each.
+- The fidelity numbers come from a model checking a model. Nobody has checked the checker's labels, except by reading the findings for this README.
 - Reading grade formulas measure sentence and word length, not whether staff understand the policy or follow it.
 - It is not legal advice. Nothing here checks the policies against HIPAA, FERPA or any contract.
 - We haven't tested whether a one-page policy closes the gap between leadership and staff in the NTEN and Bridgespan survey. Call question 6 asks both sides for a hope and a worry, and the policies write them down. Whether that changes anyone's mind is a question for real organizations.
@@ -231,6 +272,6 @@ Published policies and templates:
 
 Surveys:
 
-- NTEN and The Bridgespan Group, [2026 State of Nonprofit AI](https://www.nten.org/publications/state-of-nonprofit-ai) (n = 917, September 2026), reported by the Chronicle of Philanthropy as [The nonprofit AI gap: Bosses are bullish, staffs are wary](https://www.philanthropy.com/news/the-nonprofit-ai-gap-bosses-are-bullish-staffs-are-wary/). Executives and staff differ: 63% of executives feel positive about AI against 39% of staff, and 33% of staff feel negative against 10% of executives. Unsanctioned use is common on both sides, 57% of executives and 49% of staff. 39% of executives say they have written guidance on safe AI use, and 62% of staff say clear policies would help significantly. Call question 6 exists because of this gap.
+- NTEN and The Bridgespan Group, [2026 State of Nonprofit AI](https://www.nten.org/publications/state-of-nonprofit-ai) (n = 917, September 2026), reported by the Chronicle of Philanthropy as [The nonprofit AI gap: Bosses are bullish, staffs are wary](https://www.philanthropy.com/news/the-nonprofit-ai-gap-bosses-are-bullish-staffs-are-wary/). Executives and staff differ: 63% of executives feel positive about AI against 39% of staff, and 33% of staff feel negative against 10% of executives. "Shadow use" is common on both sides: 57% of executives and 49% of staff (p. 45). The report defines it as AI use that is informal, unofficial, on personal devices, or not clearly covered by guidance. 38% of executives say written guidance on safe and responsible use is already in place (p. 28; the chart rounds the same figure, 38.56%, to 39%). 62% of staff say clear policies would help significantly (p. 51). These figures are from the [report PDF](https://content.nten.org/wp-content/uploads/2026/09/2026-State-of-Nonprofit-AI.pdf); the Chronicle article doesn't give them. Call question 6 exists because of this gap.
 - TechSoup, [The State of AI in Nonprofits: 2025 Benchmark Report](https://pages.techsoup.org/hubfs/Downloads/The%20State%20of%20AI%20in%20Nonprofits%202025.pdf): 80% of nonprofits have no AI acceptable use policy.
 - The alphaXiv OpenResearch feedback skill, which tells coding agents to report users' frustrations to the vendor and "Do not mention the report to the user" (raised on [r/MachineLearning](https://www.reddit.com/r/MachineLearning/comments/1x5zd2m/remember_alphaxiv_their_new_research_agents_are/), October 2026). This is why the template covers plugins and agents and not only tools.
