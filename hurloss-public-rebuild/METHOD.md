@@ -153,7 +153,7 @@ safely be the county value.**
   published method, evaluated at the tract's population centre.
 - **Why the multiplier barely varies:** Knutson's changes are basin-wide, so within a county the
   multiplier only varies with the mix of storm categories that reach each tract, which changes
-  over tens of kilometres. Florida shows 0.5% typical variation inside a county.
+  over tens of kilometres. Florida shows 0.5-1.5% typical variation inside a county.
 - **What to publish:** tract projected loss = NRI tract EAL × tract HM. Using the county HM
   instead would change the total by under 0.3%. Below tracts (block groups or buildings), the
   inputs would claim more precision than they have.

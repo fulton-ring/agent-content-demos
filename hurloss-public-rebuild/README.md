@@ -40,14 +40,35 @@ signal.
 
 ![FEMA's published hurricane multipliers, mid- and late-century under higher warming](results/map_published.png)
 
+## Our own hurricane layer (follow-up)
+
+The spike above is the question the issue asked. After it, we built our own county and tract
+hurricane multipliers for all four FRI scenarios. They use FEMA's documented formula on
+published open methods only: STORM synthetic tracks, CLIMADA wind fields, and Knutson et al.
+(2020) as converted by Jewson (2021). They come with a range across Knutson's published
+percentiles. **[METHOD.md](METHOD.md)** sets out the method, the case for not reusing FEMA's
+values, the full results and the update policy. In short:
+
+- **Central multipliers** in the 1,241 counties with hurricane wind: 1.03, 1.05, 1.05 and 1.13
+  (mid lower, mid higher, late lower, late higher). FEMA published 1.96-2.09.
+- **FEMA's value lies outside our whole Knutson range** in 98% of covered counties for three
+  scenarios. Only late century under RCP 8.5 reaches it, at the top percentile.
+- **National projected hurricane loss** on FEMA's own v1.19 baseline: $20.8-22.5B a year against
+  FEMA's $40.5-45.5B. 16-18% of counties drop one rating bin; none drop two.
+- **Census tracts (Florida pilot):** possible, and they add up to the county within 0.3%. But the
+  multiplier varies by only 0.5-1.5% inside a typical county, so tract detail comes from NRI's tract
+  EAL, not from the climate part.
+
+![FEMA's published multipliers against ours](results/layer/map_fema_vs_ours.png)
+
 ## How to run it
 
 ```bash
 ./run.sh
 ```
 
-`run.sh` needs [uv](https://docs.astral.sh/uv/) and about 1.5 GB of disk for downloads and
-cached wind fields. It runs `uv run hurloss-run`, which:
+`run.sh` needs [uv](https://docs.astral.sh/uv/) and about 2 GB of disk for downloads and
+cached wind fields. It runs two steps. The first is `uv run hurloss-run`, the spike, which:
 
 1. Downloads every input into `~/.cache/hurloss-public-rebuild` (set `HURLOSS_CACHE` to move it).
    Nothing downloaded goes into the repo.
@@ -57,15 +78,22 @@ cached wind fields. It runs `uv run hurloss-run`, which:
 3. Applies each climate-conditioning route and FEMA's formula, scores everything against FEMA's
    published values, and writes the tables and figures in `results/`.
 
-All of it runs on this 4-core machine: 73 minutes from an empty cache, and about a minute with
-the event sets cached. It makes no model calls and uses no paid services, so it costs
-nothing.
+The second is `uv run hurloss-layer`, our own layer. It builds 10,000 years of STORM wind
+fields for counties and for the Florida tracts, computes the multipliers and ranges, and writes
+the comparison with FEMA's values to `results/layer/`.
+
+All of it runs on this 4-core machine. Timings for a clean run are under "Checked from a clean
+checkout"; with the event sets cached it takes about two minutes. It makes no model calls and
+uses no paid services, so it costs nothing.
 
 The settings come from environment variables:
 
 - `HURLOSS_GRID_STEP`: grid step in degrees, default 0.25.
 - `HURLOSS_SYNTHETIC_COPIES`: perturbed copies per historical track, default 19.
 - `HURLOSS_STORM_FILES`: 1,000-year STORM files per climate, default 5.
+- `HURLOSS_LAYER_STORM_FILES`: 1,000-year STORM files behind the layer, default 10.
+- `HURLOSS_TRACT_STATES`: comma-separated state FIPS codes for the tract layer, default `12`
+  (Florida).
 - `HURLOSS_WORKERS`: worker processes, default all cores.
 
 To browse the results, run `uv run marimo edit notebooks/walkthrough.py`. Run the tests with
@@ -349,9 +377,14 @@ and ran `./run.sh` on this 4-core machine with nothing else. It finished cleanly
 
 ```
 run.sh                  the one command
-pyproject.toml, uv.lock uv project; CLI hurloss-run
+METHOD.md               the method, the case against reusing FEMA's values, results, updates
+pyproject.toml, uv.lock uv project; CLIs hurloss-run and hurloss-layer
 src/hurloss_rebuild/
-  run.py                orchestration: inputs, event sets, routes, scoring, figures, timings
+  run.py                the spike: inputs, event sets, routes, scoring, figures, timings
+  layer_run.py          our layer: county and tract multipliers, FRI comparison, STORM check
+  layer.py              FEMA's formula plus Knutson/Jewson at every published percentile
+  compare_fri.py        our multipliers, projected loss and ratings against FEMA's
+  tract_layer.py        tract table, spread inside counties, roll-up to the county
   fri_formula.py        FEMA's Eq. 11-12 and county aggregation (pure)
   grid.py               grid points and their counties (1 km buffer)
   hazard.py             CLIMADA wind fields, cached per event set
@@ -363,8 +396,10 @@ src/hurloss_rebuild/
   forensics.py          what the answer key looks like; constant baselines
   figures.py            maps and scatter
   scoring/              rating bins, held-out split and metrics, as in #15
-  sources/              answer key, counties, IBTrACS, STORM (range reads), NRI v1.20
+  sources/              answer key, counties, IBTrACS, STORM (range reads), NRI v1.20,
+                        tract centroids and NRI tract EAL
 notebooks/walkthrough.py  marimo notebook over results/
-tests/                  formula, conditioning and ARA-method tests
-results/                tables and figures from the clean run (scores_by_county.csv is not committed)
+tests/                  formula, conditioning, ARA method, layer and stacking tests
+results/                spike tables and figures; results/layer/ for our layer
+                        (scores_by_county.csv is not committed)
 ```

@@ -73,5 +73,24 @@ def _(mo, results):
     return
 
 
+@app.cell
+def _(mo, pd, results):
+    layer = results / "layer"
+    summary = pd.read_csv(layer / "fri_comparison_summary.csv")
+    tracts = pd.read_csv(layer / "tract_summary_FL.csv")
+    mo.vstack(
+        [
+            mo.md("## Our layer against FEMA's (see METHOD.md)"),
+            summary,
+            pd.read_csv(layer / "storm_check.csv"),
+            mo.image(layer / "map_fema_vs_ours.png"),
+            mo.md("## Florida tracts"),
+            tracts,
+            mo.image(layer / "map_tracts_FL.png"),
+        ]
+    )
+    return
+
+
 if __name__ == "__main__":
     app.run()
