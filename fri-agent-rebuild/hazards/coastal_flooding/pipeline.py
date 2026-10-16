@@ -15,7 +15,7 @@ from fri_rebuild import inputs
 SEVERITIES = ("minor", "moderate", "major")
 SCENARIOS = {"LOWER": "intermediate", "HIGHER": "high"}
 DECADES = {"MID": 2050, "LATE": 2100}
-CURRENT_DECADES = (2020, 2030)
+CURRENT_DECADES = (2030,)
 # Midpoints of the documented annual-chance bands: minor 50-100%, moderate 2-10%, major 1%.
 ANNUAL_CHANCE = pd.Series({"minor": 0.75, "moderate": 0.06, "major": 0.01})
 
@@ -26,7 +26,7 @@ def saturate(days):
 
 
 def station_frequencies() -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Current (mean of 2020 and 2030 decades, ~2025) and projected flood days per year."""
+    """Current (2030 decade) and projected flood days per year."""
     tables = inputs.coastal_tables()
     projected = tables["htf_decadal"]
     base = projected[(projected["scenario"] == "intermediate") & (projected["decade"].isin(CURRENT_DECADES))]
