@@ -429,6 +429,57 @@ logs are `forensics/recipes/agent*.tsv`.
   return-period recipe to within 0.06°. That recipe produces factors as large as 10^24, which made
   the angle meaningless, so we dropped the test.
 
+### What-if: the floodplain share, and how stale the inputs are
+
+These are scenarios built on FEMA's own numbers (`python -m fri_rebuild.coastal_scenarios`,
+`results/forensics/coastal_scenarios_*.csv`). They show how much the dropped floodplain share
+could matter. They are not FEMA's values and not forecasts.
+
+For the 279 counties the recipe fits within 1%, we treat the part of each county's weights
+missing from 1 as the floodplain share. The variants are:
+
+- **floodplain_kept:** that share keeps today's losses (factor 1).
+- **floodplain_1pct:** that share grows the way the 1% annual-chance flood level does under the
+  scenario's sea level rise.
+- **floodplain_0_2pct:** the same for the 0.2% level, extrapolated past the curve's 100-year end.
+  NRI does not publish how the floodplain share splits between the two levels, so the two
+  variants bracket it.
+
+| Scenario | Published | Floodplain kept at 1 | Floodplain grows (1% to 0.2% level) |
+|---|---|---|---|
+| Mid-century, lower | $4.95B/yr | $5.17B/yr (16 ratings change) | $5.98B-6.21B/yr (59-69 ratings change) |
+| Mid-century, higher | $9.50B/yr | $9.73B/yr (7) | $12.0B-16.1B/yr (47-61) |
+| Late century, lower | $59.0B/yr | $59.2B/yr (4) | $187B-327B/yr (64-81) |
+| Late century, higher | $60.1B/yr | $60.3B/yr (4) | $272B-838B/yr (102-117) |
+
+- **What the table shows:**
+  - Keeping the floodplain share at today's losses changes little: about 4.6% in mid-century,
+    under 1% late.
+  - Letting it grow with sea level changes mid-century projected losses by 21-69%.
+- **The late-century figures are not credible as estimates.**
+  - By 2100, today's 100-year and 500-year flood levels are reached up to 10 times a year under
+    these rises, so their frequency factors run into the thousands.
+  - The same frequency-ratio method FEMA used for tidal flooding then multiplies today's
+    floodplain losses as if every one of those floods did the same damage.
+  - Like FEMA's own late-century coastal values, they say more about the method's limits than
+    about future losses.
+- **Did the flood frequency inputs shift?** Not the thresholds or the curves.
+  - NOAA's current flood thresholds still equal its 2018 formula (0.04 x tide range + 0.50 m,
+    0.03 x + 0.80 m, 0.04 x + 1.17 m above high tide). Using the formula for every gauge fits
+    FEMA's values as well as the published thresholds do: 17 exact against 18, median error 1.4%
+    in both, late-century pattern 91% against 90%.
+  - The extreme water level curves are the 2022 report's.
+- **The NRI baseline did shift.** NRI v1.20 (December 2025) moved coastal flood EAL a long way
+  from v1.19.0, the baseline FEMA applied its multipliers to
+  (`results/forensics/coastal_baseline_drift_v1_20.csv`):
+  - National coastal flood EAL fell from $1.28B to $0.99B a year.
+  - 73% of the 463 counties with coastal flood EAL in both releases changed by more than 2x
+    either way; the middle half ranges from 0.21x to 2.5x.
+  - 29 counties gained coastal flood EAL and 16 lost it. Part of that is Connecticut moving from
+    8 counties to 9 planning regions.
+  - FEMA's multipliers were never refit to v1.19.0 (see the v1.18.1 footprint above). Applying
+    them to v1.20 would widen the mismatch.
+
 ## What failed or wasn't covered
 
 - **Hurricane wind** was not attempted. FEMA's input is Applied Research Associates'
