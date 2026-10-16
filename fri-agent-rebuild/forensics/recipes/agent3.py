@@ -16,9 +16,14 @@ USE_ID = True  # use the NOAA-ID matched projection when the gauge has one
 EXN = 6
 SHIFT = 0.0  # metres added to the threshold for the current frequency
 SHIFT_FUT = 0.0  # metres added to the threshold for the future frequencies
+STEP = "near"  # None, floor, ceil, near: read the return period off a table row instead of interpolating
+CLAMP_TOP = False
 INTERP = "logrp"  # interpolation between table points: logrp, rp, freq
 LOW_EXTRAP = True  # extrapolate log-linearly below the 0.1-year level, then cap
 OFFSETS = ()
+RISE_SCALE = 1.0  # multiplier on the rise
+Y_MID = 2050  # year of the mid-century projection
+Y_LATE = 2100
 ADD_MID = 0.0  # cm added to the 2050 rise
 ADD_LATE = 0.0  # cm added to the 2100 rise
 BASE = None
@@ -51,17 +56,34 @@ def _rises(row, t):
     vals = {}
     for sc in SCEN:
         for y in (2050, 2100):
-            v = r.loc[sc, f"RSL{y} (cm)"] / 100
+            yy = Y_MID if y == 2050 else Y_LATE
+            xs = np.arange(2020, 2151, 10)
+            ys = [r.loc[sc, f"RSL{x} (cm)"] for x in xs]
+            v = float(np.interp(yy, xs, ys)) / 100
             if OFFSETS:
                 v += sum(r.loc[sc, c] for c in OFFSETS) / 100
             v += (ADD_MID if y == 2050 else ADD_LATE) / 100
             if BASE:
                 v -= r.loc[sc, BASE] / 100
-            vals[(sc, y)] = v
+            vals[(sc, y)] = v * RISE_SCALE
     return vals
 
 
 def freq(z, lv, per):
+    if STEP:
+        if z <= lv[0] and STEP != "ceil":
+            return CAP
+        if z >= lv[-1]:
+            if CLAMP_TOP:
+                return 1 / per[-1]
+        else:
+            if STEP == "floor":
+                j = np.searchsorted(lv, z, side="right") - 1
+            elif STEP == "ceil":
+                j = np.searchsorted(lv, z, side="left")
+            else:
+                j = int(np.argmin(np.abs(lv - z)))
+            return min(CAP, 1 / per[max(j, 0)])
     if z <= lv[0]:
         if not LOW_EXTRAP:
             return CAP
