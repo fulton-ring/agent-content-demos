@@ -13,7 +13,7 @@ from fri_rebuild import answer_key, score
 from fri_rebuild.experiment import load_pipeline
 from fri_rebuild.paths import HAZARDS_DIR, RESULTS_DIR
 
-HAZARDS = ("extreme_heat", "drought", "wildfire")
+HAZARDS = ("extreme_heat", "extreme_heat_loca2", "drought", "wildfire", "coastal_flooding")
 
 
 def largest_differences(detail: pd.DataFrame, count: int = 5) -> pd.DataFrame:
@@ -76,11 +76,12 @@ def summarize_pipeline(key: pd.DataFrame, pipeline: Path, hazard: str, label: st
 
 
 def claude_code_comparison(key: pd.DataFrame) -> pd.DataFrame:
-    """Score the final files of the Claude Code subagent loop (wildfire) the same way."""
-    folder = RESULTS_DIR / "claude-code-subagents" / "wildfire"
+    """Score the final files of the Claude Code subagent loops the same way."""
+    root = RESULTS_DIR / "claude-code-subagents"
     return pd.DataFrame(
         [
-            summarize_pipeline(key, path, "wildfire", f"Claude Code subagent {path.stem}")
+            summarize_pipeline(key, path, folder.name, f"Claude Code subagent {path.stem}")
+            for folder in sorted(root.iterdir())
             for path in sorted(folder.glob("agent*.py"))
         ]
     )
