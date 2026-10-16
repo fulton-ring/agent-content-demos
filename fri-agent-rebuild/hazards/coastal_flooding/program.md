@@ -55,3 +55,24 @@ LOWER/HIGHER) for coastal counties. You edit `pipeline.py`; nothing else.
    curves plus sea level rise?
 4. How to handle sub-types with zero current frequency (division by zero) and gauges with no data.
 5. Anything else the log suggests: look at which states and columns have the largest errors.
+
+## Note from the person running the loop (added after round 10)
+
+Ten rounds tuned which decade counts as "current" and the sub-type weights. Training error fell
+to 0.65, but correlation stayed near 0.44, and on held-out states it is 0.28. Nobody tried open
+question 3, and there is documentary evidence for it:
+
+- The 187 gauges FEMA cites are exactly the 187 rows of `extreme_water_levels` (the 2022
+  report's extreme water level table). The CO-OPS projections cover only 110.
+- FEMA defines the sub-types by return period: minor = 1-2 year flood, moderate = 10-50 year,
+  major = 100 year. Those are columns of that table (return levels in m above MHHW, year 2000).
+- So a likely reading is: for each gauge and sub-type, take today's flood level z from the table
+  (e.g. the 1-2, 10-50 or 100 year return level). Raise mean sea level by the scenario's relative
+  rise at that gauge and decade (`sea_level_projections`, 2050 and 2100, Intermediate = 1.0 m and
+  High = 2.0 m scenarios, median). Read off the new return period of z, i.e. the return period
+  whose level is z minus the rise. The frequency adjustment factor is old return period / new
+  return period, capped where the level falls below the table's shortest return period
+  (0.1 year).
+- Then assign counties to the nearest of the 187 gauges.
+
+This is a hypothesis, not FEMA's confirmed method. Weigh it against the log.

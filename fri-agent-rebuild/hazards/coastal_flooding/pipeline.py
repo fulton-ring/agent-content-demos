@@ -16,8 +16,9 @@ SEVERITIES = ("minor", "moderate", "major")
 SCENARIOS = {"LOWER": "intermediate", "HIGHER": "high"}
 DECADES = {"MID": 2050, "LATE": 2100}
 CURRENT_DECADES = (2030,)
-# Documented annual-chance bands: minor 50-100% (upper end, 1-year flood), moderate 2-10%, major 1%.
-ANNUAL_CHANCE = pd.Series({"minor": 1.0, "moderate": 0.06, "major": 0.01})
+# Annual-chance weights: minor 50-100% (upper end, 1-year flood), moderate 2-10% (midpoint),
+# major: midpoint of the 0-1% band.
+ANNUAL_CHANCE = pd.Series({"minor": 1.0, "moderate": 0.06, "major": 0.005})
 
 
 def saturate(days):
@@ -29,7 +30,9 @@ def station_frequencies() -> tuple[pd.DataFrame, pd.DataFrame]:
     """Current (2030 decade) and projected flood days per year."""
     tables = inputs.coastal_tables()
     projected = tables["htf_decadal"]
-    base = projected[(projected["scenario"] == "intermediate") & (projected["decade"].isin(CURRENT_DECADES))]
+    base = projected[
+        (projected["scenario"] == "intermediate") & (projected["decade"].isin(CURRENT_DECADES))
+    ]
     current = base.pivot_table(index="station", columns="severity", values="days", aggfunc="mean")
     current = current.reindex(columns=list(SEVERITIES))
     return current, projected

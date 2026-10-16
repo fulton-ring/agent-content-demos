@@ -10,6 +10,7 @@ raw values.
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 
+import aiohttp
 import fsspec
 import h5py
 import numpy as np
@@ -95,22 +96,36 @@ def day_slices(scenario: str, period: str) -> list[Slice]:
     return pieces
 
 
+def read_days(piece: Slice, start: int, stop: int, attempts: int = 5) -> np.ndarray:
+    """Days [start, stop) of one source file, reopening the connection if a read is cut off."""
+    for attempt in range(attempts):
+        try:
+            with open_remote(piece.scenario, piece.span) as nc:
+                return nc["tasmin"][start:stop]
+        except (OSError, aiohttp.ClientError):
+            if attempt == attempts - 1:
+                raise
+    raise RuntimeError("unreachable")
+
+
 def histogram_slice(piece: Slice, cells: np.ndarray, out_name: str) -> str:
     """Histogram of tasmin (deg C) for one run of days, written to a partial file."""
+    target = cache_path("loca2", "partial", out_name)
+    if target.exists():
+        return str(target)
     counts = np.zeros((VALUE_BINS + 1, len(cells)), dtype=np.uint16)
     columns = np.arange(len(cells))
-    batch = 30
-    with open_remote(piece.scenario, piece.span) as nc:
-        data = nc["tasmin"]
-        for start in range(piece.first_day, piece.last_day, batch):
-            block = data[start : min(start + batch, piece.last_day)]
-            block = block.reshape(block.shape[0], -1)[:, cells] - 273.15
-            for day in block:
-                bins = np.searchsorted(EDGES, day, side="right") - 1
-                bins = np.where(np.isfinite(day) & (np.abs(day) < 1e10), bins, MISSING_ROW)
-                counts[bins, columns] += 1
-    target = cache_path("loca2", "partial", out_name)
-    np.save(target, counts)
+    batch = 60
+    for start in range(piece.first_day, piece.last_day, batch):
+        block = read_days(piece, start, min(start + batch, piece.last_day))
+        block = block.reshape(block.shape[0], -1)[:, cells] - 273.15
+        for day in block:
+            bins = np.searchsorted(EDGES, day, side="right") - 1
+            bins = np.where(np.isfinite(day) & (np.abs(day) < 1e10), bins, MISSING_ROW)
+            counts[bins, columns] += 1
+    partial = target.with_name(target.stem + ".tmp.npy")
+    np.save(partial, counts)
+    partial.rename(target)
     return str(target)
 
 
