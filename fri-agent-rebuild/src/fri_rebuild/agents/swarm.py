@@ -8,8 +8,7 @@ answer key, runs each candidate, and keeps the best one if it beats the current 
 
 Usage: uv run fri-swarm <hazard> [--rounds N] [--agents N] [--budget USD] [--resume NOTE]
 
-Every proposal is logged to experiments/swarm/<hazard>.tsv and its code kept in
-experiments/swarm/candidates/<hazard>/.
+Every proposal, with its code, is appended to experiments.jsonl (fri_rebuild.agents.records).
 """
 
 import argparse
@@ -31,16 +30,13 @@ from pydantic_ai.messages import ModelResponse
 from pydantic_ai.models.openrouter import OpenRouterModel, OpenRouterModelSettings
 
 from fri_rebuild import inputs
-from fri_rebuild.paths import EXPERIMENTS_DIR, HAZARDS_DIR, cache_path
+from fri_rebuild.agents import records
+from fri_rebuild.paths import HAZARDS_DIR, cache_path
 
 os.environ.setdefault("PYDANTIC_AI_NO_BANNER", "1")
 MODEL = "anthropic/claude-sonnet-5.5"
 RUN_TIMEOUT_SECONDS = 1500
 MIN_IMPROVEMENT = 0.002
-LOG_COLUMNS = (
-    "id\tround\tagent\tparent\tmetric_log_mae\tsame_bin\tpearson\tstatus\tseconds\tcost_usd\t"
-    "description"
-)
 FORBIDDEN = (
     re.compile(r"answer_key|fri_rebuild\.scor|from fri_rebuild import .*scor|fri_rebuild\.coastal"),
     re.compile(r"read_excel|Master_Datasheet|nri-future-risk|raw\.githubusercontent"),
@@ -99,6 +95,18 @@ class Candidate:
     proposal: Proposal | None
     cost: float
     error: str = ""
+
+
+def logged_value(value: object) -> object:
+    """A logged metric: numbers as numbers, blanks as None."""
+    text = str(value)
+    if text == "":
+        return None
+    try:
+        number = float(text)
+    except ValueError:
+        return text
+    return int(number) if text.lstrip("-").isdigit() else number
 
 
 def code_id(code: str) -> str:
@@ -191,11 +199,6 @@ class Swarm:
         self.folder = HAZARDS_DIR / hazard
         self.pipeline = self.folder / "pipeline.py"
         self.program = (self.folder / "program.md").read_text()
-        self.log_path = EXPERIMENTS_DIR / "swarm" / f"{hazard}.tsv"
-        self.candidates = EXPERIMENTS_DIR / "swarm" / "candidates" / hazard
-        self.candidates.mkdir(parents=True, exist_ok=True)
-        if not self.log_path.exists():
-            self.log_path.write_text(LOG_COLUMNS + "\n")
         self.spent = 0.0
         self.agent = Agent(
             OpenRouterModel(MODEL),
@@ -206,11 +209,15 @@ class Swarm:
         )
         self.agent.tool_plain(describe_input)
 
-    def log(self, row: list[object]) -> None:
-        with self.log_path.open("a") as handle:
-            handle.write(
-                "\t".join(str(v).replace("\t", " ").replace("\n", " ") for v in row) + "\n"
-            )
+    def log(self, row: list[object], code: str | None = None) -> None:
+        """Append one experiment, fields in records.SWARM_COLUMNS order, with its code."""
+        record: dict[str, object] = {"harness": "swarm", "hazard": self.hazard}
+        for column, value in zip(records.SWARM_COLUMNS, row, strict=True):
+            text = column in ("id", "parent", "status", "description")
+            record[column] = str(value).replace("\n", " ") if text else logged_value(value)
+        if code is not None and str(record["id"]) not in self.logged_ids():
+            record["code"] = code
+        records.append(record)
 
     def prompt(self, best_code: str, best_summary: str, notes: list[str], agent: int) -> str:
         return "\n\n".join(
@@ -218,7 +225,7 @@ class Swarm:
                 f"# program.md\n{self.program}",
                 f"# Current best pipeline.py\n```python\n{best_code}\n```",
                 f"# Training-state scores of the current best\n```\n{best_summary}\n```",
-                f"# Experiment log so far\n```\n{self.log_path.read_text()}\n```",
+                f"# Experiment log so far\n```\n{records.swarm_log_text(self.hazard)}\n```",
                 "# Notes from earlier experiments\n" + ("\n".join(notes[-12:]) or "none yet"),
                 f"You are agent {agent} of {self.agents} this round. Pick a different idea from "
                 f"the other agents: prefer open question number {agent} in program.md if it has "
@@ -288,7 +295,7 @@ class Swarm:
                 ]
             )
             return None
-        path = self.candidates / f"{candidate.id}.py"
+        path = cache_path("runs", self.hazard, f"{candidate.id}.py")
         path.write_text(proposal.pipeline_code)
         outcome = run_pipeline(path, cache_path("runs", self.hazard, f"{candidate.id}.parquet"))
         status = "crash" if outcome.metric is None else "tested"
@@ -305,32 +312,26 @@ class Swarm:
                 f"{outcome.seconds:.0f}",
                 f"{candidate.cost:.4f}",
                 proposal.description,
-            ]
+            ],
+            code=proposal.pipeline_code,
         )
         return outcome
 
     def mark(self, candidate_id: str, status: str) -> None:
-        lines = self.log_path.read_text().splitlines()
-        for index in range(len(lines) - 1, 0, -1):
-            fields = lines[index].split("\t")
-            if fields[0] == candidate_id and fields[7] == "tested":
-                fields[7] = status
-                lines[index] = "\t".join(fields)
-                break
-        self.log_path.write_text("\n".join(lines) + "\n")
+        records.set_status("swarm", self.hazard, candidate_id, "tested", status)
 
     def logged_ids(self) -> set[str]:
-        return {row.split("\t")[0] for row in self.log_path.read_text().splitlines()[1:]}
+        log = records.table("swarm", self.hazard)
+        return set(log["id"]) if len(log) else set()
 
     def last_round(self) -> int:
-        rows = self.log_path.read_text().splitlines()[1:]
-        return max((int(row.split("\t")[1]) for row in rows), default=0)
+        log = records.table("swarm", self.hazard)
+        return int(log["round"].max()) if len(log) else 0
 
     async def run(self, rounds: int, patience: int, resume_note: str | None) -> None:
         """Run the loop. With resume_note, continue an existing log from the kept pipeline."""
         best_code = self.pipeline.read_text()
         best_id = code_id(best_code)
-        (self.candidates / f"{best_id}.py").write_text(best_code)
         start = self.last_round() + 1 if resume_note else 1
         start_run = run_pipeline(
             self.pipeline, cache_path("runs", self.hazard, f"{best_id}.parquet")
@@ -350,7 +351,8 @@ class Swarm:
                 f"{start_run.seconds:.0f}",
                 "0",
                 f"resume: {resume_note}" if resume_note else "baseline (human-written)",
-            ]
+            ],
+            code=best_code,
         )
         best_metric, best_summary = start_run.metric, start_run.summary
         notes: list[str] = []

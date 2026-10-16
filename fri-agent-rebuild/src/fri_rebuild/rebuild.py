@@ -1,19 +1,17 @@
 """Run each hazard's final pipeline, score it on training and held-out states, and summarize the
-agent experiment logs: every pipeline the loop kept, scored on held-out states after the fact,
-plus the Claude Code subagent comparison. The notebook notebooks/rebuild.py writes the tables to
-results/rebuild/.
+experiment record (experiments.jsonl): every pipeline the loop kept, scored on held-out states
+after the fact, plus the Claude Code subagent comparison. The notebook notebooks/rebuild.py
+writes the tables to results/rebuild/.
 """
 
 import time
-from pathlib import Path
+from types import ModuleType
 
 import pandas as pd
 
-from fri_rebuild.paths import EXPERIMENTS_DIR
-from fri_rebuild.pipeline import hazard_pipeline, load_pipeline
+from fri_rebuild.agents import records
+from fri_rebuild.pipeline import hazard_pipeline, load_source
 from fri_rebuild.scoring import metrics
-
-SWARM_DIR = EXPERIMENTS_DIR / "swarm"
 
 HAZARDS = ("extreme_heat", "extreme_heat_loca2", "drought", "wildfire", "coastal_flooding")
 
@@ -29,10 +27,9 @@ def largest_differences(detail: pd.DataFrame, count: int = 5) -> pd.DataFrame:
 
 
 def swarm_summary(hazard: str) -> dict[str, object]:
-    path = SWARM_DIR / f"{hazard}.tsv"
-    if not path.exists():
+    log = records.table("swarm", hazard)
+    if log.empty:
         return {"hazard": hazard}
-    log = pd.read_csv(path, sep="\t")
     agents = log[(log["round"] > 0) & (log["status"] != "resume")]
     tested = agents["metric_log_mae"].notna()
     baseline = log.loc[log["round"] == 0, "metric_log_mae"].iloc[0]
@@ -54,19 +51,21 @@ def swarm_summary(hazard: str) -> dict[str, object]:
 
 def kept_pipeline_scores(key: pd.DataFrame, hazard: str) -> pd.DataFrame:
     """Training and held-out metrics for every pipeline the loop kept, baseline included."""
-    log = pd.read_csv(SWARM_DIR / f"{hazard}.tsv", sep="\t")
-    kept = log[log["status"].isin(["keep"])].drop_duplicates("id")
+    log = records.table("swarm", hazard)
+    kept = log[log["status"] == "keep"].drop_duplicates("id")
     rows = []
     for _, entry in kept.iterrows():
-        pipeline = SWARM_DIR / "candidates" / hazard / f"{entry['id']}.py"
+        pipeline = load_source(
+            records.code("swarm", hazard, entry["id"]), f"{hazard}_{entry['id']}"
+        )
         rows.append(
             summarize_pipeline(key, pipeline, hazard, f"{entry['id']} {entry['description']}")
         )
     return pd.DataFrame(rows)
 
 
-def summarize_pipeline(key: pd.DataFrame, pipeline: Path, hazard: str, label: str) -> dict:
-    rebuilt = load_pipeline(pipeline).hazard_multipliers()
+def summarize_pipeline(key: pd.DataFrame, pipeline: ModuleType, hazard: str, label: str) -> dict:
+    rebuilt = pipeline.hazard_multipliers()
     result, _ = metrics.score(key, rebuilt, ("train", "held_out"))
     row: dict = {"hazard": hazard, "pipeline": label}
     for subset in ("train", "held_out"):
@@ -79,14 +78,15 @@ def summarize_pipeline(key: pd.DataFrame, pipeline: Path, hazard: str, label: st
 
 def claude_code_comparison(key: pd.DataFrame) -> pd.DataFrame:
     """Score the final files of the Claude Code subagent loops the same way."""
-    root = EXPERIMENTS_DIR / "claude-code-subagents"
-    return pd.DataFrame(
-        [
-            summarize_pipeline(key, path, folder.name, f"Claude Code subagent {path.stem}")
-            for folder in sorted(root.iterdir())
-            for path in sorted(folder.glob("agent*.py"))
-        ]
-    )
+    finals = records.table("claude-code-subagent")
+    finals = finals[finals["status"] == "final"].sort_values(["hazard", "run"])
+    rows = []
+    for _, final in finals.iterrows():
+        hazard, run = str(final["hazard"]), str(final["run"])
+        code = records.code("claude-code-subagent", hazard, "final", run)
+        pipeline = load_source(code, f"{hazard}_{run}")
+        rows.append(summarize_pipeline(key, pipeline, hazard, f"Claude Code subagent {run}"))
+    return pd.DataFrame(rows)
 
 
 def run_hazard(

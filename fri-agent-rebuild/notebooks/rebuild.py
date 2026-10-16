@@ -14,7 +14,7 @@ def _():
     from fri_rebuild.scoring import answer_key
 
     out = RESULTS_DIR / "rebuild"
-    (out / "county_hm").mkdir(parents=True, exist_ok=True)
+    out.mkdir(parents=True, exist_ok=True)
     return answer_key, mo, out, pd, rebuild
 
 
@@ -25,7 +25,8 @@ def _(mo):
 
     Runs each hazard's final pipeline (`hazards/<hazard>/pipeline.py`), scores its county
     multipliers against FEMA's published values on training and held-out states, and summarizes
-    the agent loop's experiment logs (`experiments/`). The loop itself is not rerun here: it
+    the agent loop's experiment record (`experiments.jsonl`; browse it in
+    `notebooks/experiments.py`). The loop itself is not rerun here: it
     costs money and is not deterministic (`uv run fri-swarm <hazard>`).
 
     Writes `results/rebuild/`.
@@ -34,12 +35,12 @@ def _(mo):
 
 
 @app.cell
-def _(answer_key, out, rebuild):
+def _(answer_key, out, pd, rebuild):
     key = answer_key.conus(answer_key.load())
-    runs = {}
-    for _hazard in rebuild.HAZARDS:
-        runs[_hazard] = rebuild.run_hazard(key, _hazard)
-        runs[_hazard][0].to_csv(out / "county_hm" / f"{_hazard}.csv")
+    runs = {_hazard: rebuild.run_hazard(key, _hazard) for _hazard in rebuild.HAZARDS}
+    county_hm = pd.concat([run[0] for run in runs.values()], axis=1).sort_index()
+    county_hm.index.name = "fips"
+    county_hm.to_csv(out / "county_hm.csv")
     return key, runs
 
 

@@ -1,7 +1,9 @@
-"""Load a pipeline or recipe file (hazard pipelines, agent candidates, recipe-search agents)."""
+"""Load a pipeline or recipe as a module: from a file, or from code in the experiment record."""
 
 import importlib.util
+import sys
 from pathlib import Path
+from types import ModuleType
 
 from fri_rebuild.paths import HAZARDS_DIR
 
@@ -12,6 +14,14 @@ def load_pipeline(path: Path):  # noqa: ANN201 - returns a module
         raise ImportError(f"cannot load {path}")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    return module
+
+
+def load_source(code: str, name: str) -> ModuleType:
+    """A module from source code, e.g. an agent's candidate from experiments.jsonl."""
+    module = ModuleType(f"pipeline_{name}")
+    sys.modules[module.__name__] = module  # dataclasses and pickling look modules up by name
+    exec(compile(code, f"<{name}>", "exec"), module.__dict__)  # noqa: S102 - our own record
     return module
 
 

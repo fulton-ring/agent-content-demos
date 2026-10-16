@@ -43,7 +43,7 @@ things:
 
 1. Downloads every input into `~/.cache/fri-agent-rebuild` (`uv run fri-prepare`; set
    `FRI_CACHE` to move it). Nothing downloaded goes into the repo.
-2. Runs the five [marimo](https://marimo.io) notebooks in `notebooks/` as scripts. Each one
+2. Runs the [marimo](https://marimo.io) notebooks in `notebooks/` as scripts. Each one
    writes its own folder under `results/`:
 
 | Notebook | What it does | Writes |
@@ -53,6 +53,7 @@ things:
 | `coastal_forensics.py` | Reverse engineering FEMA's coastal multipliers (answer key open) | `results/coastal_forensics/` |
 | `coastal_scenarios.py` | What-if coastal multipliers (scenarios, not findings) | `results/coastal_scenarios/` |
 | `charleston_pilot.py` | Coastal multipliers by tract, built from buildings | `results/charleston/` |
+| `experiments.py` | Browse every agent proposal: logs, code, diffs, progress by round | nothing |
 
 To read or change one interactively, run `uv run marimo edit notebooks/<name>.py`. The
 notebooks only call functions in `src/fri_rebuild/`, so the same code backs scripts, notebooks
@@ -132,8 +133,8 @@ but we did not try to rebuild them.
     identical to an earlier run. It runs each candidate in a subprocess and keeps the best one if
     it beats the current best by more than 0.002.
   - The loop stops after a set number of rounds with no improvement or at its budget. Every
-    proposal is logged in `experiments/swarm/<hazard>.tsv`, and its code is kept in
-    `experiments/swarm/candidates/<hazard>/<id>.py`.
+    proposal, with its code, is one line of `experiments.jsonl` (browse it in
+    `notebooks/experiments.py`).
 
 ## Results (one clean run)
 
@@ -234,7 +235,7 @@ NEX extreme heat split by threshold, held-out:
 We ran two hazards a second way: Claude Code subagents (Sonnet), each starting from the human
 baseline with the same rules and `program.md`, and steered to different open questions.
 
-- Each ran 6-10 experiments in its own copy (`experiments/claude-code-subagents/<hazard>/`).
+- Each ran 6-10 experiments in its own copy (their logs and final files are in `experiments.jsonl`).
 - Each took 2-3 minutes and 42-62k tokens.
 - Unlike the Pydantic AI agents, they could read the data and run code themselves.
 
@@ -289,8 +290,8 @@ the agent framework this repo prescribes, and compared it with Claude Code subag
 3. **Harness bug: the answer-key guard rejected valid code.** The first wildfire round lost all
    three proposals. The guard banned the text `_HM"]`, which every pipeline writes for its own
    output columns, and banned `STATEABBRV`, which FEMA's state fixed effects need. The person
-   removed both patterns and restarted. That run is kept in
-   `experiments/swarm/wildfire-guard-bug.tsv` ($0.06).
+   removed both patterns and restarted. That run is kept in `experiments.jsonl` as harness
+   `swarm-guard-bug` ($0.06).
 4. **Kept code needed tidying.** The final wildfire pipeline left an unused table behind, and two
    kept pipelines each had one type-check error. The person fixed them without changing results.
    The harness does not lint candidates.
@@ -402,8 +403,8 @@ find it.
 
 Three Claude Code subagents searched for a recipe that reproduces FEMA's numbers from public NOAA
 data (`uv run fri-recipe-score <recipe.py>`). Two of them, starting from different angles,
-converged on the same one, now `src/fri_rebuild/coastal/recipe.py`. Their recipes and search
-logs are in `experiments/coastal-recipe-search/`; `results/coastal_forensics/recipe_scores.csv`
+converged on the same one, now `src/fri_rebuild/coastal/recipe.py`. Their final recipes and
+search logs are in `experiments.jsonl` (harness `recipe-search`); `results/coastal_forensics/recipe_scores.csv`
 scores the recipe and its threshold variants against the return-period baseline.
 
 - **Sub-types are NOAA's thresholds, not return periods.** They are NOAA's minor, moderate and
@@ -626,27 +627,20 @@ variants.
 ## Files
 
 ```
-run.sh                      the one command: download inputs, run every notebook
-pyproject.toml, uv.lock     uv project; CLIs fri-prepare, fri-swarm, fri-experiment, fri-recipe-score
-notebooks/                  marimo notebooks, one per analysis (table under "How to run it")
-src/fri_rebuild/            shared function modules
-  inputs.py                 the read-only data API the hazard pipelines (and agents) use
-  sources/                  downloads and reductions: nex, loca2, fwi, landfire, nri, geo, tide_gauges
-  scoring/                  answer_key (FEMA's published values, rating bins), split, metrics
-  agents/                   swarm (the agent loop) and experiment (runs and scores one candidate)
-  coastal/                  forensics, recipe (the recovered FEMA recipe), recipe_score,
-                            scenarios (what-if), buildings (Charleston pilot)
-  rebuild.py, tracts.py     scoring the final pipelines; the census-tract layer
-  maps.py, pipeline.py      tract maps; loading pipeline and recipe files
-  prepare.py, paths.py, http.py
-hazards/<hazard>/           program.md (the human brief, with dated interventions) and
-                            pipeline.py (the final kept pipeline), for extreme_heat (NEX),
-                            extreme_heat_loca2, drought, wildfire and coastal_flooding
-experiments/                what the agents did, kept as a record (not linted)
-  swarm/<hazard>.tsv        every experiment: id, round, agent, parent, training metrics,
-                            status, seconds, cost, description
-  swarm/candidates/         the code of each proposal
-  claude-code-subagents/    the Claude Code comparison runs (wildfire, coastal flooding)
-  coastal-recipe-search/    the three recipe-search agents' recipes and logs
-results/                    notebook outputs, one folder per notebook
+run.sh               the one command: download inputs, run every notebook
+pyproject.toml       uv project; CLIs fri-prepare, fri-swarm, fri-experiment, fri-recipe-score
+experiments.jsonl    every agent proposal from every harness, with its code (one per line)
+notebooks/           marimo notebooks, one per analysis (table under "How to run it")
+src/fri_rebuild/     shared function modules
+  inputs.py          the read-only data API the hazard pipelines (and agents) use
+  sources/           downloads and reductions: nex, loca2, fwi, landfire, nri, geo, tide_gauges
+  scoring/           answer_key (FEMA's published values, rating bins), split, metrics
+  agents/            swarm (the agent loop), experiment (runs one candidate), records
+  coastal/           forensics, recipe (the recovered FEMA recipe), recipe_score,
+                     scenarios (what-if), buildings (Charleston pilot)
+  rebuild.py, tracts.py, maps.py, pipeline.py, prepare.py, paths.py, http.py
+hazards/<hazard>/    program.md (the human brief, with dated interventions) and pipeline.py
+                     (the final kept pipeline), for extreme_heat (NEX), extreme_heat_loca2,
+                     drought, wildfire and coastal_flooding
+results/             notebook outputs, one folder per notebook
 ```
