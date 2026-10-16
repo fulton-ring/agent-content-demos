@@ -35,6 +35,7 @@ def by_county(ours: pd.DataFrame, key: pd.DataFrame, eal_now: pd.Series) -> pd.D
             table[f"our_{column.lower()}"] = (
                 ours[f"{name}_{column}"].reindex(rated.index).fillna(1.0)
             )
+        table["our_covered"] = ~ours["no_cat1_wind"].reindex(rated.index).fillna(True).astype(bool)
         table["fema_pal"] = table["eal_v1_19"] * table["fema_hm"]
         table["our_pal_v1_19"] = table["eal_v1_19"] * table["our_hm"]
         table["our_pal_v1_20"] = table["eal_v1_20"] * table["our_hm"]
@@ -65,6 +66,13 @@ def summary(comparison: pd.DataFrame) -> pd.DataFrame:
                 "our_hm_low_median": part["our_hm_low"].median(),
                 "our_hm_high_median": part["our_hm_high"].median(),
                 "fema_within_our_range": part["fema_within_our_range"].mean(),
+                "counties_covered": int(part["our_covered"].sum()),
+                "fema_within_our_range_covered": part.loc[
+                    part["our_covered"], "fema_within_our_range"
+                ].mean(),
+                "our_hm_median_covered": part.loc[part["our_covered"], "our_hm"].median(),
+                "our_hm_high_median_covered": part.loc[part["our_covered"], "our_hm_high"].median(),
+                "our_hm_high_max": part["our_hm_high"].max(),
                 "eal_v1_19_total": part["eal_v1_19"].sum(),
                 "fema_pal_total": part["fema_pal"].sum(),
                 "our_pal_v1_19_total": part["our_pal_v1_19"].sum(),
