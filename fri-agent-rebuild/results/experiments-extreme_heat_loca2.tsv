@@ -1,1 +1,14 @@
 id	round	agent	parent	metric_log_mae	same_bin	pearson	status	seconds	cost_usd	description
+68178bf	0	0	-	0.022303	0.9902	0.9961	keep	34	0	baseline (human-written)
+8dc68c6	1	1	68178bf	1.405276	0.5778	-0.0387	discard	37	0.0359	Apply 296.22K floor to the historical denominator too (Q1)
+3d2aac7	1	2	68178bf	0.342822	0.8528	0.8269	discard	32	0.0350	Zero projected events in cells whose historical percentile is below 296.22K floor
+f6cc443	1	3	68178bf	0.022740	0.9898	0.9961	discard	30	0.0301	Per-cell future/past ratio, then county area-weighted mean (question 3)
+6003111	2	1	68178bf				crash	8	0.0583	Interpolate within histogram bins for percentile and 296.22K floor (sub-bin precision)
+1772a27	2	2	68178bf	0.013340	0.9941	0.9964	keep	32	0.0448	Interpolate percentile and 296.22K floor within 0.1C bins for event-day counts
+77fb965	2	3	68178bf	0.013340	0.9941	0.9964	discard	32	0.0426	Linear interpolation within percentile and floor bins for fractional day counts
+ee9c85c	3	1	1772a27	0.018193	0.9916	0.9946	discard	22	0.0516	County-pooled histograms first, then county percentile and floor (Q3)
+665f4f0	3	2	1772a27	0.014714	0.9933	0.9964	discard	31	0.0921	Strict bin-level 296.22K floor (upper edge of floor bin), keep interpolated percentile
+1ba7e99	3	3	1772a27	0.018193	0.9916	0.9946	discard	20	0.0362	County-average histograms first, then percentile/floor/ratio at county level (Q3)
+1e2a497	4	1	1772a27	0.021518	0.9907	0.9961	discard	40	0.0642	Per-cell MAX(1,ratio) then county area-weighted mean (Q3/Q4 variant)
+dcc42ec	4	2	1772a27	0.013340	0.9941	0.9964	discard	37	0.0599	Per-cell ratio with interpolated percentile/floor, then county area-weighted mean
+d6e0f49	4	3	1772a27	0.021518	0.9907	0.9961	discard	32	0.0415	Per-cell interpolated ratio with per-cell MAX(1), then county area-weighted mean (Q3)
