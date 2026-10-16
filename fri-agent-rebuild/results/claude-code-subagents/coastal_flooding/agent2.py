@@ -21,10 +21,9 @@ CURRENT_YEARS = (2001, 2020)
 def station_frequencies() -> tuple[pd.DataFrame, pd.DataFrame]:
     """Current (observed mean) and projected flood days per year, by station and severity."""
     tables = inputs.coastal_tables()
-    observed = tables["htf_observed"]
-    recent = observed[observed["year"].between(*CURRENT_YEARS)]
-    current = recent.groupby("station")[list(SEVERITIES)].mean()
     projected = tables["htf_decadal"]
+    base = projected[projected["decade"].isin([2020, 2030]) & (projected["scenario"] == "intermediate")]
+    current = base.pivot_table(index="station", columns="severity", values="days", aggfunc="mean")
     return current, projected
 
 
@@ -33,6 +32,7 @@ def nearest_station(stations: pd.DataFrame) -> pd.Series:
     counties = inputs.county_shapes()
     coastal = inputs.baseline()["CFLD_EALT"] > 0
     shapes = counties.loc[coastal[coastal].index].to_crs("EPSG:5070")
+    shapes["geometry"] = shapes.geometry.centroid
     points = inputs.points(stations).to_crs("EPSG:5070")
     joined = gpd.sjoin_nearest(shapes, points[["station", "geometry"]], how="left")
     return joined.groupby(level=0)["station"].first()
@@ -44,6 +44,9 @@ def hazard_multipliers() -> pd.DataFrame:
     stations = projected.drop_duplicates("station")[["station", "lat", "lon"]]
     stations = stations[stations["station"].isin(current.index)]
     nearest = nearest_station(stations)
+    obs = inputs.coastal_tables()["htf_observed"]
+    obs = obs[obs["year"].between(*CURRENT_YEARS)].groupby("station")[list(SEVERITIES)].mean()
+    obs = obs.reindex(current.index)
     share = current.div(current.sum(axis=1), axis=0)
     result = {}
     for warming, scenario in SCENARIOS.items():
