@@ -7,7 +7,7 @@ below the 0.1-yr level. The three sub-types are the gauge's NOAA minor, moderate
 thresholds (flood_thresholds, m above MHHW). Sea level rise (median 1.0 m and 2.0 m scenarios for
 LOWER and HIGHER, 2050 and 2100) lowers the threshold; factor = f(threshold - rise) / f(threshold).
 Gauges without a direct sea level row take the nearest 1-degree grid cell; gauges without NOAA
-thresholds take the median of the gauges that have them.
+thresholds take those of the nearest gauge that has them (great-circle distance).
 """
 
 import numpy as np
@@ -29,7 +29,19 @@ _COLS, _PERIODS = forensics.return_periods(_CURVES)
 _LOGP = np.log(_PERIODS)
 _TH = _TH.set_index("station")
 _NAMES = ["minor_m_above_mhhw", "moderate_m_above_mhhw", "major_m_above_mhhw"]
-_TH_DEFAULT = _TH[_NAMES].median()
+_C = _CURVES.assign(St=_CURVES["St"].astype(str)).set_index("St")
+_KNOWN = [g for g in _C.index if g in _TH.index and not _TH.loc[g, _NAMES].isna().any()]
+
+
+def _nearest_thresholds(gauge: str):
+    lat1, lon1 = np.radians(_C.loc[gauge, ["Latitude", "Longitude"]].to_numpy(float))
+    best, best_d = None, np.inf
+    for g in _KNOWN:
+        lat2, lon2 = np.radians(_C.loc[g, ["Latitude", "Longitude"]].to_numpy(float))
+        h = np.sin((lat2 - lat1) / 2) ** 2 + np.cos(lat1) * np.cos(lat2) * np.sin((lon2 - lon1) / 2) ** 2
+        if h < best_d:
+            best, best_d = g, h
+    return _TH.loc[best, _NAMES]
 
 
 def _rises(gauge: str, row) -> dict:
@@ -62,9 +74,9 @@ def gauge_factors(gauge: str) -> np.ndarray | None:
     if row.empty:
         return None
     levels = np.maximum.accumulate(row[_COLS].to_numpy(float)[0])
-    th = _TH.loc[gauge, _NAMES] if gauge in _TH.index else _TH_DEFAULT
-    if th.isna().any():
-        th = _TH_DEFAULT
+    th = _TH.loc[gauge, _NAMES] if gauge in _TH.index else None
+    if th is None or th.isna().any():
+        th = _nearest_thresholds(gauge)
     rise = _rises(gauge, row)
     out = []
     for name in _NAMES:

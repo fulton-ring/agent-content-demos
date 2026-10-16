@@ -15,9 +15,10 @@ CAP = 10.0  # events per year (0.1-year return period, shortest in the table)
 USE_ID = True  # use the NOAA-ID matched projection when the gauge has one
 EXN = 6
 SHIFT = 0.0  # metres added to the threshold for the current frequency
-SHIFT_FUT = 0.0  # metres added to the threshold for the future frequencies
-STEP = "near"  # None, floor, ceil, near: read the return period off a table row instead of interpolating
+SHIFT_FUT = 0.06  # metres: EMPIRICAL global offset (rise effectively 6 cm smaller); meaning unknown, fitted to FEMA values
+STEP = None  # None, floor, ceil, near: read the return period off a table row instead of interpolating
 CLAMP_TOP = False
+FILL = "nearest"  # None, "median" or "nearest": gauges without NOAA thresholds get the median threshold across gauges
 INTERP = "logrp"  # interpolation between table points: logrp, rp, freq
 LOW_EXTRAP = True  # extrapolate log-linearly below the 0.1-year level, then cap
 OFFSETS = ()
@@ -110,7 +111,19 @@ def gauge_factors(gauge):
         return None
     T = th.iloc[0, 1:].to_numpy(float)
     if np.isnan(T).any():
-        return None
+        if not FILL:
+            return None
+        allT = t["flood_thresholds"].iloc[:, 1:].to_numpy(float)
+        if FILL == "median":
+            T = np.nanmedian(allT, axis=0)
+        else:  # nearest gauge (by lat/lon) that has NOAA thresholds
+            have = t["flood_thresholds"].dropna()
+            ids = set(have.station.astype(str))
+            e2 = e[e.St.astype(str).isin(ids)]
+            c = np.cos(np.radians(row.iloc[0].Latitude))
+            d = (e2.Latitude - row.iloc[0].Latitude) ** 2 + ((e2.Longitude - row.iloc[0].Longitude) * c) ** 2
+            nid = str(e2.loc[d.idxmin(), "St"])
+            T = have[have.station.astype(str) == nid].iloc[0, 1:].to_numpy(float)
     row = row.iloc[0]
     lv = np.maximum.accumulate(row[cols].to_numpy(float))
     r = _rises(row, t)
