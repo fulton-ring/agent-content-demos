@@ -101,6 +101,13 @@ def score_all(
     return pd.concat(scores, ignore_index=True), pd.concat(details)
 
 
+def largest_differences(details: pd.DataFrame, per_group: int = 5) -> pd.DataFrame:
+    """The held-out counties furthest from FEMA, per method and scenario."""
+    held_out = details[details["subset"] == "held_out"].assign(miss=lambda t: t["log_error"].abs())
+    ranked = held_out.sort_values("miss", ascending=False)
+    return ranked.groupby(["method", "scenario"]).head(per_group).drop(columns="miss")
+
+
 def draw(
     shapes: gpd.GeoDataFrame,
     key: pd.DataFrame,
@@ -147,6 +154,13 @@ def main() -> None:
         table = baseline.county_table(events, points.point_county, nri_table)
         write(table, f"baseline_{label}_by_county.csv", index=True)
         write(baseline.agreement(table).assign(event_set=label), f"baseline_{label}.csv")
+    hazard_level = {
+        "historical_intensity_today": rebuild.county_intensity(history, points.point_county),
+        "storm_intensity_today": rebuild.county_intensity(present, points.point_county),
+        "nri_v1_20_loss_ratio": nri_table["HRCN_EALT"] / nri_table["HRCN_EXPT"],
+        "nri_v1_19_eal": key["HRCN_EALT"],
+    }
+    write(forensics.rank_against(key, hazard_level), "published_vs_hazard_level.csv")
     regions = ara_white_paper.point_regions(points.point_county, shapes["STUSPS"])
     ratios = timer.run(
         "conditioning",
@@ -156,6 +170,7 @@ def main() -> None:
     scores, details = timer.run("scoring", lambda: score_all(tables, key))
     write(scores, "scores.csv")
     write(details, "scores_by_county.csv", index=True)
+    write(largest_differences(details), "largest_differences.csv", index=True)
     draw(shapes, key, ratios, details)
     write(pd.DataFrame(timer.rows), "timings.csv")
 

@@ -65,3 +65,27 @@ def published_signal(key: pd.DataFrame) -> pd.DataFrame:
         columns[f"{scenario.name}_half"] = hm / 2
         columns[f"{scenario.name}_minus_one"] = hm - 1
     return pd.DataFrame(columns)
+
+
+def rank_against(key: pd.DataFrame, measures: dict[str, pd.Series]) -> pd.DataFrame:
+    """Spearman rank correlation of each published scenario with simple hazard-level measures.
+
+    A reference point for the rebuilds: how much of FEMA's county pattern is just "where
+    hurricanes hit today".
+    """
+    rows = []
+    for scenario in SCENARIOS:
+        published = key[f"HRCN_{scenario.name}_HM"]
+        published = published[published > 0]
+        for name, values in measures.items():
+            both = pd.DataFrame({"published": published, "measure": values}).dropna()
+            both = both[both["measure"] > 0]
+            rows.append(
+                {
+                    "scenario": scenario.name,
+                    "measure": name,
+                    "counties": len(both),
+                    "spearman": both["published"].corr(both["measure"], method="spearman"),
+                }
+            )
+    return pd.DataFrame(rows)

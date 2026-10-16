@@ -8,6 +8,7 @@ import pandas as pd
 from hurloss_rebuild.scoring import ratings, split
 
 SUBSETS = ("train", "held_out")
+COVERED_SUFFIX = "_covered"
 
 
 @dataclass(frozen=True)
@@ -68,16 +69,22 @@ def score_column(
 def score(
     key: pd.DataFrame, rebuilt: pd.DataFrame, method: str
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Scores per scenario and subset; `rebuilt` has one column per FEMA scenario name."""
+    """Scores per scenario and subset; `rebuilt` has one column per FEMA scenario name.
+
+    Each subset is scored twice: on every county FEMA published, and ("_covered") only on
+    counties the rebuild gives a value, which separates coverage from the climate signal.
+    """
     subset_of = split.label(key.index)
     rows, details = [], []
     for scenario in rebuilt.columns:
         published = key[f"HRCN_{scenario}_HM"]
+        covered = rebuilt[scenario].reindex(key.index).notna()
         for subset in SUBSETS:
-            part = key[subset_of == subset]
-            result, detail = score_column(
-                part, rebuilt[scenario], published, (method, scenario, subset)
-            )
-            rows.append(asdict(result))
-            details.append(detail)
+            for name, mask in ((subset, True), (subset + COVERED_SUFFIX, covered)):
+                part = key[(subset_of == subset) & mask]
+                result, detail = score_column(
+                    part, rebuilt[scenario], published, (method, scenario, name)
+                )
+                rows.append(asdict(result))
+                details.append(detail)
     return pd.DataFrame(rows), pd.concat(details)
