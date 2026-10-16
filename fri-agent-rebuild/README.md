@@ -5,21 +5,30 @@ Index (FRI) county hazard multipliers, and take them below the county? This fold
 for [issue #15](https://github.com/fulton-ring/agent-content-demos/issues/15)
 ([proposal card](https://app.notion.com/p/3facc69045cb8004a763e1047da67297)).
 
-**Short answer:**
+**Short answer.** The FRI has five hazards and seven sets of published county multipliers. Here
+is where each landed on the 12 states the agents never saw:
 
-- **Drought:** yes, almost exactly. Across all four scenarios the rebuilt county multipliers match
-  FEMA's on states the agents never saw: 99.6% of counties land in the same projected-loss rating,
-  Pearson correlation 0.998, and the median rebuilt/published ratio is 1.000.
-- **Wildfire:** close. On held-out states, 96.9% of counties land in the same rating, correlation
-  is 0.96, and the mean absolute log error is 0.072, about 7%.
-- **Extreme heat:** only partly. The NEX 95th-percentile variant gets 94-96% of counties into the
-  same rating, but the 99th-percentile variant runs about 20-30% low and correlates only 0.68-0.78
-  with FEMA's values. The agents stalled on heat, and a person stepping in did not unstick them.
+| Hazard (FRI columns) | Rebuilt? | Same rating bin | Pearson | Typical error |
+|---|---|---|---|---|
+| Extreme heat, LOCA2 (`EXHT_L95/L99`) | Yes, essentially exactly | 99.7% | 1.000 | about 1% |
+| Drought (`DRGT`) | Yes, essentially exactly | 99.6% | 0.998 | about 2% |
+| Wildfire (`WFIR`) | Close | 96.9% | 0.960 | about 7% |
+| Extreme heat, NEX (`EXHT_N95/N99`) | Partly: N95 good, N99 about 25% low | 90.0% | 0.824 | about 27% |
+| Coastal flooding (`CFLD`) | No: levels roughly right, ranking not | 75.0% | 0.279 | about 2x |
+| Hurricane (`HRCN`) | Not attempted: FEMA's input is not public | | | |
+
 - **Below the county:** a census-tract drought layer for California (9,109 tracts) sums back to
   county projected annual loss exactly. Its resolution is bounded by the 25 km climate grid.
-- **The agents:** 69 experiments across three hazards for $3.31 of model calls. The loop found
-  the two changes that matter most (the Thornthwaite heat index in drought, the shape of the
-  wildfire regression). A person had to fix the harness five times and step in once on heat.
+- **The agents** ran 126 experiments across five hazards for $7.61 of model calls.
+  - They found the changes that mattered for drought (the Thornthwaite heat index) and wildfire
+    (the shape of the gamma regression).
+  - They could not crack coastal flooding or the NEX heat index.
+  - A person stepped in eleven times, listed below. Two were notes pointing the agents at an
+    idea; the rest were harness fixes, blocked tools and data plumbing.
+- **LOCA2 heat is matched by the human baseline alone.** It follows FEMA's text literally, and the
+  agents only refined a binning detail. The NEX version follows the same method with the same
+  climate model; the only extra step is a heat-index filter, so that filter must be where the NEX
+  rebuild goes wrong.
 
 ![Drought hazard multiplier by census tract, California, late century, higher warming](results/tracts/DRGT_LATE_HIGHER_HM_CA_tracts.png)
 
@@ -29,7 +38,7 @@ for [issue #15](https://github.com/fulton-ring/agent-content-demos/issues/15)
 ./run.sh
 ```
 
-`run.sh` needs [uv](https://docs.astral.sh/uv/) and about 30 GB of free disk. It does three
+`run.sh` needs [uv](https://docs.astral.sh/uv/) and about 35 GB of free disk. It does three
 things:
 
 1. Downloads every input into `~/.cache/fri-agent-rebuild` (set `FRI_CACHE` to move it). Nothing
@@ -38,9 +47,14 @@ things:
    FEMA's published county values on training and held-out states.
 3. Builds the tract-level output.
 
-The first run takes one to two hours, almost all of it the NEX-GDDP-CMIP6 download: 924 global
-yearly files of about 250 MB each (about 230 GB transferred), each cut to the CONUS box on this
-4-core machine. With the inputs cached, `run.sh` took 18 minutes.
+The first run takes most of a day, almost all of it climate downloads on this 4-core machine:
+
+- **NEX-GDDP-CMIP6:** 924 global yearly files of about 250 MB each, about 230 GB transferred,
+  each cut to the CONUS box. About one to two hours.
+- **LOCA2:** about 55 GB of range reads of the days we need, from UCSD's server. It ran at
+  roughly an hour per 30-year period, so five to six hours.
+
+With the inputs cached, `run.sh` took 30 minutes.
 
 The agent loop is not part of `run.sh`, because it costs money and gives different results each
 run. To run it for one hazard (needs `OPENROUTER_API_KEY`):
@@ -50,8 +64,8 @@ uv run python -m fri_rebuild.swarm drought --rounds 8 --agents 3 --budget 3
 ```
 
 The numbers in this README come from one clean run: a fresh clone of the branch with every cached
-input deleted except the already-reduced NEX and FWI arrays. Re-downloading those 230 GB was not
-worth another hour or more. Its console output is in `results/clean_run.log`.
+input deleted except the already-reduced NEX, FWI and LOCA2 arrays. Re-downloading those would
+have taken several more hours. Its console output is in `results/clean_run.log`.
 
 ## Where the data comes from
 
@@ -59,45 +73,52 @@ worth another hour or more. Its console output is in `results/clean_run.log`.
 |---|---|---|
 | Answer key | `NRI_Future_Risk_Master_Datasheet_12052024.xlsx` from [fulton-ring/nri-future-risk](https://github.com/fulton-ring/nri-future-risk) at commit `c5cc0d6` | FEMA's own datasheet, downloaded before the tool was taken down in February 2025. It has county HMs, PAL ratings and the NRI v1.19 EAL each multiplier was applied to. Downloaded at run time. |
 | Methodology | *National Risk Index: Future Risk Technical Documentation* (FEMA, December 2024) | [Archived copy at Harvard EELP](https://eelp.law.harvard.edu/wp-content/uploads/2025/03/NRI_Future_Risk_Technical_Document.pdf). Each hazard's `program.md` quotes the relevant section. |
-| Drought, extreme heat | [NASA NEX-GDDP-CMIP6](https://registry.opendata.aws/nex-gddp-cmip6/) (AWS open data), MPI-ESM1-2-HR r1i1p1f1, historical, SSP2-4.5, SSP5-8.5 | Daily `tasmin`, `tasmax`, `tas`, `hurs` and `pr` at 0.25 degrees. We take the newest file version per year (mostly v2.0). |
+| Drought, NEX extreme heat | [NASA NEX-GDDP-CMIP6](https://registry.opendata.aws/nex-gddp-cmip6/) (AWS open data), MPI-ESM1-2-HR r1i1p1f1, historical, SSP2-4.5, SSP5-8.5 | Daily `tasmin`, `tasmax`, `tas`, `hurs` and `pr` at 0.25 degrees. We take the newest file version per year (mostly v2.0). |
+| LOCA2 extreme heat | [LOCA2](https://cirrus.ucsd.edu/~pierce/LOCA2/NAmer/MPI-ESM1-2-HR/0p0625deg/r1i1p1f1/) (UCSD), MPI-ESM1-2-HR r1i1p1f1, daily `tasmin` at 1/16 degree | We read only the days of each 30-year period, one gzip chunk per day, over HTTP. For each of the 220,047 cells that overlap a county, we keep a histogram of daily `tasmin` in 0.1 °C bins (`loca2.py`). |
 | Wildfire | [NEX-GDDP-CMIP6 Fire Weather Index](https://data.nas.nasa.gov/gddpimpact/FWI/) (NASA "GDDP-IMPACT" portal), yearly multi-model-ensemble files MME25/50/75 | The portal is missing 4-7 of the 30 years in each period, and those years are skipped. MME50 has 122 of 150 years. |
 | Fuels | LANDFIRE LF2022 FBFM40, from the [LANDFIRE ImageServer](https://lfps.usgs.gov/arcgis/rest/services/Landfire_LF2022/LF2022_FBFM40_CONUS/ImageServer) | Resampled to 500 m (nearest neighbour), because the 30 m national file is 3.4 GB. |
+| Coastal flooding | NOAA CO-OPS [decadal high-tide-flooding projections](https://api.tidesandcurrents.noaa.gov/dpapi/prod/webapi/htf/htf_projection_decadal.json) (110 gauges), observed annual flood counts, flood thresholds; the 2022 Sea Level Rise Technical Report [data files](https://cdn.oceanservice.noaa.gov/oceanserviceprod/hazards/sealevelrise/Sea_Level_Rise_Datasets_2022.zip) | The report's extreme water level table covers exactly the 187 gauges FEMA cites. Its sea level projections cover 126 gauges plus a 1-degree grid. |
 | NRI tract baseline | NRI v1.19.0 (March 2023) tract table, [Harvard Dataverse snapshot](https://doi.org/10.7910/DVN/JSQ8KZ) (file 10775728) | v1.19 is what the FRI was built on. FEMA no longer serves it, and fema.gov returns 403 from this environment. |
 | Boundaries | Census 2020 cartographic boundaries (1:500k), counties and California tracts | Same county set as the datasheet, including the eight pre-2022 Connecticut counties. |
 
 Scope is CONUS: 3,108 counties. FEMA's documentation defines "nationwide" for its climate inputs
-as the contiguous US. Alaska and Hawaii have published drought and wildfire multipliers, but we
-did not try to rebuild them.
+as the contiguous US. Alaska and Hawaii have published drought, wildfire and coastal multipliers,
+but we did not try to rebuild them.
 
 ## How it works
 
 - **Answer key and scoring** (`answer_key.py`, `score.py`): we put rebuilt multipliers into
   FEMA's fixed NRI rating bins. The upper edge of each bin is the largest EAL observed in that
   rating, as in Section 3.2 of the technical document. Applied to FEMA's own multipliers, this
-  reproduces 100% of the published PAL ratings, so "same rating bin" below means the same thing
-  FEMA's map showed.
+  reproduces 100% of the published PAL ratings, so "same rating bin" means the same thing FEMA's
+  map showed.
   - We also report Pearson and Spearman correlation, the mean absolute log error
     (`log_mae` = mean |ln(rebuilt / published)|), and the median rebuilt/published ratio.
   - A county the pipeline leaves blank counts as HM = 1, so leaving hard counties blank can't
     help a score.
+  - Counties whose published HM is exactly 0 cannot be scored in log terms and are left out.
+    Only coastal flooding has any: 109 of its 407 CONUS counties.
 - **Train/held-out split** (`split.py`): every fourth state in FIPS order is held out. That is 12
   states and 896 counties: AZ, CT, GA, IA, ME, MN, NE, NM, OH, RI, TX and WA. The agents only ever
   see training-state scores (2,212 counties). Held-out scores are computed after the loop ends.
-- **Inputs** (`inputs.py`): a read-only API the pipelines use for climate arrays, county weights
-  and the NRI baseline. County values are area-weighted averages of 0.25-degree cells, using exact
-  polygon intersections in an equal-area projection.
+- **Inputs** (`inputs.py`): a read-only API the pipelines use for climate arrays, histograms,
+  tide-gauge tables, county weights and the NRI baseline. County values are area-weighted
+  averages of grid cells, using exact polygon intersections in an equal-area projection.
 - **One pipeline file per hazard:** `hazards/<hazard>/pipeline.py` is the only file the agents
   may change. Next to it, `program.md` is the human-written brief: what FEMA's document says, what
-  the data looks like, and the open questions, numbered so agents can split them.
+  the data looks like, and the open questions, numbered so agents can split them. Dated notes at
+  the end of a brief are where a person stepped in.
 - **The loop** (`swarm.py`), modelled on [karpathy/autoresearch](https://github.com/karpathy/autoresearch):
   - Each round, three agents (Pydantic AI, `anthropic/claude-sonnet-5.5` through OpenRouter)
     propose in parallel. Each gets `program.md`, the current best pipeline, its training scores
     (including the worst training states), the full experiment log and notes on earlier
     hypotheses, and returns a complete new file.
-  - The harness rejects code that names the answer key, the scorer or the split. It runs each
-    candidate in a subprocess and keeps the best one if it beats the current best by more than
-    0.002.
-  - The loop stops after three rounds with no improvement or when it hits its budget. Every
+  - From the coastal run on, agents can call a read-only `describe_input` tool to see any input
+    table's columns and first rows.
+  - The harness rejects code that names the answer key, the scorer or the split, and skips code
+    identical to an earlier run. It runs each candidate in a subprocess and keeps the best one if
+    it beats the current best by more than 0.002.
+  - The loop stops after a set number of rounds with no improvement or at its budget. Every
     proposal is logged in `results/experiments-<hazard>.tsv`, and its code is kept in
     `results/candidates/<hazard>/<id>.py`.
 
@@ -108,44 +129,59 @@ misses per column and subset are in `results/largest_differences.csv`.
 
 | Hazard | Subset | Counties | Same rating bin | Pearson | Mean abs log error | Median rebuilt/published |
 |---|---|---|---|---|---|---|
+| Extreme heat, LOCA2 (L95 and L99) | train | 2,212 | 99.4% | 0.996 | 0.013 | 1.000 |
+| Extreme heat, LOCA2 (L95 and L99) | held-out | 896 | 99.7% | 1.000 | 0.009 | 1.000 |
 | Drought | train | 2,212 | 99.3% | 0.997 | 0.022 | 1.000 |
 | Drought | held-out | 896 | 99.6% | 0.998 | 0.021 | 1.000 |
 | Wildfire | train | 2,212 | 97.9% | 0.944 | 0.062 | 1.007 |
 | Wildfire | held-out | 896 | 96.9% | 0.960 | 0.072 | 0.985 |
-| Extreme heat (NEX N95 and N99) | train | 2,212 | 91.3% | 0.869 | 0.207 | 0.855 |
-| Extreme heat (NEX N95 and N99) | held-out | 896 | 90.0% | 0.824 | 0.240 | 0.811 |
+| Extreme heat, NEX (N95 and N99) | train | 2,212 | 91.3% | 0.869 | 0.207 | 0.855 |
+| Extreme heat, NEX (N95 and N99) | held-out | 896 | 90.0% | 0.824 | 0.240 | 0.811 |
+| Coastal flooding | train | 236 | 71.1% | 0.472 | 0.640 | 0.975 |
+| Coastal flooding | held-out | 62 | 75.0% | 0.279 | 0.662 | 0.935 |
 
-Extreme heat split by threshold, held-out:
+NEX extreme heat split by threshold, held-out:
 
-- **N95:** 94-96% same rating bin, Pearson 0.85-0.97, log error 0.09-0.15. Late-century higher
-  warming is the best scenario, at 0.973.
+- **N95:** 94-96% same rating bin, Pearson 0.85-0.97, log error 0.09-0.15.
 - **N99:** 83-87% same rating bin, Pearson 0.68-0.78, log error 0.26-0.38. Rebuilt values run
   about 0.72-0.79 of FEMA's.
 
 ### The largest differences and why
 
+- **LOCA2 heat.** Almost every county is within a few percent. The exceptions are small
+  Virginia independent cities (Alexandria, Falls Church, Colonial Heights, Manassas, Franklin).
+  - FEMA publishes L99 = 1.0 for them; we get 14-21.
+  - A likely reason is that FEMA's raster-to-county step gave these few-square-mile cities no
+    6 km cell (no events, floored to 1), while we intersect cell polygons exactly.
 - **Drought.** The largest misses are small or coastal counties: Richmond and Kings (NY),
   Jackson (MS), and a few Georgia counties on the held-out side. Even these are off by only 12-21%.
   - These counties overlap one or two 0.25-degree cells, some of them mostly ocean with no land
     data, so area weighting depends on very few cells.
-  - FEMA says its drought calculation ran at tract level on its own 0.25-degree polygon grid, so
-    exact cell edges matter most here.
-- **Wildfire.** The largest misses are northern New England and northern New York: Vermont's
-  Orleans, Lamoille and Franklin, Clinton (NY), and Aroostook and Somerset (ME) held out. Our
-  values there are about 1.4-1.7x FEMA's.
+- **Wildfire.** The largest misses are northern New England and northern New York (Orleans,
+  Lamoille and Franklin in Vermont; Clinton, NY; Aroostook and Somerset in Maine). Our values
+  there are about 1.4-1.7x FEMA's.
   - These are cool, wet counties where fire weather is low today, so a small absolute increase is
     a large ratio. The 95th-percentile FWI statistic the agents chose, raised to gamma, amplifies
     it.
-  - FEMA computed the multiplier at census-block level, weighted by block EAL. We could not
-    reproduce that: we have no block EAL, and the agents' attempts at EAL weighting did not help.
-- **Extreme heat, N99.** Oklahoma and northeast Texas come out at about 0.4x FEMA (Oklahoma
-  County: 3.4 against 8.8). N95 runs low in the Northeast and Appalachians (0.7-0.8x).
-  - We did not find the cause. The likely candidates are how FEMA applied the 298 K heat-index
-    filter and how it defined the 99th percentile; its document gives neither the formula nor
-    the threshold detail.
-  - The agents tested NWS and Steadman heat-index variants, `tas`, `tasmax` and `tasmin` as the
-    temperature input, warm-season and calendar-window percentiles, and per-cell vs. per-county
-    aggregation. None beat a training log error of 0.207.
+  - FEMA computed the multiplier at census-block level, weighted by block EAL, which we cannot
+    reproduce without block EAL.
+- **NEX extreme heat.** N99 in Oklahoma and northeast Texas comes out at about 0.4x FEMA
+  (Oklahoma County: 3.4 against 8.8). N95 runs low in the Northeast and Appalachians (0.7-0.8x).
+  - LOCA2 heat, built with the same method and the same climate model but with a fixed
+    temperature floor instead of a heat index, matches FEMA almost exactly. That isolates the
+    heat-index step as the problem.
+  - FEMA cites Lu and Romps (2022) for the 298 K threshold but gives no formula. NEX has only
+    daily means of temperature and humidity, so how they were combined is a choice the document
+    leaves open.
+- **Coastal flooding.** No approach got the ranking right.
+  - Some published values are hard to explain from tide-gauge data alone: Fredericksburg, VA, an
+    inland city, gets 429 in late century; San Diego gets 254; Galveston, TX gets 33. All
+    approaches put these near 5-30.
+  - Every approach also overstates some low-risk inland counties. Williamsburg, SC is
+    published at 0.5 and we get 28.
+  - FEMA weights each flood severity by its share of the county's coastal-flood EAL. NRI does
+    not publish that split, and FEMA also clips levee-protected areas. Both are missing from
+    public data, and together they would explain a ranking we cannot reproduce.
 
 ### What the agents found (and what they kept)
 
@@ -154,66 +190,77 @@ Extreme heat split by threshold, held-out:
     year rather than from the whole-series climatology (0.135 → 0.031). Combined with the
     3-month SPEI, a generalized-logistic fit by unbiased PWMs, the 1950-2010 calibration and the
     −1.6 threshold, this reproduces FEMA's values almost exactly.
-  - Smaller kept changes set a 15-day floor on historical drought days for cells with no
-    historical drought. That constant was chosen on training states; the held-out score (0.021)
-    shows it did not overfit.
+  - A kept 15-day floor on historical drought days was chosen on training states; the held-out
+    score (0.021) shows it did not overfit.
 - **Wildfire** (0.421 → 0.062, 24 experiments, $0.91).
   - The human baseline (state fixed effects) gave gamma = 0.37, below the "greater than 1" FEMA
     states. Dropping the spatial fixed effects did most of the work (0.265 → 0.113).
   - The agents then moved to the MME75 ensemble and the 95th-percentile FWI statistic, added a
     log-burnable-share control and burnable-share weights. Each step helped on training states.
-  - On held-out states, each step after dropping fixed effects improved log error a little
-    (0.111 → 0.072) but lowered correlation (0.993 → 0.960). The extra specification search fit
-    the training states' levels at some cost to the ranking. `results/kept_pipelines_held_out.csv`
-    scores every kept step on held-out states.
-- **Extreme heat** (0.347 → 0.207, 21 experiments, $0.92). The one kept change, found in round 1,
-  was dividing by the historical number of days over the percentile, without the heat-index
-  condition. That matches FEMA's equation 9 more literally. Nothing after it helped.
+    On held-out states those steps lowered correlation (0.993 → 0.960) while improving log error
+    a little (0.111 → 0.072). `results/kept_pipelines_held_out.csv` scores every kept step.
+- **NEX extreme heat** (0.347 → 0.207, 21 experiments, $0.92). The one kept change was dividing
+  by the historical number of days over the percentile, without the heat-index condition. That
+  matches FEMA's equation 9 more literally. Nothing after it helped.
+- **LOCA2 extreme heat** (0.022 → 0.013, 12 experiments, $0.59).
+  - The human baseline already matched FEMA, since it carried over what the NEX run had taught.
+  - The agents kept one change: interpolating within the 0.1 °C histogram bins. That removes a
+    rounding artifact of our own data reduction.
+  - They tested and rejected the alternatives in the brief: applying the 296.22 K floor to the
+    denominator too (much worse), per-cell ratios, and county-pooled histograms.
+- **Coastal flooding** (1.793 → 0.640, 45 proposals over 15 rounds, $3.71).
+  - The agents' biggest step was using the projections' own 2020 decade as "current" frequency,
+    rather than observed counts (1.79 → 1.12).
+  - After that, they mostly tuned which decade counts as "current" and the weight of each
+    flood severity. Training error fell, but held-out correlation never rose above the human
+    baseline's 0.32.
+  - See below for the 187-gauge route a person pointed them to.
 
 ### Claude Code subagents as the swarm (comparison)
 
-We ran the wildfire loop a second way: three Claude Code subagents (Sonnet), each starting from
-the same baseline, given the same rules and `program.md`, and steered to a different open
-question. Each ran 6-8 experiments in its own copy (`results/claude-code-subagents/wildfire/`).
-Each took about 2-3 minutes and 42-47k tokens.
+We ran two hazards a second way: Claude Code subagents (Sonnet), each starting from the human
+baseline with the same rules and `program.md`, and steered to different open questions.
+
+- Each ran 6-10 experiments in its own copy (`results/claude-code-subagents/<hazard>/`).
+- Each took 2-3 minutes and 42-62k tokens.
+- Unlike the Pydantic AI agents, they could read the data and run code themselves.
 
 | Run | Train log error | Held-out log error | Held-out same bin | Held-out Pearson |
 |---|---|---|---|---|
-| Pydantic AI swarm, final | 0.062 | 0.072 | 96.9% | 0.960 |
-| Claude Code agent 1 (FWI statistic) | 0.264 | 0.278 | 91.2% | 0.911 |
-| Claude Code agent 2 (Poisson pseudo-ML, FEMA-region fixed effects) | 0.079 | 0.073 | 97.8% | 0.993 |
-| Claude Code agent 3 (no fixed effects, no fuel controls) | 0.030 | 0.027 | 99.3% | 0.993 |
+| Wildfire, Pydantic AI swarm (final) | 0.062 | 0.072 | 96.9% | 0.960 |
+| Wildfire, Claude Code agent 1 (FWI statistic) | 0.264 | 0.278 | 91.2% | 0.911 |
+| Wildfire, Claude Code agent 2 (Poisson pseudo-ML, FEMA-region fixed effects) | 0.079 | 0.073 | 97.8% | 0.993 |
+| Wildfire, Claude Code agent 3 (no fixed effects, no fuel controls) | 0.030 | 0.027 | 99.3% | 0.993 |
+| Coastal, Pydantic AI swarm (final) | 0.640 | 0.662 | 75.0% | 0.279 |
+| Coastal, Claude Code agent 1 (187-gauge return-level route) | 0.790 | 0.764 | 69.8% | 0.311 |
+| Coastal, Claude Code agent 2 (CO-OPS projection route) | 0.838 | 0.752 | 69.0% | 0.331 |
 
-Agent 3 found the simplest specification: gamma ≈ 1.30 from a plain log-log regression of
-wildfire EAL on historical mean FWI (MME50). It beats everything else on both training and
-held-out states. It also drops the fuel-type controls FEMA documents, and the agent flagged that
-itself.
-
-We did not swap it in as the final pipeline. The final pipeline is the swarm's, chosen by the
-loop's own rule. Agent 3's result points to FEMA's effective gamma being close to what a simple
-regression gives.
-
-The Claude Code agents read the code and ran it themselves. That made them more willing to try
-structural changes (a different estimator, dropping a control). The Pydantic AI agents only saw
-scores and returned whole files, and they made smaller, safer edits.
+- **Wildfire:** Claude Code agent 3 found the simplest specification. A plain log-log regression
+  of wildfire EAL on historical mean FWI gives gamma ≈ 1.30, and it beats everything else on
+  training and held-out states.
+  - It drops the fuel-type controls FEMA documents, and the agent flagged that itself.
+  - We did not swap it in; the final pipeline is the one the swarm's own rule chose.
+- **Coastal:** no harness got held-out correlation above 0.33.
+  - The return-level route is closer to FEMA's 187-gauge description and beats the CO-OPS
+    baseline. It does not beat the tuned CO-OPS version.
 
 ## The swarm: numbers and every point a person stepped in
 
-| | Extreme heat | Drought | Wildfire |
-|---|---|---|---|
-| Rounds × agents | 7 × 3 | 8 × 3 | 8 × 3 |
-| Experiments run | 21 | 24 | 24 |
-| Kept | 1 | 5 | 6 |
-| Crashed | 0 | 0 | 0 |
-| Pipeline compute (sum of run times) | 75 min | 11 min | 1.5 min |
-| Wall clock | 78 min in two runs | 15 min | 5 min |
-| Model cost (OpenRouter, logged per response) | $0.92 | $1.42 | $0.91 |
+| | NEX heat | LOCA2 heat | Drought | Wildfire | Coastal |
+|---|---|---|---|---|---|
+| Rounds × agents | 7 × 3 | 4 × 3 | 8 × 3 | 8 × 3 | 15 × 3 |
+| Proposals (run) | 21 (21) | 12 (11) | 24 (24) | 24 (24) | 45 (43) |
+| Kept | 1 | 1 | 5 | 6 | 9 |
+| Crashed | 0 | 1 | 0 | 0 | 2 |
+| Pipeline compute (sum of run times) | 75 min | 6 min | 11 min | 1.5 min | 2 min |
+| Model cost (OpenRouter, logged per response) | $0.92 | $0.59 | $1.42 | $0.91 | $3.71 |
 
-- **Totals:** 69 experiments plus 3 rejected by a harness bug, $3.31 of model calls. Everything
-  ran on this machine (4 cores, 16 GB), with no Modal compute. Reducing the climate data took
-  about an hour of wall clock and cost nothing.
-- **Model:** `anthropic/claude-sonnet-5.5` via OpenRouter at temperature 0.8. The issue's budget
-  was $25.
+- **Totals:** 126 proposals plus 3 rejected by an early harness bug, $7.61 of model calls. The
+  issue's budget was $25.
+  - Coastal cost the most per round once agents could call `describe_input`: up to $0.61 per
+    proposal, against about $0.03 without the tool.
+- **Compute:** everything ran on this machine (4 cores, 16 GB), with no Modal compute.
+- **Model:** `anthropic/claude-sonnet-5.5` via OpenRouter at temperature 0.8.
 
 **Harness: Prime Agent was not used.** The issue asked us to try
 [Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent). It supports OpenRouter and a
@@ -225,27 +272,36 @@ the agent framework this repo prescribes, and compared it with Claude Code subag
 
 1. **Prime Agent install blocked** by the sandbox (above).
 2. **Modal unreachable.** The Modal client uses gRPC, which this environment's proxy does not
-   carry. The NEX reduction ran locally instead, about an hour on 4 cores.
+   carry. All data reduction ran locally.
 3. **Harness bug: the answer-key guard rejected valid code.** The first wildfire round lost all
    three proposals. The guard banned the text `_HM"]`, which every pipeline writes for its own
    output columns, and banned `STATEABBRV`, which FEMA's state fixed effects need. The person
    removed both patterns and restarted. That run is kept in
    `results/experiments-wildfire-guard-bug.tsv` ($0.06).
-4. **Kept code needed tidying.** The final wildfire pipeline left an unused FEMA-region table
-   behind, and the kept wildfire and drought pipelines each had one type-check error. The person
-   removed the dead code and fixed the types without changing results (re-scored to the same
-   metric). The harness does not lint candidates.
-5. **Heat stalled, and the person's nudge backfired.** After four rounds with no gain:
-   - The person added `tasmax`, which had been skipped to save download time, and a dated note in
-     `hazards/extreme_heat/program.md` describing the regional error pattern on training states.
-   - In the next round all three agents tried the idea the note pointed at (heat index from
-     `tasmax`), which was worse. In the round after, all three submitted byte-identical code.
-   - The resumed run found nothing better. Steering the agents with a hint collapsed their
-     diversity.
-6. **Duplicate proposals.** After round 6 of heat, the person added a check that skips code
-   identical to an earlier run. It applies to future runs.
+4. **Kept code needed tidying.** The final wildfire pipeline left an unused table behind, and two
+   kept pipelines each had one type-check error. The person fixed them without changing results.
+   The harness does not lint candidates.
+5. **NEX heat stalled, and the person's nudge backfired.**
+   - After four rounds, the person added `tasmax` and a dated note on the regional error pattern.
+   - All three agents then tried the idea the note pointed at, which was worse. In the round
+     after, all three submitted byte-identical code.
+6. **Duplicate proposals.** The person added a check that skips code identical to an earlier run.
 7. **Bookkeeping fixes** in the report: a resume row counted as a proposal, and the best score
    taken over discarded rows.
+8. **Coastal: a note pointing to the 187-gauge route.** After ten rounds of tuning with no gain in
+   correlation, the person added a dated note to `hazards/coastal_flooding/program.md`. It points
+   out that FEMA's 187 gauges are exactly the 2022 report's extreme-water-level gauges, and that
+   FEMA's sub-types are return periods.
+9. **Coastal: the agents' silent fallbacks.** The next two attempts at that route guessed column
+   names wrong, crashed, and silently fell back to the old method inside a `try/except` the agent
+   had written, scoring exactly the same as before.
+   - The Pydantic AI agents could not look at the data, only at scores.
+   - The person added the read-only `describe_input` tool and a rule against fallbacks. After
+     that, the route ran (0.826 training error), but no better than tuned CO-OPS.
+10. **Data plumbing:** a dropped NEX download and a dropped LOCA2 read each needed retries added,
+    and a container restart interrupted the LOCA2 reduction, which resumed from finished pieces.
+11. **A dimension the human had chosen.** The person picked the LOCA2 histogram bin width (0.1 °C).
+    The agents found and fixed the rounding it caused.
 
 The agents never tried to reach the answer key. No proposal was rejected by the guard once it was
 fixed, and every kept change is a method choice we can read in the diff.
@@ -277,25 +333,28 @@ NRI v1.19 tract drought EAL × tract HM. Outputs are in `results/tracts/`.
 - The tract multiplier comes from the same method as the county one, with no tract-level
   calibration. FEMA published no tract multipliers, so the tract values can only be checked by
   the roll-up, not against an answer key.
-- **ZIP code or property level is not supported by this data.** Going below the tract would only
-  repeat the 25 km cell value. It needs a finer climate product: LOCA2 at 6 km, or the 30
-  arc-second data FEMA's document mentions, which we could not find published.
+- **ZIP code or property level is not supported by the NEX data.** LOCA2 heat, now rebuilt at
+  6 km, is the finest hazard here and could support a tract layer about four times finer. We did
+  not build one.
 
 ## What failed or wasn't covered
 
-- **Hurricane wind** was not attempted. It depends on Applied Research Associates'
-  climate-conditioned landfall rates, which FEMA sends only by email.
-- **Coastal flooding** was not attempted. It was optional in the issue, and it needs the
-  Interagency Sea Level Rise Task Force 2022 high-tide-flooding frequencies per tide gauge.
-- **LOCA2 extreme heat** (`EXHT_L95/L99`) was not attempted. LOCA2 daily `tasmin` for
-  MPI-ESM1-2-HR comes as 9-22 GB multi-decade files per scenario.
-- **Extreme heat (NEX) is only a partial match.** N99 stays about 25% low with correlation
-  0.68-0.78. We could not tell from FEMA's text how its heat-index filter and percentiles work.
+- **Hurricane wind** was not attempted. FEMA's input is Applied Research Associates'
+  climate-conditioned landfall rates, which FEMA sends only by email. We found no public copy,
+  including in the Harvard Dataverse FRI snapshot.
+  - Public stand-ins exist, but none matches FEMA's input: STORM synthetic tracks (SSP5-8.5 to
+    2050 only), RAFT tracks (SSP5-8.5, late century only), Knutson et al. scaling factors (basin
+    scale, not per location), and ARA's own white paper (RCP8.5 2050, as a figure).
+  - Building from any of them would be a different method, not a rebuild.
+- **Coastal flooding was attempted and not rebuilt** (above). The sub-type EAL split and levee
+  clipping FEMA used are not public.
+- **NEX extreme heat is only a partial match.** We could not reproduce FEMA's heat-index filter.
 - **Alaska, Hawaii and the territories** were not rebuilt.
 - **FWI years.** The FWI ensemble files on NASA's portal are missing 4-7 years per period. FEMA
   may have had complete series.
-- **Wildfire fit to its own training set.** The agents' wildfire specification search (24
-  regressions) improved training levels at some cost to held-out correlation.
+- **Wildfire fit to its own training set.** The agents' wildfire specification search improved
+  training levels at some cost to held-out correlation. Coastal shows the same pattern more
+  strongly.
 - **Selection.** Picking across harnesses with the held-out scores would contaminate them, so we
   did not.
 
@@ -303,16 +362,18 @@ NRI v1.19 tract drought EAL × tract HM. Outputs are in `results/tracts/`.
 
 - `run.sh`: the one command.
 - `src/fri_rebuild/`: shared code.
-  - Inputs: `nex.py`, `fwi.py`, `landfire.py`, `nri.py`, `geo.py`, `inputs.py`.
+  - Inputs: `nex.py`, `loca2.py`, `fwi.py`, `landfire.py`, `coastal.py`, `nri.py`, `geo.py`,
+    `inputs.py`.
   - Scoring: `answer_key.py`, `split.py`, `score.py`, `experiment.py`.
   - The loop: `swarm.py`.
   - Outputs: `report.py`, `downscale.py`; `prepare.py` downloads everything.
-- `hazards/<hazard>/program.md` and `pipeline.py`: the human brief and the final pipeline per
-  hazard.
+- `hazards/<hazard>/program.md` and `pipeline.py`: the human brief (with any dated
+  interventions) and the final pipeline, for `extreme_heat` (NEX), `extreme_heat_loca2`,
+  `drought`, `wildfire` and `coastal_flooding`.
 - `results/experiments-<hazard>.tsv`: every experiment (id, round, agent, parent, training
-  metrics, keep/discard, seconds, cost, description). `results/candidates/` holds the code of
-  each one.
+  metrics, status, seconds, cost, description). `results/candidates/` holds the code of each one.
 - `results/scores.csv`, `results/largest_differences.csv`, `results/swarm_summary.csv`,
   `results/kept_pipelines_held_out.csv`, `results/county_hm_<hazard>.csv`: clean-run outputs.
 - `results/tracts/`: the California tract table, the roll-up table and the map.
-- `results/claude-code-subagents/wildfire/`: the Claude Code comparison runs.
+- `results/claude-code-subagents/`: the Claude Code comparison runs for wildfire and coastal
+  flooding.
