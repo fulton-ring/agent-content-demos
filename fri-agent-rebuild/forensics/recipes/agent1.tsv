@@ -4,3 +4,10 @@ experiment	four_distinct_median	four_distinct_exact	late_pattern	coverage	status
 2	0.002575	17	0.917526	291	keep	sub-types = NOAA minor/moderate/major flood thresholds (flood_thresholds table) instead of return periods; f(T-rise)/f(T); curve extended above 100 yr with last-6-point log slope, capped at 10/yr below 0.1 yr (291 covered: gauges with thresholds)
 3	0.024200	17	0.884831	356	keep	as 2 + gauges with NaN thresholds (61) take the median of the 126 known thresholds (full coverage)
 4	0.013904	18	0.898876	356	keep	as 3 but NaN-threshold gauges take the thresholds of the nearest gauge that has them (instead of global median)
+5	0.002575	17	0.917526	291	discard	NSLOPE (upward extrapolation slope) 2..40 points: no change at all (row scale is free in the scorer, mid columns negligible vs late)
+6	0.0069	9	0.8848	356	discard	cap RP 0.05 (median fill): median down, exact down; cap 0.2 much worse (0.0993)
+7	0.0199	16	0.8848	356	discard	linear-in-RP interpolation instead of log RP (median fill); linear-in-frequency 0.0258; coarser table subsets no better
+8	0.0259	17	0.8427	356	discard	NaN-threshold gauges use return-period sub-types (1-2, 10-50, 100 yr; several groupings identical) instead of median thresholds: worse than nearest-gauge thresholds
+9	0.0029	17	0.8174	356	discard	log-linear extrapolation below 0.1 yr capped at 20/yr: median 0.003 but late_pattern falls to 0.82 (cap 15: 0.0031/18/0.84; cap 100: late 0.37)
+10	0.0079	16	0.8989	356	discard	annual-probability interpolation (linear in 1-exp(-1/RP)) with nearest fill; probability-valued factors (1-exp(-f)) far worse (0.12, 0 exact)
+11	0.0025	15	0.8989	356	discard	CAP_RP 0.065 tuned (0.06: 0.0041/15; 0.075: 0.0087/18; 1/12: 0.0106/16): noisy, not adopted since 0.1 is the documented table minimum

@@ -372,17 +372,62 @@ find it.
 - **Late century saturates on the Atlantic and Gulf coasts.** For 314 of 356 counties the two
   late-century scenarios (1.0 m and 2.0 m of sea-level rise) give identical multipliers. The 42
   exceptions are on the Pacific coast and in Puerto Rico and the Virgin Islands.
-  - That is what happens when today's flood levels fall below the shortest return period in the
-    2022 report's return-level tables under both scenarios.
-  - A recipe built that way, from the report's return-level curves and median sea-level rise
-    capped at the 0.1-year level, reproduces this pattern and FEMA's scale (factors up to 1,000).
-    It does not reproduce the 36 counties with four distinct values: median error 17%, best 4%.
-- **Not resolved:** the exact recipe. That includes which return periods define each sub-type,
-  how frequencies are capped or extrapolated, which sea-level series and base year were used,
-  and how gauges without their own sea-level projection were handled.
+- **The multipliers follow the previous NRI release's coastal flooding footprint.** We compared
+  them with NRI v1.18.1 (November 2021), the release before the one they were applied to. Our
+  copy is a third-party one, but its coastal flood EAL matches FEMA's v1.18.1 tract layer on
+  ArcGIS Online for every county.
+  - In the 50 states and DC, all 303 counties with a non-zero multiplier had coastal flood EAL in
+    v1.18.1. All 68 counties that gained coastal flood EAL only in v1.19.0 are published at 0;
+    every Great Lakes county is among them.
+  - The 2023 release changed coastal flooding everywhere. Building values were revalued (median
+    1.74x). Frequency went from a handful of regional values to per-county values. The historic
+    loss ratio changed by a median factor of 261.
+  - The counties below 1 are mostly inland counties where the new method cut frequency and the
+    mapped hazard area. These changes come from the method, not from local events.
+
+**The recipe, found by search.**
+
+Three Claude Code subagents searched for a recipe that reproduces FEMA's numbers from public NOAA
+data (`python -m fri_rebuild.recipe_score <recipe.py>`). Two of them, starting from different
+angles, converged on the same one, saved as `forensics/recipes/noaa_thresholds.py`. The search
+logs are `forensics/recipes/agent*.tsv`.
+
+- **Sub-types are NOAA's thresholds, not return periods.** They are NOAA's minor, moderate and
+  major flood thresholds at each gauge (about 0.5, 0.8 and 1.2 m above high tide), not the
+  1-2, 10-50 and 100-year floods FEMA's documentation names.
+- **The frequencies come from the 2022 report's curves.** Each threshold's annual frequency is
+  read off the gauge's return-level curve in the 2022 Sea Level Rise Technical Report, today and
+  after lowering the threshold by the median relative sea-level rise. The scenarios are 1.0 m
+  for the lower case and 2.0 m for the higher, in 2050 and 2100. Frequencies are capped at
+  10 a year, the curve's shortest return period.
+- **The factor is a ratio.** It is new frequency over today's frequency.
+- **How well it fits:**
+  - It reproduces 18 of the 42 counties with four distinct values to within 0.1%, with a median
+    error of 1.4% across all 42. Before this recipe the best was 17% median error and none exact.
+  - It predicts which counties have equal late-century values for 90% of counties.
+  - It fits every other county with non-negative weights. The Magueyes Island, PR group fits to
+    about 0.01%.
+- **What still doesn't fit:**
+  - Pacific gauges (Tacoma, Astoria, parts of Oregon and California) are off by 2-40%. They
+    behave as if FEMA's cap or sea-level inputs differ there.
+  - Some Atlantic gauges have identical mid-century values under both scenarios, which the recipe
+    does not produce.
+  - A global 6 cm reduction in the rise would cut the median error to 0.24%, but we have no
+    physical reason for it, so it is not in the recipe.
+- **What the recipe implies about the county weights:**
+  - With the factors known, each county's sub-type weights can be solved. For the 279 counties
+    fit within 1%, the weights sum to a median of 0.57, and 82% sum to less than 0.95
+    (`results/forensics/coastal_weights_threshold_recipe.csv`).
+  - NRI v1.19.0 defines five coastal flooding sub-types: NOAA's three high-tide-flooding zones
+    plus FEMA's 1% and 0.2% annual-chance floodplains (its Technical Documentation, chapter 7).
+  - The Future Risk formula adjusts only the three high-tide sub-types. If the floodplain share of
+    EAL was simply left out rather than kept at a factor of 1, that explains the counties below 1.
+    It also explains the zeros: Great Lakes counties have floodplain EAL but no tidal flooding.
+  - This depends on our "today's frequency" matching FEMA's. A different baseline would rescale
+    each sub-type's weights, so we treat the weight sums as strong evidence, not proof.
 - **One retraction during the analysis.** An early subspace test seemed to match an uncapped
-  recipe to within 0.06°. That recipe produces factors as large as 10^24, which made the angle
-  meaningless, so we dropped the test.
+  return-period recipe to within 0.06°. That recipe produces factors as large as 10^24, which made
+  the angle meaningless, so we dropped the test.
 
 ## What failed or wasn't covered
 
@@ -412,6 +457,8 @@ find it.
   - Inputs: `nex.py`, `loca2.py`, `fwi.py`, `landfire.py`, `coastal.py`, `nri.py`, `geo.py`,
     `inputs.py`.
   - Scoring: `answer_key.py`, `split.py`, `score.py`, `experiment.py`.
+  - Forensics (answer key open): `forensics.py`, `recipe_score.py`; recipes in
+    `forensics/recipes/`.
   - The loop: `swarm.py`.
   - Outputs: `report.py`, `downscale.py`; `prepare.py` downloads everything.
 - `hazards/<hazard>/program.md` and `pipeline.py`: the human brief (with any dated
