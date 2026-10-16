@@ -7,7 +7,7 @@ import numpy as np
 from fri_rebuild import coastal, forensics
 
 OPT = {k: os.environ.get(k, d) for k, d in dict(
-    LOW="1.0 - MED", HIGH="2.0 - MED", BASE="0", FALL="none", CAP="1").items()}
+    LOW="1.0 - MED", HIGH="1.5 - MED", BASE="0", FALL="nearest_noaa", CAP="1", CAPF="0").items()}
 SUB_TYPES = forensics.SUB_TYPES
 YEARS = forensics.YEARS
 
@@ -44,6 +44,12 @@ def _rise_rows(tables, gauge, lat, lon):
     return pool[pool["NOAA ID"] == best["NOAA ID"]]
 
 
+def _freq(level, levels, periods):
+    capf = float(OPT["CAPF"])
+    f = forensics.exceedance_frequency(level, levels, periods, OPT["CAP"] == "1")
+    return min(f, capf) if capf > 0 else f
+
+
 def gauge_factors(gauge):
     tables = coastal.tables()
     curves = tables["extreme_water_levels"]
@@ -70,7 +76,7 @@ def gauge_factors(gauge):
                 elif base == "2020":
                     rise = rise - r["RSL2020 (cm)"]
                 rise /= 100
-                fut = np.mean([forensics.exceedance_frequency(z - rise, levels, periods, OPT["CAP"] == "1") for z in today])
+                fut = np.mean([_freq(z - rise, levels, periods) for z in today])
                 vec.append(fut / current)
         out.append(vec)
     return np.array(out)
