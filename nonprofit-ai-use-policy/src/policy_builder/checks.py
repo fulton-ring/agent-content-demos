@@ -7,9 +7,10 @@ from pydantic import BaseModel
 from textstat import textstat
 
 from policy_builder.fill import RunMeta
+from policy_builder.review import FidelityCounts
 from policy_builder.schema import SECTIONS, Policy
 
-PLACEHOLDER = re.compile(r"\[|\]|\bTBD\b|lorem", re.IGNORECASE)
+PLACEHOLDER = re.compile(r"\[|\]|\bTBD\b|lorem|not yet named|^none\b", re.IGNORECASE)
 
 
 def field_texts(value: object) -> list[str]:
@@ -75,9 +76,12 @@ def untraced_names(policy: Policy, call_notes: str) -> list[str]:
     return sorted({w for p in phrases for w in words_missing_from_call(p, call_notes)})
 
 
-class PolicyResult(ReadingLevel, RunMeta):
+class PolicyResult(ReadingLevel):
     """Everything measured for one policy in one run."""
 
+    run: RunMeta
+    fidelity_first: FidelityCounts
+    fidelity_final: FidelityCounts
     slug: str
     organization: str
     pages: int

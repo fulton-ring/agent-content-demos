@@ -13,7 +13,7 @@ Dana: We're a family services nonprofit in a mid-sized county. About 85 staff an
 
 **Q: What AI tools are people already using, for what, and on whose account?**
 
-Luis: Officially, nothing. Unofficially, a lot. We're on Microsoft 365, and we turned on Copilot for the development team and me as a pilot in the spring, eight licenses. Development uses it for drafting appeals and thank-you letters and summarizing grant guidelines.
+Luis: Officially, nothing. Unofficially, a lot. We're on Microsoft 365, and we turned on Copilot for the development team and me as a pilot in the spring, eight licenses. Development uses it for drafting appeals and thank-you letters and summarizing grant guidelines. Copilot stays inside our Microsoft 365, so the pilot can use donor names and gift amounts for letters. Nothing from case files or student records goes in it.
 
 Priya: My teachers use ChatGPT, mostly free accounts, some paid on their own card. Lesson plans, reading passages at different levels, practice questions for the GED. A couple use it to translate handouts into Spanish.
 
@@ -39,7 +39,7 @@ Luis: Public statements. If we put out a statement about something in the news, 
 
 **Q: Who should say yes to something new, and who is accountable if it goes wrong?**
 
-Dana: Luis approves tools. He already does for software. For anything touching client data, Luis and our privacy officer, which is also our compliance director, Grace. The board will want to approve the policy. Our board chair has asked about AI twice.
+Dana: Luis owns this policy day to day. He keeps it current and runs the training, and the board approves changes. Luis also approves tools. He already does for software. For anything touching client data, Luis and our privacy officer, which is also our compliance director, Grace. The board will want to approve the policy. Our board chair has asked about AI twice.
 
 Luis: If something goes wrong, tell me and Grace the same day. If it's client data, Grace decides if it's a breach under the county contract.
 
@@ -62,3 +62,11 @@ Luis: Can I add one? Someone asked about installing a ChatGPT plugin in the brow
 **Q: Anything else?**
 
 Dana: Training. If we have a policy, people need an hour on it, not just an email. And whether we buy ChatGPT Team or extend Copilot to everyone is a budget question for the board. We haven't decided.
+
+**Q: Until the board decides, what can everyone do now?**
+
+Dana: I don't want people hiding it. So until then, anyone can use ChatGPT or Copilot for work that has nothing about a real person in it: rewording an email, brainstorming, explaining a form. Teachers can keep making lesson plans, reading passages and practice questions, and translating handouts. No student names, no scores, nothing from a case file. Use your work email to sign up, not a personal one, and turn off the setting that trains on what you type.
+
+Priya: That covers almost everything my teachers do.
+
+Dana: Case notes still wait for the county. That's not an everyone-now thing.
