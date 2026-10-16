@@ -18,14 +18,17 @@ import re
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+import pandas as pd
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent
 from pydantic_ai.messages import ModelResponse
 from pydantic_ai.models.openrouter import OpenRouterModel, OpenRouterModelSettings
 
+from fri_rebuild import inputs
 from fri_rebuild.paths import HAZARDS_DIR, RESULTS_DIR, cache_path
 
 os.environ.setdefault("PYDANTIC_AI_NO_BANNER", "1")
@@ -58,6 +61,10 @@ Hard rules (a candidate that breaks them is rejected without being run):
 - Keep `hazard_multipliers()` returning the same columns, indexed by county FIPS.
 - The pipeline must finish in under 20 minutes on 4 CPU cores and 16 GB of RAM. Loading one
   variable for one 30-year period is about 0.6 GB as float32; free arrays you no longer need.
+
+Do not wrap the method in try/except blocks that fall back to another method: a crash is logged
+and tells everyone the idea failed, while a silent fallback hides it. Use the describe_input tool
+to check table columns and values before you write code against them.
 
 Make one focused change per experiment so the log shows what helped. Never resubmit an idea
 the log already shows as tested. Return the complete file.
@@ -130,6 +137,42 @@ def run_pipeline(path: Path, output: Path) -> Outcome:
     )
 
 
+def input_tables() -> dict[str, Callable[[], pd.DataFrame]]:
+    """Tables the agents may inspect: the read-only inputs, never the answer key."""
+    tables: dict[str, Callable[[], pd.DataFrame]] = {
+        "baseline": inputs.baseline,
+        "cell_coordinates": inputs.cell_coordinates,
+    }
+    for name in (
+        "htf_decadal",
+        "htf_observed",
+        "extreme_water_levels",
+        "sea_level_projections",
+        "flood_thresholds",
+    ):
+        tables[f"coastal:{name}"] = lambda name=name: inputs.coastal_tables()[name]
+    return tables
+
+
+def describe_input(name: str) -> str:
+    """Show the shape, columns, dtypes and first rows of an input table.
+
+    Names: baseline, cell_coordinates, coastal:htf_decadal, coastal:htf_observed,
+    coastal:extreme_water_levels, coastal:sea_level_projections, coastal:flood_thresholds.
+    """
+    tables = input_tables()
+    if name not in tables:
+        return f"unknown table {name!r}; choose from {sorted(tables)}"
+    table = tables[name]()
+    with pd.option_context("display.width", 200, "display.max_columns", 30):
+        text = (
+            f"shape {table.shape}\ncolumns {list(table.columns)}\n"
+            f"dtypes\n{table.dtypes.value_counts().to_string()}\n"
+            f"first rows\n{table.head(5).to_string()}"
+        )
+    return text[:6000]
+
+
 def response_cost(messages: list) -> float:
     return sum(
         float((m.provider_details or {}).get("cost", 0.0))
@@ -159,6 +202,7 @@ class Swarm:
             model_settings=OpenRouterModelSettings(max_tokens=16000, temperature=0.8),
             retries=2,
         )
+        self.agent.tool_plain(describe_input)
 
     def log(self, row: list[object]) -> None:
         with self.log_path.open("a") as handle:
