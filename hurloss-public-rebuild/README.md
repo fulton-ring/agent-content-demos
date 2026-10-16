@@ -26,10 +26,10 @@ main finding.
   - ARA's own white paper, put through FEMA's own formula, gives 1.06-1.23 by region for 2050
     under RCP 8.5. FEMA published about 2.0 for the same regions.
 - **The level only matches if FEMA's ratio carries an extra +1 (or a factor of 2).** Read that
-  way, every public route lands near FEMA's values on the counties it covers: 91-100% same rating
+  way, every public route lands near FEMA's values on the counties it covers: 90-100% same rating
   bin, median ratio 0.98-1.04, mean log error 0.01-0.20.
 - **The pattern between counties doesn't match on any route.** Spearman rank correlation with
-  FEMA's values on held-out states is −0.19 to 0.19 where a route has a value. That is no better
+  FEMA's values on held-out states is −0.19 to 0.18 where a route has a value. That is no better
   than ranking counties by today's hurricane hazard (−0.22 to 0.31).
 - **Today's hazard is not the problem.** Before any climate conditioning, our wind model ranks
   counties' NRI hurricane loss with Spearman 0.76 (historical tracks) and 0.92 (STORM).
@@ -57,8 +57,8 @@ cached wind fields. It runs `uv run hurloss-run`, which:
 3. Applies each climate-conditioning route and FEMA's formula, scores everything against FEMA's
    published values, and writes the tables and figures in `results/`.
 
-All of it runs on this 4-core machine: about 70 minutes from an empty cache, and about one minute
-with the event sets cached. It makes no model calls and uses no paid services, so it costs
+All of it runs on this 4-core machine: 73 minutes from an empty cache, and about a minute with
+the event sets cached. It makes no model calls and uses no paid services, so it costs
 nothing.
 
 The settings come from environment variables:
@@ -211,27 +211,27 @@ All held-out counties FEMA covers. A blank counts as HM = 1.
 | Constant 2 | mid, higher | 0 / 424 | 99.8% | | | 0.017 | 0.990 |
 | Constant 2 | late, lower | 0 / 424 | 99.5% | | | 0.017 | 1.007 |
 | Constant 2 | late, higher | 0 / 433 | 95.2% | | | 0.174 | 0.896 |
-| Knutson frequency, as documented | mid, lower | 201 | 73.1% | 0.080 | 0.316 | 0.665 | 0.506 |
-| Knutson frequency, as documented | late, higher | 210 | 70.7% | −0.162 | −0.054 | 0.787 | 0.473 |
-| Knutson frequency, +1 | mid, lower | 201 | 91.0% | 0.115 | 0.331 | 0.339 | 0.975 |
-| Knutson frequency, +1 | late, higher | 210 | 86.8% | −0.216 | −0.082 | 0.479 | 0.730 |
+| Knutson frequency, as documented | mid, lower | 201 | 73.1% | 0.080 | 0.312 | 0.665 | 0.506 |
+| Knutson frequency, as documented | late, higher | 210 | 70.7% | −0.161 | −0.054 | 0.787 | 0.473 |
+| Knutson frequency, +1 | mid, lower | 201 | 91.0% | 0.115 | 0.333 | 0.339 | 0.974 |
+| Knutson frequency, +1 | late, higher | 210 | 86.8% | −0.216 | −0.081 | 0.480 | 0.730 |
 | STORM SSP5-8.5, as documented | mid, higher | 75 | 78.5% | 0.032 | 0.016 | 0.571 | 0.511 |
 | STORM SSP5-8.5, +1 | mid, higher | 75 | 92.9% | 0.058 | 0.135 | 0.283 | 0.987 |
-| ARA Figure 1, as documented | mid, higher | 201 | 72.6% | 0.063 | 0.264 | 0.681 | 0.504 |
-| ARA Figure 1, +1 | mid, higher | 201 | 91.5% | 0.070 | 0.264 | 0.336 | 0.991 |
+| ARA Figure 1, as documented | mid, higher | 201 | 72.6% | 0.063 | 0.266 | 0.681 | 0.504 |
+| ARA Figure 1, +1 | mid, higher | 201 | 91.5% | 0.070 | 0.266 | 0.336 | 0.991 |
 
 Only counties where the route gives a value (`held_out_covered`):
 
 | Route | Scenario | Counties | Same bin | Spearman | Log error | Median ratio | Constant 2's log error on the same counties |
 |---|---|---|---|---|---|---|---|
-| Knutson frequency, +1 | mid, lower | 223 | 99.1% | 0.019 | 0.027 | 1.025 | 0.004 |
-| Knutson frequency, +1 | mid, higher | 223 | 98.2% | 0.128 | 0.029 | 1.024 | |
-| Knutson frequency, +1 | late, lower | 223 | 97.8% | 0.111 | 0.042 | 1.039 | |
-| Knutson frequency, +1 | late, higher | 223 | 96.0% | 0.148 | 0.055 | 0.977 | 0.105 |
-| Knutson intensity, +1 | late, higher | 223 | 90.6% | 0.017 | 0.109 | 0.980 | |
+| Knutson frequency, +1 | mid, lower | 223 | 99.1% | 0.029 | 0.027 | 1.026 | 0.004 |
+| Knutson frequency, +1 | mid, higher | 223 | 98.2% | 0.142 | 0.029 | 1.025 | 0.012 |
+| Knutson frequency, +1 | late, lower | 223 | 97.8% | 0.127 | 0.042 | 1.041 | 0.007 |
+| Knutson frequency, +1 | late, higher | 223 | 96.0% | 0.152 | 0.056 | 0.977 | 0.105 |
+| Knutson intensity, +1 | late, higher | 223 | 90.6% | 0.017 | 0.109 | 0.985 | 0.105 |
 | STORM SSP5-8.5, +1 | mid, higher | 349 | 93.1% | −0.162 | 0.196 | 1.030 | 0.012 |
-| ARA Figure 1, +1 | mid, higher | 223 | 99.6% | 0.177 | 0.010 | 1.005 | 0.012 |
-| Knutson frequency, ×2 | late, higher | 223 | 93.7% | 0.149 | 0.103 | 1.062 | |
+| ARA Figure 1, +1 | mid, higher | 223 | 99.6% | 0.183 | 0.010 | 1.005 | 0.012 |
+| Knutson frequency, ×2 | late, higher | 223 | 93.3% | 0.150 | 0.105 | 1.065 | 0.105 |
 
 What the tables show:
 
@@ -246,13 +246,13 @@ What the tables show:
     0.010-0.109). STORM is at 0.196.
   - Spearman stays at or below 0.19.
   - The constant 2 is closer than every Knutson route in the other three scenarios (0.004-0.012
-    against 0.027-0.075). ARA's Figure 1 route roughly ties it (0.010 against 0.012).
+    against 0.027-0.076). ARA's Figure 1 route roughly ties it (0.010 against 0.012).
   - Late-century higher is the one case where a public route beats the constant. Knutson
-    frequency +1 halves the error (0.055 against 0.105) because Knutson's late-century rise
+    frequency +1 halves the error (0.056 against 0.105) because Knutson's late-century rise
     (median +16% in our measure) matches FEMA's median 2.19. It still doesn't rank counties
     (0.15).
 - **+1 fits the level better than ×2 in every scenario.** Median ratios are 0.98-1.04 for +1 and
-  1.04-1.08 for ×2. That fits FEMA's "projected" intensity having included the historical one, but
+  1.02-1.08 for ×2. That fits FEMA's "projected" intensity having included the historical one, but
   it is not proof.
 - **STORM's GCM spread is large.**
   - The four GCMs' median county ratios are 0.96 (EC-Earth3P-HR), 1.14 (CNRM-CM6-1-HR), 1.21
@@ -302,8 +302,8 @@ What the tables show:
   (70-79% same bin, against 100% for a constant 2).
 - **County ranking:** no route gets held-out Spearman above 0.19 on covered counties.
 - **Inland coverage:** the historical and STORM sets reach 948 and 1,189 counties against FEMA's
-  1,579. More synthetic years would help; 10× the STORM years would take about 10× the 70-minute
-  run.
+  1,579. More synthetic years would help; 10× the STORM years would make the
+  STORM part of the 73-minute run about 10 times longer.
 - **CLIMADA needed two workarounds:**
   - Its GDAL dependency has no wheels, so `pyproject.toml` overrides it out. The parts we use
     don't need it, but `climada.entity` does, so the Emanuel damage curve is written out in
@@ -323,7 +323,27 @@ What the tables show:
 
 ## Checked from a clean checkout
 
-CLEAN_RUN_PLACEHOLDER
+We cloned branch `spike/hurloss-public-rebuild` fresh, set `HURLOSS_CACHE` to an empty folder,
+and ran `./run.sh` on this 4-core machine with nothing else. It finished cleanly in 4,398 s
+(73 minutes). Per-step times are in `results/timings_empty_cache.csv`:
+
+| Step | Seconds |
+|---|---|
+| Answer key, counties, grid | 11 |
+| Historical event set (IBTrACS, 19 perturbed copies, wind fields) | 645 |
+| STORM present (5,000 years: range reads, interpolation, wind fields) | 850 |
+| STORM future (4 GCMs × 5,000 years) | 2,865 |
+| NRI v1.20, conditioning, scoring | 4 |
+
+- **Tables.** The committed `results/` come from a second `./run.sh` in the same clone, on the
+  same cache, after a later commit that only added output tables. With the event sets cached,
+  that run took about a minute. Every number in this README comes from those files.
+- **Run-to-run noise.** CLIMADA's perturbed historical tracks are not exactly reproducible when
+  run on a process pool, even with a fixed seed. STORM is.
+  - An earlier run on the same code differed by up to 0.9 points in same-bin share, 0.016 in
+    Spearman and 0.002 in log error, and only on the historical routes.
+  - None of the conclusions depend on differences that small.
+- **Cost:** $0. The run makes no model calls and uses no paid services.
 
 ## Files
 
