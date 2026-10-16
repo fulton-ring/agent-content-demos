@@ -29,10 +29,12 @@ def station_frequencies() -> tuple[pd.DataFrame, pd.DataFrame]:
 
 
 def nearest_station(stations: pd.DataFrame) -> pd.Series:
-    """Nearest station (by distance from the county polygon) for each coastal county."""
+    """Nearest station (by distance from the county centroid) for each coastal county."""
     counties = inputs.county_shapes()
     coastal = inputs.baseline()["CFLD_EALT"] > 0
     shapes = counties.loc[coastal[coastal].index].to_crs("EPSG:5070")
+    shapes = shapes.copy()
+    shapes["geometry"] = shapes.geometry.centroid
     points = inputs.points(stations).to_crs("EPSG:5070")
     joined = gpd.sjoin_nearest(shapes, points[["station", "geometry"]], how="left")
     return joined.groupby(level=0)["station"].first()
