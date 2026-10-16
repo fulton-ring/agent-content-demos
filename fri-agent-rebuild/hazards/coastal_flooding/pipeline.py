@@ -16,6 +16,8 @@ SEVERITIES = ("minor", "moderate", "major")
 SCENARIOS = {"LOWER": "intermediate", "HIGHER": "high"}
 DECADES = {"MID": 2050, "LATE": 2100}
 CURRENT_DECADE = 2020
+# Midpoints of the documented annual-chance bands: minor 50-100%, moderate 2-10%, major 1%.
+ANNUAL_CHANCE = pd.Series({"minor": 0.75, "moderate": 0.06, "major": 0.01})
 
 
 def saturate(days):
@@ -51,9 +53,10 @@ def hazard_multipliers() -> pd.DataFrame:
     stations = projected.drop_duplicates("station")[["station", "lat", "lon"]]
     stations = stations[stations["station"].isin(current_days.index)]
     nearest = nearest_station(stations)
-    current = saturate(current_days)
-    total = current.sum(axis=1)
-    share = current.div(total.where(total > 0), axis=0)
+    current = saturate(current_days)[list(SEVERITIES)]
+    weights = (current > 0).astype(float).mul(ANNUAL_CHANCE[list(SEVERITIES)], axis=1)
+    total = weights.sum(axis=1)
+    share = weights.div(total.where(total > 0), axis=0)
     result = {}
     for warming, scenario in SCENARIOS.items():
         for period, decade in DECADES.items():
@@ -62,7 +65,7 @@ def hazard_multipliers() -> pd.DataFrame:
             future_days = future_days.reindex(index=current.index, columns=list(SEVERITIES))
             future = saturate(future_days)
             with np.errstate(divide="ignore", invalid="ignore"):
-                factor = future / current[list(SEVERITIES)].where(current > 0)
+                factor = future / current.where(current > 0)
             station_hm = (factor.where(share > 0) * share).sum(axis=1, min_count=1)
             result[f"CFLD_{period}_{warming}_HM"] = nearest.map(station_hm)
     return pd.DataFrame(result)
