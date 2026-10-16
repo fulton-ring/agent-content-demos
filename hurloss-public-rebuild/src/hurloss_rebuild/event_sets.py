@@ -32,7 +32,7 @@ def historical(grid: Grid, tag: str) -> Events:
     name = f"ibtracs_{HISTORY[0]}_{HISTORY[1]}_x{copies + 1}_{tag}"
 
     def make_tracks(pool: ProcessPool) -> TCTracks:
-        tracks = hazard.hourly(hazard.near_box(ibtracs.tracks(*HISTORY)), pool)
+        tracks = hazard.hourly(hazard.near_box(ibtracs.tracks(*HISTORY), grid), pool)
         if copies:
             tracks.calc_perturbed_trajectories(
                 nb_synth_tracks=copies, use_global_decay_params=True, seed=SEED, pool=pool
@@ -49,24 +49,41 @@ def west_negative(track: xr.Dataset) -> xr.Dataset:
     return track.assign_coords(lon=((track.lon + 180) % 360) - 180)
 
 
-def storm_tracks(model: str | None, files: int, pool: ProcessPool) -> TCTracks:
-    parts = [TCTracks.from_simulations_storm(storm.fetch(model, i)) for i in range(files)]
-    tracks = TCTracks(data=[west_negative(track) for part in parts for track in part.data])
-    return hazard.hourly(hazard.near_box(tracks), pool)
+def storm_tracks(model: str | None, index: int, grid: Grid, pool: ProcessPool) -> TCTracks:
+    """Hourly tracks near the grid from one 1,000-year STORM file."""
+    part = TCTracks.from_simulations_storm(storm.fetch(model, index))
+    tracks = TCTracks(data=[west_negative(track) for track in part.data])
+    return hazard.hourly(hazard.near_box(tracks, grid), pool)
 
 
-def storm_set(model: str | None, grid: Grid, tag: str) -> Events:
-    """STORM North Atlantic tracks; `model` None is the present climate."""
-    files = env_int("HURLOSS_STORM_FILES", 5, 1, storm.FILES_PER_SET)
+def storm_files() -> int:
+    """1,000-year STORM files per climate for the spike's cross-check (present vs future)."""
+    return env_int("HURLOSS_STORM_FILES", 5, 1, storm.FILES_PER_SET)
+
+
+def storm_set(model: str | None, grid: Grid, tag: str, files: int) -> Events:
+    """STORM North Atlantic tracks, `files` x 1,000 years; `model` None is the present climate.
+
+    Each 1,000-year file gets its own wind fields and cache entry, so memory stays bounded and
+    a longer catalogue reuses the files a shorter one already computed.
+    """
+    if not 1 <= files <= storm.FILES_PER_SET:
+        raise ValueError(f"STORM files out of range: {files}")
     label = model or "present"
-    name = f"storm_{label}_{files}k_{tag}"
-    fields = hazard.wind_fields(lambda pool: storm_tracks(model, files, pool), grid, name)
     period = STORM_PRESENT_YEARS if model is None else STORM_FUTURE_YEARS
-    events = hazard.events(fields, period, rate=1.0 / (files * storm.YEARS_PER_FILE))
+    parts = []
+    for index in range(files):
+        fields = hazard.wind_fields(
+            lambda pool, i=index: storm_tracks(model, i, grid, pool),
+            grid,
+            f"storm_{label}_file{index}_{tag}",
+        )
+        parts.append(hazard.events(fields, period, rate=1.0 / (files * storm.YEARS_PER_FILE)))
+    events = hazard.stack(parts)
     LOG.info("STORM %s: %d events near the grid", label, events.wind.shape[0])
     return events
 
 
-def storm_future(grid: Grid, tag: str) -> list[Events]:
+def storm_future(grid: Grid, tag: str, files: int) -> list[Events]:
     """One event set per STORM future-climate GCM."""
-    return [storm_set(model, grid, tag) for model in storm.FUTURE_ZIPS]
+    return [storm_set(model, grid, tag, files) for model in storm.FUTURE_ZIPS]

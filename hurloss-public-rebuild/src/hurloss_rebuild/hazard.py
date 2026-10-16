@@ -15,11 +15,13 @@ import pathos.pools
 from climada.hazard import Centroids, TCTracks, TropCyclone
 from scipy import sparse
 
-from hurloss_rebuild.grid import EAST, NORTH, SOUTH, WEST, Grid
+from hurloss_rebuild.grid import Grid
 from hurloss_rebuild.paths import cache_path
 
 LOG = logging.getLogger(__name__)
 TIME_STEP_H = 1.0
+# Tracks with no fix within this many degrees (about 220 km) of any point are dropped before the
+# wind fields: Cat 1 wind (the lowest level FEMA's formula counts) that far from the eye is rare.
 BOX_MARGIN_DEG = 2.0
 
 
@@ -34,16 +36,15 @@ class Events:
     years: tuple[int, int]
 
 
-def near_box(tracks: TCTracks) -> TCTracks:
-    """Only tracks with a fix within the grid box (plus a margin) can put wind on a point."""
+def near_box(tracks: TCTracks, grid: Grid) -> TCTracks:
+    """Only tracks with a fix within the grid's bounds (plus a margin) can put wind on a point."""
+    south, north = grid.lat.min() - BOX_MARGIN_DEG, grid.lat.max() + BOX_MARGIN_DEG
+    west, east = grid.lon.min() - BOX_MARGIN_DEG, grid.lon.max() + BOX_MARGIN_DEG
     kept = [
         track
         for track in tracks.data
         if (
-            (track.lat > SOUTH - BOX_MARGIN_DEG)
-            & (track.lat < NORTH + BOX_MARGIN_DEG)
-            & (track.lon > WEST - BOX_MARGIN_DEG)
-            & (track.lon < EAST + BOX_MARGIN_DEG)
+            (track.lat > south) & (track.lat < north) & (track.lon > west) & (track.lon < east)
         ).any()
     ]
     if not kept:
@@ -110,4 +111,19 @@ def events(hazard: TropCyclone, years: tuple[int, int], rate: float | None = Non
         category=np.asarray(hazard.category),
         basin=np.asarray(hazard.basin),
         years=years,
+    )
+
+
+def stack(parts: list[Events]) -> Events:
+    """One event set from several on the same points and period."""
+    if not parts:
+        raise ValueError("nothing to stack")
+    if len({part.wind.shape[1] for part in parts}) != 1 or len({p.years for p in parts}) != 1:
+        raise ValueError("event sets differ in points or period")
+    return Events(
+        wind=sparse.csr_matrix(sparse.vstack([part.wind for part in parts])),
+        frequency=np.concatenate([part.frequency for part in parts]),
+        category=np.concatenate([part.category for part in parts]),
+        basin=np.concatenate([part.basin for part in parts]),
+        years=parts[0].years,
     )

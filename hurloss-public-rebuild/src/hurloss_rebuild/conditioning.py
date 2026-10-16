@@ -27,18 +27,29 @@ SCENARIOS = (
     Scenario("LATE_LOWER", "4.5", 2100),
     Scenario("LATE_HIGHER", "8.5", 2100),
 )
-BASINS = ("NA", "EP")
+# Knutson et al. (2020) report these percentiles of model spread: 5th/95th for all-storm
+# frequency and 10th/90th for Cat 4-5 frequency and intensity, paired as CLIMADA pairs them.
+PERCENTILES = ("5/10", "25", "50", "75", "90/95")
+CENTRAL = "50"
 
 
-def knutson_percent(variable: str, scenario: Scenario, basin: str, years: tuple[int, int]) -> float:
-    """Median Knutson/Jewson % change in `variable` for one basin, relative to `years`."""
+def knutson_percent(
+    variable: str,
+    scenario: Scenario,
+    basin: str,
+    years: tuple[int, int],
+    percentile: str = CENTRAL,
+) -> float:
+    """Knutson/Jewson % change in `variable` for one basin, relative to `years`."""
+    if percentile not in PERCENTILES:
+        raise ValueError(f"unknown Knutson percentile: {percentile}")
     table = get_knutson_scaling_factor(
-        variable=variable, percentile="50", basin=basin, baseline=years, yearly_steps=5
+        variable=variable, percentile=percentile, basin=basin, baseline=years, yearly_steps=5
     )
     return float(table.loc[scenario.year, scenario.rcp])
 
 
-def frequency_only(events: Events, scenario: Scenario) -> Events:
+def frequency_only(events: Events, scenario: Scenario, percentile: str = CENTRAL) -> Events:
     """Jewson's recommended use: rescale event rates by peak category, winds unchanged.
 
     Cat 4-5 events take Knutson's Cat 4-5 frequency change; the rest take whatever keeps the
@@ -49,8 +60,9 @@ def frequency_only(events: Events, scenario: Scenario) -> Events:
     strong = np.isin(events.category, [4, 5])
     for basin in np.unique(events.basin):
         in_basin = events.basin == basin
-        all_change = knutson_percent("cat05", scenario, str(basin), events.years) / 100
-        strong_change = knutson_percent("cat45", scenario, str(basin), events.years) / 100
+        all_change = knutson_percent("cat05", scenario, str(basin), events.years, percentile)
+        strong_change = knutson_percent("cat45", scenario, str(basin), events.years, percentile)
+        all_change, strong_change = all_change / 100, strong_change / 100
         weak_total = frequency[in_basin & ~strong].sum()
         strong_total = frequency[in_basin & strong].sum()
         if weak_total <= 0:

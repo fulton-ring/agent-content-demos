@@ -147,8 +147,9 @@ def main() -> None:
     points = timer.run("grid", lambda: grid.build(shapes, step))
     LOG.info("%d grid points cover %d counties", points.lat.size, points.point_county.nunique())
     history = timer.run("historical event set", lambda: event_sets.historical(points, tag))
-    present = timer.run("STORM present", lambda: event_sets.storm_set(None, points, tag))
-    futures = timer.run("STORM future", lambda: event_sets.storm_future(points, tag))
+    files = event_sets.storm_files()
+    present = timer.run("STORM present", lambda: event_sets.storm_set(None, points, tag, files))
+    futures = timer.run("STORM future", lambda: event_sets.storm_future(points, tag, files))
     nri_table = timer.run("NRI v1.20", nri.counties)
     for label, events in (("historical", history), ("storm_present", present)):
         table = baseline.county_table(events, points.point_county, nri_table)

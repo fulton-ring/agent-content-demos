@@ -50,3 +50,33 @@ def published_vs_rebuilt(details: pd.DataFrame, pairs: list[tuple[str, str]], ta
     figure.savefig(target, dpi=110)
     plt.close(figure)
     return target
+
+
+def layer_maps(
+    shapes: gpd.GeoDataFrame, key: pd.DataFrame, ours: pd.DataFrame, target: Path
+) -> Path:
+    """FEMA's published multipliers next to ours, mid- and late-century under higher warming."""
+    panels = {}
+    for scenario in ("MID_HIGHER", "LATE_HIGHER"):
+        published = key[f"HRCN_{scenario}_HM"]
+        panels[f"FEMA, {scenario}"] = published.where(published > 0)
+        panels[f"Ours (Knutson median), {scenario}"] = ours[f"{scenario}_HM"]
+    return county_maps(shapes, panels, target, 1.0, 2.2)
+
+
+def tract_map(shapes: gpd.GeoDataFrame, table: pd.DataFrame, state: str, target: Path) -> Path:
+    """Tract multipliers (late century, higher) as points over the state's counties."""
+    outline = shapes[shapes["STUSPS"] == state].to_crs(EQUAL_AREA)
+    geometry = gpd.points_from_xy(table["longitude"], table["latitude"])
+    # geopandas ships no type stubs that agree with pandas-stubs' DataFrame overloads.
+    points = gpd.GeoDataFrame(table[["LATE_HIGHER_HM"]], geometry=geometry, crs="EPSG:4326")  # ty: ignore[no-matching-overload]
+    points = points.to_crs(EQUAL_AREA)
+    figure, axis = plt.subplots(figsize=(7, 7))
+    outline.boundary.plot(ax=axis, color="#999999", linewidth=0.4)
+    points.plot(ax=axis, column="LATE_HIGHER_HM", cmap="viridis", markersize=3, legend=True)
+    axis.set_title(f"Tract HM, late century higher (Knutson median), {state}", fontsize=10)
+    axis.set_axis_off()
+    figure.tight_layout()
+    figure.savefig(target, dpi=110)
+    plt.close(figure)
+    return target

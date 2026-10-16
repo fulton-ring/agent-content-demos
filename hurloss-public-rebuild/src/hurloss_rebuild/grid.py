@@ -56,3 +56,14 @@ def build(counties: gpd.GeoDataFrame, step: float) -> Grid:
     position = pd.Series(np.arange(len(used)), index=used)
     mapping = pd.Series(pairs["fips"].to_numpy(), index=position[pairs["point"]].to_numpy())
     return Grid(lat=lat[used], lon=lon[used], point_county=mapping)
+
+
+def tract_points(centroids: pd.DataFrame) -> Grid:
+    """One point per tract, at its population-weighted centre; `point_county` holds tract FIPS."""
+    if centroids.empty:
+        raise ValueError("no tract centroids")
+    return Grid(
+        lat=centroids["latitude"].to_numpy(dtype=float),
+        lon=centroids["longitude"].to_numpy(dtype=float),
+        point_county=pd.Series(centroids.index.to_numpy(), index=np.arange(len(centroids))),
+    )
