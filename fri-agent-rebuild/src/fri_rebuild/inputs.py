@@ -163,3 +163,24 @@ def county_fuel_shares() -> pd.DataFrame:
 
     _, fips = county_weights()
     return landfire.fuel_shares(geo.counties().loc[fips], "counties")
+
+
+def loca2_histogram(scenario: str, period: str) -> tuple[np.ndarray, np.ndarray]:
+    """Daily tasmin histograms from LOCA2 (MPI-ESM1-2-HR, 1/16 degree) for one 30-year period.
+
+    Returns (edges, counts). `edges` are bin edges in deg C (first and last are -inf/inf, bins
+    are 0.1 deg C wide from -10 to 40). `counts` has shape (bins + 1, cells): one row per bin plus
+    a last row counting days with no data. scenario is 'historical', 'ssp245' or 'ssp585';
+    period is 'historical', 'MID' or 'LATE'.
+    """
+    from fri_rebuild import loca2
+
+    return loca2.EDGES, np.load(loca2.histogram_path(scenario, period))
+
+
+def loca2_county_weights() -> tuple[sparse.csr_matrix, pd.Index]:
+    """County x cell intersection areas (km^2) for the LOCA2 cells in `loca2_histogram`."""
+    from fri_rebuild import loca2
+
+    _, weights, fips = loca2.county_weights()
+    return weights, fips
