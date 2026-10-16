@@ -9,13 +9,16 @@ structure produced them and where they disagree with FEMA's own documentation:
 4. Whether counties that share a tide gauge lie in a 3-dimensional subspace, as
    HM = sum over sub-types of (gauge factor x county weight) requires. Groups with all four
    scenario values distinct are compared with random groups of the same counties.
-5. How well one candidate recipe for the gauge factors, built from the 2022 Sea Level Rise
+5. Whether the multipliers follow the coastal flooding footprint of the previous NRI release
+   (v1.18.1, November 2021) rather than v1.19.0, the baseline they were applied to.
+6. How well one candidate recipe for the gauge factors, built from the 2022 Sea Level Rise
    Technical Report (return-level curve, median relative sea level rise, frequencies capped at
    the curve's shortest return period), reproduces each county with non-negative weights.
 
 Usage: python -m fri_rebuild.forensics  (writes results/forensics/*.csv)
 """
 
+import io
 import re
 
 import geopandas as gpd
@@ -23,14 +26,21 @@ import numpy as np
 import pandas as pd
 from scipy.optimize import nnls
 
-from fri_rebuild import answer_key, coastal, geo
-from fri_rebuild.paths import RESULTS_DIR
+from fri_rebuild import answer_key, coastal, geo, http
+from fri_rebuild.paths import RESULTS_DIR, cache_path
 
 COLUMNS = [f"CFLD_{s}_HM" for s in answer_key.SCENARIOS]
 SCENARIOS = {"LOWER": "1.0 - MED", "HIGHER": "2.0 - MED"}
 YEARS = {"MID": 2050, "LATE": 2100}
 SUB_TYPES = {"minor": [1, 2], "moderate": [10, 20, 30, 40, 50], "major": [100]}
 OUT = RESULTS_DIR / "forensics"
+# NRI v1.18.1 county table. FEMA no longer serves it; this is a third-party copy committed to a
+# research repository (Git LFS). Its CFLD_EALT matches the sum of FEMA's v1.18.1 tract layer
+# (ArcGIS Online item 0f91bf00e1164acc9434d01d1c53f7c4) for every county. It has no territories.
+NRI_V1181_COUNTIES = (
+    "https://media.githubusercontent.com/media/dynamicalsystemslaboratory/"
+    "Data-centers-siting-across-U.S.-cities/main/Section%202%20and%204/Data/NRI_Table_Counties.csv"
+)
 
 
 def published() -> pd.DataFrame:
@@ -79,6 +89,30 @@ def late_equality(table: pd.DataFrame) -> pd.DataFrame:
     summary = frame.groupby("state")["late_equal"].agg(["size", "sum"])
     summary.columns = ["counties", "late_lower_equals_higher"]
     return summary.sort_values(by="counties", ascending=False)
+
+
+def previous_release() -> pd.DataFrame:
+    target = cache_path("forensics", "nri_v1_18_1_counties.parquet")
+    if not target.exists():
+        response = http.session().get(NRI_V1181_COUNTIES, timeout=300)
+        response.raise_for_status()
+        table = pd.read_csv(io.BytesIO(response.content), dtype={"STCOFIPS": str}, low_memory=False)
+        table["STCOFIPS"] = table["STCOFIPS"].str.zfill(5)
+        table[["STCOFIPS", "NRI_VER", "CFLD_EALT"]].to_parquet(target)
+    return pd.read_parquet(target).set_index("STCOFIPS")
+
+
+def footprint(table: pd.DataFrame) -> pd.DataFrame:
+    """Published HM = 0 or > 0 against coastal flood EAL in v1.18.1, for states only."""
+    previous = previous_release()
+    rows = table[~table["STATEABBRV"].isin(answer_key.CONUS_EXCLUDED - {"AK", "HI"})]
+    rows = rows[["STATEABBRV", "COUNTY", "CFLD_EALT", *COLUMNS]].join(
+        previous["CFLD_EALT"].rename("CFLD_EALT_v1_18_1")
+    )
+    rows["published_zero"] = rows[COLUMNS[0]] == 0
+    rows["coastal_in_v1_18_1"] = rows["CFLD_EALT_v1_18_1"].fillna(0) > 0
+    rows["eal_v1_18_1_over_v1_19"] = rows["CFLD_EALT_v1_18_1"] / rows["CFLD_EALT"]
+    return rows
 
 
 def rank_ratio(values: np.ndarray) -> float:
@@ -199,6 +233,7 @@ def main() -> None:
         "coastal_zero_hm.csv": zeros(table),
         "coastal_hm_below_one.csv": below_one(table, gauges),
         "coastal_late_equality_by_state.csv": late_equality(table),
+        "coastal_footprint_v1_18_1.csv": footprint(table),
         "coastal_gauge_rank_test.csv": subspace_test(table, gauges),
         "coastal_recipe_fit.csv": recipe_fit(table, gauges),
     }
@@ -209,6 +244,12 @@ def main() -> None:
         f"HM = 0: {len(zero)} counties; PAL ratings match HM = 1 for {zero['matches_hm_1'].sum()}"
     )
     print(f"0 < HM < 1: {len(outputs['coastal_hm_below_one.csv'])} counties")
+    print(
+        pd.crosstab(
+            outputs["coastal_footprint_v1_18_1.csv"]["published_zero"],
+            outputs["coastal_footprint_v1_18_1.csv"]["coastal_in_v1_18_1"],
+        ).to_string()
+    )
     equal = outputs["coastal_late_equality_by_state.csv"]
     print(
         f"late lower == late higher: {equal['late_lower_equals_higher'].sum()} of "

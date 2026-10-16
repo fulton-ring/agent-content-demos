@@ -14,6 +14,8 @@ SCEN = ["1.0 - MED", "2.0 - MED"]  # LOWER, HIGHER scenario labels
 CAP = 10.0  # events per year (0.1-year return period, shortest in the table)
 USE_ID = True  # use the NOAA-ID matched projection when the gauge has one
 EXN = 6
+SHIFT = 0.0  # metres added to the threshold for the current frequency
+SHIFT_FUT = 0.0  # metres added to the threshold for the future frequencies
 INTERP = "logrp"  # interpolation between table points: logrp, rp, freq
 LOW_EXTRAP = True  # extrapolate log-linearly below the 0.1-year level, then cap
 OFFSETS = ()
@@ -40,9 +42,7 @@ def _rises(row, t):
         if not m.empty:
             lat, lon = m.iloc[0].Lat, m.iloc[0].Long
     c = np.cos(np.radians(lat))
-    d = (s.Lat - lat) ** 2 + np.minimum(
-        ((s.Long - lon) * c) ** 2, ((s.Long - lon - 360) * c) ** 2
-    )
+    d = (s.Lat - lat) ** 2 + np.minimum(((s.Long - lon) * c) ** 2, ((s.Long - lon - 360) * c) ** 2)
     i = d.idxmin()
     r = s[(s.Lat == s.loc[i, "Lat"]) & (s.Long == s.loc[i, "Long"])].set_index("Scenario")
     out = []
@@ -94,11 +94,14 @@ def gauge_factors(gauge):
     r = _rises(row, t)
     out = []
     for z in T:
-        p0 = freq(z, lv, per)
-        out.append([
-            freq(z - r[(SCEN[0], 2050)], lv, per) / p0,
-            freq(z - r[(SCEN[1], 2050)], lv, per) / p0,
-            freq(z - r[(SCEN[0], 2100)], lv, per) / p0,
-            freq(z - r[(SCEN[1], 2100)], lv, per) / p0,
-        ])
+        p0 = freq(z + SHIFT, lv, per)
+        z = z + SHIFT_FUT
+        out.append(
+            [
+                freq(z - r[(SCEN[0], 2050)], lv, per) / p0,
+                freq(z - r[(SCEN[1], 2050)], lv, per) / p0,
+                freq(z - r[(SCEN[0], 2100)], lv, per) / p0,
+                freq(z - r[(SCEN[1], 2100)], lv, per) / p0,
+            ]
+        )
     return np.array(out)

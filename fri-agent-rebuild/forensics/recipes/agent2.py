@@ -6,8 +6,12 @@ import numpy as np
 
 from fri_rebuild import coastal, forensics
 
-OPT = {k: os.environ.get(k, d) for k, d in dict(
-    LOW="1.0 - MED", HIGH="1.5 - MED", BASE="0", FALL="nearest_noaa", CAP="1", CAPF="0").items()}
+OPT = {
+    k: os.environ.get(k, d)
+    for k, d in dict(
+        LOW="1.0 - MED", HIGH="1.5 - MED", BASE="0", FALL="nearest_noaa", CAP="1", CAPF="0"
+    ).items()
+}
 SUB_TYPES = forensics.SUB_TYPES
 YEARS = forensics.YEARS
 
@@ -57,7 +61,9 @@ def gauge_factors(gauge):
     row = curves[curves["St"].astype(str) == gauge]
     if row.empty:
         return None
-    rises = _rise_rows(tables, gauge, float(row["Latitude"].iloc[0]), float(row["Longitude"].iloc[0]))
+    rises = _rise_rows(
+        tables, gauge, float(row["Latitude"].iloc[0]), float(row["Longitude"].iloc[0])
+    )
     if rises is None or rises.empty:
         return None
     levels = np.maximum.accumulate(row[columns].to_numpy(float)[0])
