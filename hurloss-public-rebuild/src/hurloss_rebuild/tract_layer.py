@@ -57,3 +57,22 @@ def summary(table: pd.DataFrame) -> pd.DataFrame:
             }
         )
     return pd.DataFrame(rows)
+
+
+def tract_loss(nri_v1_20: pd.DataFrame, county_hm: pd.DataFrame) -> pd.DataFrame:
+    """Tract projected loss: NRI v1.20 tract hurricane EAL x its county's multiplier and range.
+
+    The Florida pilot shows tract-level wind changes the multiplier by 0.5-1.5% inside a county,
+    less than the disagreement between hazard catalogues, so the climate part stays at county
+    level and the tract detail comes from NRI.
+    """
+    table = pd.DataFrame(index=nri_v1_20.index)
+    table["county"] = nri_v1_20["STCOFIPS"].astype(str).str.zfill(5)
+    table["eal_v1_20"] = nri_v1_20["HRCN_EALT"]
+    for scenario in SCENARIOS:
+        for suffix in ("HM", "HM_LOW", "HM_HIGH"):
+            column = f"{scenario.name}_{suffix}"
+            hm = county_hm[column].reindex(table["county"]).fillna(1.0).to_numpy()
+            table[column] = hm
+        table[f"{scenario.name}_PAL"] = table["eal_v1_20"] * table[f"{scenario.name}_HM"]
+    return table

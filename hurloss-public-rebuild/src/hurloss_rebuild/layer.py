@@ -62,3 +62,44 @@ def multipliers(events: Events, point_unit: pd.Series) -> pd.DataFrame:
     if not np.isfinite(today.to_numpy()).all():
         raise ValueError("non-finite intensity today")
     return wide(ratios_by_percentile(events, point_unit), today)
+
+
+def combine(catalogues: dict[str, pd.DataFrame]) -> pd.DataFrame:
+    """One layer from several hazard catalogues.
+
+    Central HM is the mean of the catalogues that have Cat 1 wind at the unit; the range runs
+    from the lowest to the highest value over every catalogue and Knutson percentile. Each
+    catalogue's central value is kept as its own column.
+    """
+    if not catalogues:
+        raise ValueError("no catalogues to combine")
+    units = sorted(set().union(*(table.index for table in catalogues.values())))
+    table = pd.DataFrame(index=pd.Index(units, name="unit"))
+    covered = pd.DataFrame(
+        {
+            name: ~t["no_cat1_wind"].reindex(units).fillna(True).astype(bool)
+            for name, t in catalogues.items()
+        }
+    )
+    table["no_cat1_wind"] = ~covered.any(axis=1)
+    table["catalogues_with_wind"] = covered.sum(axis=1)
+    for scenario in SCENARIOS:
+        name = scenario.name
+        central = pd.DataFrame(
+            {c: t[f"{name}_HM"].reindex(units).where(covered[c]) for c, t in catalogues.items()}
+        )
+        low = pd.DataFrame(
+            {c: t[f"{name}_HM_LOW"].reindex(units).where(covered[c]) for c, t in catalogues.items()}
+        )
+        high = pd.DataFrame(
+            {
+                c: t[f"{name}_HM_HIGH"].reindex(units).where(covered[c])
+                for c, t in catalogues.items()
+            }
+        )
+        table[f"{name}_HM"] = central.mean(axis=1).fillna(1.0)
+        table[f"{name}_HM_LOW"] = low.min(axis=1).fillna(1.0)
+        table[f"{name}_HM_HIGH"] = high.max(axis=1).fillna(1.0)
+        for catalogue in catalogues:
+            table[f"{name}_HM_{catalogue.upper()}"] = central[catalogue]
+    return table

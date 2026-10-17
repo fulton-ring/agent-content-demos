@@ -8,6 +8,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import pandas as pd
+from matplotlib.colors import LogNorm
 
 from hurloss_rebuild.sources.counties import EQUAL_AREA
 
@@ -76,6 +77,31 @@ def tract_map(shapes: gpd.GeoDataFrame, table: pd.DataFrame, state: str, target:
     points.plot(ax=axis, column="LATE_HIGHER_HM", cmap="viridis", markersize=3, legend=True)
     axis.set_title(f"Tract HM, late century higher (Knutson median), {state}", fontsize=10)
     axis.set_axis_off()
+    figure.tight_layout()
+    figure.savefig(target, dpi=110)
+    plt.close(figure)
+    return target
+
+
+def loss_maps(shapes: gpd.GeoDataFrame, comparison: pd.DataFrame, target: Path) -> Path:
+    """Projected annual hurricane loss by county (log scale): where the risk actually is."""
+    part = comparison[comparison["scenario"] == "MID_HIGHER"]
+    box = shapes.cx[MAP_BOUNDS[0] : MAP_BOUNDS[2], MAP_BOUNDS[1] : MAP_BOUNDS[3]]
+    box = box[~box["STUSPS"].isin(["AK", "HI", "PR"])].to_crs(EQUAL_AREA)
+    panels = {
+        "FEMA: v1.19 EAL x FEMA HM": part["fema_pal"],
+        "Ours: v1.20 EAL x our HM": part["our_pal_v1_20"],
+    }
+    norm = LogNorm(vmin=1e5, vmax=1e9)
+    figure, axes = plt.subplots(1, 2, figsize=(12, 4.2))
+    for axis, (title, values) in zip(axes, panels.items(), strict=True):
+        shaded = box.assign(value=values.reindex(box.index))
+        shaded.plot(ax=axis, color="#dddddd", linewidth=0)
+        shaded[shaded["value"] > 0].plot(
+            ax=axis, column="value", cmap="magma_r", norm=norm, linewidth=0, legend=True
+        )
+        axis.set_title(f"{title}, mid-century higher ($/yr)", fontsize=10)
+        axis.set_axis_off()
     figure.tight_layout()
     figure.savefig(target, dpi=110)
     plt.close(figure)
