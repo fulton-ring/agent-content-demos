@@ -779,8 +779,8 @@ AMOUNT_WORD = re.compile(r"^[($-]*(\d{1,3}(,\d{3})+(\.\d\d)?|\d+\.\d\d)\)?$")
 # The share of the amounts Docling sees printed on a page that a model must read for its answer to count as more
 # than near-empty. A K-1 prints many amounts the schema doesn't ask for (capital account, liabilities, statement
 # references), so only a much shorter answer is suspect there. A brokerage summary page prints only the 18 amounts
-# the schema asks for, so an answer that skips one section (GLM 5.3 Flash reading only the 1099-B rows, 8 of about
-# 16) is near-empty too.
+# the schema asks for, so an answer missing whole sections (GLM 5.3 Flash reading only the 8 1099-B amounts of
+# about 16) is near-empty too.
 BROKER_MIN_READ_SHARE = 0.75
 K1_MIN_READ_SHARE = 0.25
 

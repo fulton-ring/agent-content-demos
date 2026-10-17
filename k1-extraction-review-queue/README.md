@@ -14,7 +14,7 @@ It compares five current vision-language models, three of them open-weight, and 
 ./run.sh --screenshots # also takes screenshots of Gemini 3.8 Flash's review screen
 ```
 
-You need Python 3.10+, the `tesseract` binary (`apt install tesseract-ocr` or `brew install tesseract`; Docling uses it to read the scanned pages, so every run needs it, not only `--tesseract`), `OPENROUTER_API_KEY`, and for the OCR models `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` in the environment. `run.sh` checks for Tesseract and the OpenRouter key before it builds anything. Without the Modal credentials the OCR models are skipped. The script makes a virtualenv (Docling brings a CPU build of PyTorch; the virtualenv comes to about 2 GB), downloads the real sample K-1s, generates the made-up documents, runs Docling, runs the five models in parallel, pairs Gemini with Qwen 3.8 27B, scores everything and writes:
+You need Python 3.10+, the `tesseract` binary (`apt install tesseract-ocr` or `brew install tesseract`; Docling uses it to read the scanned pages, so every run needs it, not only `--tesseract`), `OPENROUTER_API_KEY`, and for the OCR models `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` in the environment. `run.sh` checks for Tesseract and the OpenRouter key before it builds anything. Without the Modal credentials the OCR models are skipped. The script makes a virtualenv (Docling brings a CPU build of PyTorch; the virtualenv comes to about 2 GB), downloads the blank IRS forms and the real sample K-1s, generates the made-up documents, runs Docling, runs the five models in parallel, pairs Gemini with Qwen 3.8 27B, scores everything and writes:
 
 - `output/comparison.md`: every run side by side
 - `output/<model>-alone/index.html`: each model's review screen
@@ -38,13 +38,15 @@ These files are not in the repo. `fetch_real.py` downloads them from the issuers
 
 **Scanned copies of the real K-1s.** These are born-digital PDFs, and real client documents often arrive as scans. So `fetch_real.py` also prints each K-1 page and "scans" it: it rotates, blurs and downsamples the image, adds noise and saves it as a JPEG. An office scan is mild. A bad scan imitates a fax or a phone photo.
 
-**Made-up K-1s and 1099s.** Real 1120-S and 1041 K-1s and real brokerage 1099s aren't published anywhere we can use. `generate.py` fills the blank 2025 IRS forms (in `forms/`) with invented names and amounts, and draws a made-up broker's consolidated 1099 with DIV, INT and 1099-B summary and detail pages. Their EINs start with `00-`, a prefix the IRS doesn't assign. Every made-up document is image-only, either a clean scan, an office scan or a bad scan.
+**Made-up K-1s and 1099s.** Real 1120-S and 1041 K-1s and real brokerage 1099s aren't published anywhere we can use. `generate.py` fills the blank 2025 IRS forms with invented names and amounts, and draws a made-up broker's consolidated 1099 with DIV, INT and 1099-B summary and detail pages. Their EINs start with `00-`, a prefix the IRS doesn't assign. Every made-up document is image-only, either a clean scan, an office scan or a bad scan.
+
+**Blank IRS forms.** `fetch_forms.py` downloads the blank Schedule K-1 forms from the IRS's prior-year archive (`irs.gov/pub/irs-prior/`): Form 1065 for 2018, 2019, 2021 and 2025, and Forms 1120-S and 1041 for 2025. It checks their SHA-256 hashes, as `fetch_real.py` does for the issuers' files. `generate.py` fills the 1120-S and 1041 forms, and the extractors line scanned K-1s up with all six for their box labels. They are not in the repo.
 
 ## How it works
 
 1. **Docling reads every page once** (`layout.py`, on CPU). It finds the K-1 page and the supplemental statements, and turns each statement into a Box / Description / Amount table.
 2. **Each model reads the form** (`extract_vlm.py --model-only`). The K-1 page (or the 1099 summary page) goes to the model as an image at 200 dpi. Each model is named by a Pydantic AI model string, such as `openrouter:google/gemini-3.8-flash`. All five here go through OpenRouter, which Pydantic AI treats as one provider among others, so a model from another provider is a different string and no code change. Pydantic AI asks for a typed result: one Pydantic model per form (1065, 1120-S, 1041 and the brokerage 1099), where every value carries what was printed, its bounding box and the model's own confidence. Thinking models run at low effort through Pydantic AI's provider-neutral `thinking` setting; reading a form doesn't need long reasoning, and at the default they spent their whole output budget thinking.
-3. **A value goes to review** when the model's confidence is below 0.9, the amount is on an attached statement (`STMT`), it isn't a well-formed amount, a coded row has no code letter, or a cross-check fails (qualified dividends above ordinary dividends, 4a + 4b ≠ 4c, a 1099-B row that doesn't balance). **The whole page goes to review** when the model read nothing on it, read fewer than a quarter as many values as Docling sees amounts printed on the page (at least 8 of them), or wasn't sure of any value it read. Otherwise every box the model left out would count as an accepted blank.
+3. **A value goes to review** when the model's confidence is below 0.9, the amount is on an attached statement (`STMT`), it isn't a well-formed amount, a coded row has no code letter, or a cross-check fails (qualified dividends above ordinary dividends, 4a + 4b ≠ 4c, a 1099-B row that doesn't balance). **The whole page goes to review** when the model read nothing on it, read too few values for the amounts Docling sees printed on the page (when there are at least 8), or wasn't sure of any value it read. "Too few" depends on the form. A K-1 prints many amounts the schema doesn't ask for, such as the capital account, so a K-1 answer is near-empty only below a quarter of the printed amounts. A brokerage summary page prints only the 18 amounts the schema asks for, so there the line is three quarters: Docling sees 15 to 17 amounts on each made-up 1099 summary page, a full answer has 16 to 18 values, and GLM's sparse answers had 4 to 8. An answer that skips only the DIV or only the INT section still has 12 or 14 values and isn't caught; one that skips the 1099-B rows, or DIV and INT together, is. Otherwise every box the model left out would count as an accepted blank.
 4. **Pairs** (`pair.py`). Two models' saved answers are combined with no further API calls. A value is accepted only when both models report the same box and code with the same amount and neither has its own reason to send it to review. Anything only one model reported, or that the two read differently, goes to review.
 5. **Statements.** For a `STMT` amount, the model reads the statement page and lists that box's lines. The reviewer sees them as a suggestion; the value stays in the queue.
 6. **OCR models on Modal** (`ocr_modal.py`, `extract_ocr.py`). olmOCR 2 and granite-docling turn a page into text rather than filling a schema, so each is followed by a text model (Gemini 3.8 Flash, which never sees the image) that fills the same typed schema from the OCR text, with the same review rules.
@@ -143,6 +145,7 @@ These numbers are from earlier runs and the default `./run.sh` doesn't reproduce
 ## Files
 
 - `run.sh`: the one command
+- `fetch_forms.py`: downloads the blank IRS K-1 forms into `forms/`
 - `fetch_real.py`: downloads the real K-1s and makes scanned copies
 - `generate.py`: makes the made-up documents and `answer_key.json`
 - `layout.py`: runs Docling over every sample once, writing `output/layout/`
@@ -156,6 +159,5 @@ These numbers are from earlier runs and the default `./run.sh` doesn't reproduce
 - `extract.py`: the earlier Tesseract pipeline
 - `screenshots.py`: saves `screenshots/` from a run's review screen (Gemini 3.8 Flash by default)
 - `real_answer_key.json`: the real K-1s' Part III boxes and the partnership name and EIN, keyed by hand from the issuers' PDFs
-- `forms/`: blank IRS Schedule K-1 forms (1065 for 2018, 2019, 2021 and 2025; 1120-S and 1041 for 2025), from irs.gov
 
 The committed screenshots are Gemini 3.8 Flash's review screen from the clean run reported above.
