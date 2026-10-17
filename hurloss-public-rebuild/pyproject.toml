@@ -1,0 +1,54 @@
+[project]
+name = "hurloss-rebuild"
+version = "0.1.0"
+description = "Rebuild FEMA's Future Risk Index hurricane multipliers from public track data"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "climada>=6.1.0",
+    "geopandas>=1.2.0",
+    "marimo>=0.25.1",
+    "matplotlib>=3.11.2",
+    # CLIMADA 6.1 calls float() on 1-element arrays, which NumPy 2.4 turned into an error.
+    "numpy<2.4",
+    "openpyxl>=3.1.5",
+    "pandas>=3.0.6",
+    "pyarrow>=26.0.0",
+    "pyogrio>=0.13.0",
+    "remotezip>=0.12.6",
+    "requests>=2.34.2",
+    "scipy>=1.18.1",
+    "shapely>=2.2.0",
+]
+
+[project.scripts]
+hurloss-run = "hurloss_rebuild.run:main"
+hurloss-layer = "hurloss_rebuild.layer_run:main"
+
+[build-system]
+requires = ["uv_build>=0.11.32,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pandas-stubs>=3.0.5.260914",
+    "pytest>=9.1.1",
+    "ruff>=0.17.1",
+    "scipy-stubs>=1.18.1.1",
+    "ty>=0.0.89",
+]
+
+[tool.uv]
+# CLIMADA lists the GDAL Python bindings, which have no wheels and need system GDAL headers.
+# The parts we use (tracks, wind fields, climate scaling) read and write files without them.
+override-dependencies = ["gdal; sys_platform == 'never'"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+# A bare expression at the end of a marimo cell is what the cell displays.
+"notebooks/*" = ["B018"]
