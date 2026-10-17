@@ -64,10 +64,17 @@ The first run takes most of a day, almost all of it climate downloads on this 4-
 
 - **NEX-GDDP-CMIP6:** 924 global yearly files of about 250 MB each, about 230 GB transferred,
   each cut to the CONUS box. About one to two hours.
-- **LOCA2:** about 55 GB of range reads of the days we need, from UCSD's server. It ran at
-  roughly an hour per 30-year period, so five to six hours.
-  - It runs last in `fri-prepare` and prints nothing until a period is done, so a quiet hour is
-    normal.
+- **LOCA2:** about 55 GB of range reads of the days we need, from UCSD's server, on 4 worker
+  processes. Its speed depends on that server.
+  - In the first run it took roughly an hour per 30-year period, so five to six hours for the
+    five periods.
+  - On 2026-10-17, on the same kind of 4-core machine, the historical period alone took 3 hours
+    14 minutes, with each three-year piece taking 50-110 minutes. At that pace all five periods
+    take about 15 hours.
+  - It runs last in `fri-prepare` and prints nothing until a period is done, so a quiet hour or
+    more is normal. It needs about 2.5 GB of free disk for a period's pieces while they are being
+    read. Don't run anything else memory-heavy alongside it: next to the NEX heat pipeline it ran
+    out of memory on a 16 GB machine.
   - If it is interrupted, rerun `./run.sh` (or `uv run fri-prepare`). Each period is read in
     pieces of about three years, and every finished piece is saved under
     `$FRI_CACHE/loca2/partial/`, so the rerun skips finished pieces and periods and loses only

@@ -39,7 +39,8 @@ VALUE_BINS = len(EDGES) - 1
 MISSING_ROW = VALUE_BINS
 WORKERS = 4
 # Days per piece. A finished piece is saved, so an interrupted run loses at most the pieces in
-# flight (about 15 minutes of reading each on 4 cores), at about 220 MB of disk per saved piece.
+# flight (50-110 minutes of reading each on 4 cores in October 2026), at about 220 MB of disk
+# per saved piece.
 PIECE_DAYS = 3 * 365
 
 
