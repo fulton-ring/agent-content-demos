@@ -10,6 +10,7 @@ range requests (`remotezip`), so the other basins are never downloaded.
 """
 
 from pathlib import Path
+from zipfile import ZipInfo
 
 from remotezip import RemoteZip
 
@@ -40,19 +41,31 @@ def member_name(model: str | None, index: int) -> str:
     return f"STORM_DATA_{model}_NA_1000_YEARS_{index}_IBTRACSDELTA.txt"
 
 
-def fetch(model: str | None, index: int) -> Path:
-    """One 1,000-year NA file (present climate when `model` is None), cached locally."""
-    name = member_name(model, index)
-    target = cache_path("storm", name)
-    if target.exists():
-        return target
+def find_member(archive: RemoteZip, name: str) -> ZipInfo:
+    matches = [
+        i for i in archive.infolist() if i.filename == name or i.filename.endswith("/" + name)
+    ]
+    if len(matches) != 1:
+        raise RuntimeError(f"{name} not found once in the STORM zip")
+    return matches[0]
+
+
+def fetch_all(model: str | None, files: int) -> list[Path]:
+    """The first `files` 1,000-year NA files of one climate, cached locally.
+
+    Missing files come out of one zip session, so 4TU sees one directory read per climate
+    rather than one per file.
+    """
+    if not 1 <= files <= FILES_PER_SET:
+        raise ValueError(f"STORM files out of range: {files}")
+    targets = [cache_path("storm", member_name(model, index)) for index in range(files)]
+    missing = [target for target in targets if not target.exists()]
+    if not missing:
+        return targets
     url = PRESENT_ZIP if model is None else FUTURE_DATASET + FUTURE_ZIPS[model]
     with RemoteZip(url, session=http.session()) as archive:
-        matches = [info for info in archive.infolist() if info.filename.endswith("/" + name)]
-        matches += [info for info in archive.infolist() if info.filename == name]
-        if len(matches) != 1:
-            raise RuntimeError(f"{name} not found once in {url}")
-        partial = target.with_suffix(".partial")
-        partial.write_bytes(archive.read(matches[0]))
-    partial.rename(target)
-    return target
+        for target in missing:
+            partial = target.with_suffix(".partial")
+            partial.write_bytes(archive.read(find_member(archive, target.name)))
+            partial.rename(target)
+    return targets

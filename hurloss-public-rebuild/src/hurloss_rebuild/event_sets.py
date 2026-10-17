@@ -2,6 +2,7 @@
 
 import logging
 import os
+from pathlib import Path
 
 import xarray as xr
 from climada.hazard import TCTracks
@@ -49,9 +50,9 @@ def west_negative(track: xr.Dataset) -> xr.Dataset:
     return track.assign_coords(lon=((track.lon + 180) % 360) - 180)
 
 
-def storm_tracks(model: str | None, index: int, grid: Grid, pool: ProcessPool) -> TCTracks:
+def storm_tracks(path: Path, grid: Grid, pool: ProcessPool) -> TCTracks:
     """Hourly tracks near the grid from one 1,000-year STORM file."""
-    part = TCTracks.from_simulations_storm(storm.fetch(model, index))
+    part = TCTracks.from_simulations_storm(path)
     tracks = TCTracks(data=[west_negative(track) for track in part.data])
     return hazard.hourly(hazard.near_box(tracks, grid), pool)
 
@@ -71,10 +72,11 @@ def storm_set(model: str | None, grid: Grid, tag: str, files: int) -> Events:
         raise ValueError(f"STORM files out of range: {files}")
     label = model or "present"
     period = STORM_PRESENT_YEARS if model is None else STORM_FUTURE_YEARS
+    paths = storm.fetch_all(model, files)
     parts = []
-    for index in range(files):
+    for index, path in enumerate(paths):
         fields = hazard.wind_fields(
-            lambda pool, i=index: storm_tracks(model, i, grid, pool),
+            lambda pool, p=path: storm_tracks(p, grid, pool),
             grid,
             f"storm_{label}_file{index}_{tag}",
         )
