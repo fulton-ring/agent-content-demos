@@ -14,9 +14,9 @@ Then a card gets a worker when all of these hold:
 - Not before is empty or today or earlier.
 - The issue isn't blocked by an open issue.
 - No `Worker started` comment on the issue in the last 6 hours.
-- Fewer than 5 Claude cards are **In progress**.
+- Fewer than `MAX_IN_PROGRESS` Claude cards are **In progress** (30 in the workflow, a safety ceiling rather than a throttle).
 
-For each one it starts the worker routine with the issue in the payload, moves the card to **In progress** and comments `Worker started <time>: <session url>` on the issue.
+For each one it starts the worker routine with the issue in the payload, moves the card to **In progress** and comments `Worker started <time>: <session url>` on the issue. If a start fails, it logs the error, goes on to the next card, and the run exits with an error so the failure shows in Actions. The card stays Ready and is tried again next run.
 
 ## Run it
 
