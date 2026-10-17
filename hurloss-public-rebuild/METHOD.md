@@ -23,7 +23,7 @@ don't support it.
    scenario.
 3. **The published climate science doesn't give it.**
    - Knutson et al. (2020), the standard assessment, converted to FEMA's scenarios (Jewson
-     2021), gives county medians of +3% to +13% (table below).
+     2021), gives county medians of +4% to +15% (table below).
    - STORM's four high-resolution climate models (2050, SSP5-8.5) give a median of +25%.
    - Only the 90th-percentile Knutson case for late century under RCP 8.5 reaches about 2.
 4. **FEMA's numbers don't behave like FEMA's documented formula.**
@@ -52,25 +52,32 @@ level. Until it does, we treat FEMA's hurricane multipliers as unexplained and d
 Projected annual loss = NRI hurricane expected annual loss (EAL) × hazard multiplier. This is
 FEMA's FRI Equation 12. It has two parts, which we refresh separately:
 
-- **The economic part:** NRI's hurricane EAL, by county or tract. It is refreshed whenever FEMA
-  publishes a new NRI release (v1.19 in March 2023, v1.20 in December 2025). The FRI applied its
-  multipliers to v1.19.
-- **The climate part:** our multiplier. It is refreshed only when one of its inputs changes: a
-  new STORM release, a new Knutson-style assessment, or new climate-model tracks such as RAFT.
+- **The economic part: how much hurricanes cost each place today.** This is NRI's hurricane EAL,
+  by county or tract, computed by FEMA with Hazus. It is refreshed whenever FEMA publishes a new
+  NRI release (v1.19 in March 2023, v1.20 in December 2025). The FRI applied its multipliers to
+  v1.19.
+- **The climate part: how much that cost changes by 2050 or 2100.** This is our multiplier. It is
+  refreshed only when one of its inputs changes: a new STORM release, a new Knutson-style
+  assessment, or new climate-model tracks such as RAFT.
+
+**The multiplier is a change factor, not a risk level.** Miami-Dade's multiplier of 1.06 next
+to an inland county's 1.00 does not mean Miami is low risk. Miami-Dade has the second-highest
+projected hurricane loss in the country, because its loss today is already $331M a year.
+Publish projected loss (`map_projected_loss.png`), not the multiplier alone.
 
 ## Method, step by step
 
 | Step | What we do | Source | Our choice and why |
 |---|---|---|---|
-| 1. Today's storms | 10,000 years of synthetic North Atlantic tracks resampled from IBTrACS 1980-2018 | STORM v4, Bloemendaal et al. (2020) *Sci. Data*, [doi:10.4121/12706085.v4](https://doi.org/10.4121/12706085.v4), CC0 | A synthetic catalogue reaches far more inland counties than 125 years of best tracks (1,189 against 948 counties with Cat 1 wind at 5,000 years), and it ranks NRI's county hurricane loss better (Spearman 0.92 against 0.76). |
+| 1. Today's storms | Two open catalogues, used side by side: (a) 10,000 years of synthetic North Atlantic tracks resampled from IBTrACS 1980-2018; (b) the observed tracks of 1900-2024 plus 19 perturbed copies of each (2,500 years) | (a) STORM v4, Bloemendaal et al. (2020) *Sci. Data*, [doi:10.4121/12706085.v4](https://doi.org/10.4121/12706085.v4), CC0. (b) NOAA IBTrACS v04r01 (HURDAT2 values) with CLIMADA's `calc_perturbed_trajectories` (random-walk tracks, land decay) | They have opposite strengths. STORM reaches more inland counties (1,241 against 952) and ranks NRI's county loss better (Spearman 0.92 against 0.75). But it puts about half the observed number of hurricanes on the US coast (see "Is it believable?"), while (b) matches the observed record by construction. The two give the same typical multiplier but disagree on which counties rise most (Spearman 0.20-0.22), so we average them and count the disagreement as uncertainty. |
 | 2. Wind at each place | Peak 1-minute sustained wind at 10 m per storm, Holland (2008) profile, hourly track steps | CLIMADA 6.1 (`TropCyclone.from_tracks`, model `H08`), Aznar-Siguan & Bresch (2019) | CLIMADA's default. It is open terrain with no surface-roughness reduction, so only rankings and ratios carry over, not loss levels. |
 | 3. Category frequencies | At each point, the annual frequency of wind reaching Saffir-Simpson Cat 1, 2, 3, 4 and 5 | Saffir-Simpson thresholds (64, 83, 96, 113 and 137 kt) | "Frequency of Category k" is read as wind reaching at least Category k. Counting each storm only in its peak band made no material difference. |
 | 4. Intensity | Intensity = F1 + 2·F2 + 4·F3 + 8·F4 + 16·F5 | FRI technical document (FEMA 2024), Eq. 11 | FEMA's weights unchanged. |
-| 5. Places | County: mean over 0.25° grid points within 1 km of the county (nearest point if none). Tract: the tract's population-weighted centre. | FRI Sec. 7.2. Census 2020 boundaries and CenPop2020 tract centroids. | FEMA's county rule, with a regular grid standing in for ARA's points, which aren't public. |
+| 5. Places | Counties: the mean over 0.25° grid points within 1 km of the county (nearest point if none) | FRI Sec. 7.2; Census 2020 boundaries | FEMA's county rule, with a regular grid standing in for ARA's points, which aren't public. Tracts use their county's multiplier (see "Can we go below the county?"). |
 | 6. Scenarios | FEMA's lower and higher warming are RCP 4.5 and 8.5; mid and late century are 2050 and 2100 | FRI Table 5, Sec. 7.1 | As FEMA defines them. |
-| 7. Climate change | Rescale each storm's rate by its peak category: Cat 4-5 by Knutson's Cat 4-5 frequency change, the rest so that all-storm frequency changes by Knutson's figure. Winds unchanged. | Knutson et al. (2020) *BAMS* [doi:10.1175/BAMS-D-18-0194.1](https://doi.org/10.1175/BAMS-D-18-0194.1); Jewson (2021) *JAMC* [doi:10.1175/JAMC-D-21-0102.1](https://doi.org/10.1175/JAMC-D-21-0102.1), which converts Knutson's +2 °C figures to any baseline, year and RCP; implemented in CLIMADA (`apply_climate_scenario_knu`) | Frequency only, as Jewson (2022, *SERRA*, [doi:10.1007/s00477-021-02142-6](https://doi.org/10.1007/s00477-021-02142-6)) recommends, because changing intensity as well can double count. The baseline is STORM's 1980-2018. |
-| 8. Multiplier | HM = max(1, projected / today's intensity) | FRI Eq. 12 | As documented, with no factor of 2. A county or tract with no Cat 1 wind in 10,000 years gets HM = 1, which is how FEMA's own ratings treat its zeros. |
-| 9. Range | Steps 7-8 repeated at each published Knutson percentile (5th/10th, 25th, 75th, 90th/95th); we report the median and the lowest and highest | Knutson et al. (2020); CLIMADA pairs the same percentile across variables | Shows how much the answer depends on which climate models are right. |
+| 7. Climate change | Rescale each storm's rate by its peak category: Cat 4-5 by Knutson's Cat 4-5 frequency change, the rest so that all-storm frequency changes by Knutson's figure. Winds unchanged. | Knutson et al. (2020) *BAMS* [doi:10.1175/BAMS-D-18-0194.1](https://doi.org/10.1175/BAMS-D-18-0194.1); Jewson (2021) *JAMC* [doi:10.1175/JAMC-D-21-0102.1](https://doi.org/10.1175/JAMC-D-21-0102.1), which converts Knutson's +2 °C figures to any baseline, year and RCP; implemented in CLIMADA (`apply_climate_scenario_knu`) | Frequency only, as Jewson (2022, *SERRA*, [doi:10.1007/s00477-021-02142-6](https://doi.org/10.1007/s00477-021-02142-6)) recommends, because changing intensity as well can double count. Each catalogue uses its own baseline years (1980-2018 and 1900-2024). |
+| 8. Multiplier | HM = max(1, projected / today's intensity) | FRI Eq. 12 | As documented, with no factor of 2. A county where neither catalogue has Cat 1 wind gets HM = 1, which is how FEMA's own ratings treat its zeros. |
+| 9. Central value and range | Central: the mean of the two catalogues' median-percentile values. Range: the lowest and highest value over both catalogues and every published Knutson percentile (5th/10th to 90th/95th). | Knutson et al. (2020); CLIMADA pairs the same percentile across variables | Shows how much the answer depends on which climate models, and which storm catalogue, are right. |
 | 10. Cross-check | STORM's own 2050 SSP5-8.5 tracks from four high-resolution GCMs, through steps 2-4 and 8 | Bloemendaal et al. (2022) *Sci. Adv.*, [doi:10.4121/14237678.v2](https://doi.org/10.4121/14237678.v2) | An independent route from climate-model storms rather than an assessment. It covers one scenario only. |
 
 Nothing here is fitted to FEMA's values or to NRI losses.
@@ -82,10 +89,12 @@ Nothing here is fitted to FEMA's values or to NRI losses.
   computed with Hazus.
 - **No climate-driven change in tracks.** Knutson gives basin-wide changes, so every place in
   the basin gets the same change per storm category. The local pattern comes only from which
-  categories reach each place today.
-- **The range is model spread, not total uncertainty.** It doesn't include the sampling noise
-  of a 10,000-year catalogue in rarely hit counties, or the choice of wind model.
+  categories reach each place today, and that differs between catalogues.
+- **The range is model and catalogue spread, not total uncertainty.** It doesn't include the
+  choice of wind model.
 - **Late century has no simulated-track cross-check yet.** RAFT (late century, SSP5-8.5) is #24.
+- **Connecticut** has no v1.20 county values here. NRI v1.20 moved it to nine planning regions,
+  which don't match the 2020 county codes the FRI used.
 
 ## Results
 
@@ -93,85 +102,134 @@ All numbers come from `./run.sh` (the `hurloss-layer` step) and are in `results/
 
 ### Counties (`county_multipliers.csv`, `fri_comparison_summary.csv`)
 
-1,241 counties get Cat 1 wind in 10,000 years of STORM; the rest get HM = 1. FEMA's
-comparison set is the 2,219 CONUS counties with an NRI hurricane rating; FEMA's 0s count as 1.
+1,333 counties get Cat 1 wind in at least one catalogue; the rest get HM = 1. FEMA's comparison
+set is the 2,219 CONUS counties with an NRI hurricane rating, with FEMA's 0s counted as 1.
 
-| Scenario | FEMA, median | Ours, median (covered counties) | Ours, range of medians (Knutson low to high) | Counties where FEMA's value falls inside our range (covered) |
+| Scenario | FEMA, median | Ours, median (covered counties) | Ours, range of medians (low to high) | Counties where FEMA's value falls inside our range (covered) |
 |---|---|---|---|---|
-| Mid-century, lower (RCP 4.5, 2050) | 1.99 | 1.03 | 1.00-1.35 | 2.0% |
-| Mid-century, higher (RCP 8.5, 2050) | 2.00 | 1.05 | 1.00-1.52 | 2.0% |
-| Late century, lower (RCP 4.5, 2100) | 1.96 | 1.05 | 1.00-1.58 | 2.2% |
-| Late century, higher (RCP 8.5, 2100) | 2.09 | 1.13 | 1.00-2.94 | 98.7% |
+| Mid-century, lower (RCP 4.5, 2050) | 1.99 | 1.04 | 1.00-1.41 | 2.1% |
+| Mid-century, higher (RCP 8.5, 2050) | 2.00 | 1.05 | 1.00-1.60 | 2.3% |
+| Late century, lower (RCP 4.5, 2100) | 1.96 | 1.06 | 1.00-1.67 | 2.9% |
+| Late century, higher (RCP 8.5, 2100) | 2.09 | 1.15 | 1.00-3.19 | 98.6% |
 
 - **FEMA's values sit outside the whole range of published climate science in three of the four
-  scenarios.** Even the most aggressive Knutson percentile tops out at 1.40, 1.60 and 1.67 in
-  any county. Only late century under RCP 8.5, at its top percentile, reaches FEMA's level.
+  scenarios.** The highest value any county reaches anywhere in our range is 1.56, 1.78 and 1.86
+  for those three scenarios. Only late century under RCP 8.5, at its top percentile, reaches
+  FEMA's level.
 - **National projected loss** (counties with a rating, on FEMA's v1.19 baseline of $20.3B a year):
 
   | Scenario | FEMA | Ours | Ours on NRI v1.20 |
   |---|---|---|---|
   | Mid-century, lower | $40.6B | $20.8B | $12.6B |
   | Mid-century, higher | $41.0B | $21.0B | $12.7B |
-  | Late century, lower | $40.5B | $21.1B | $12.7B |
-  | Late century, higher | $45.5B | $22.5B | $13.6B |
+  | Late century, lower | $40.5B | $21.1B | $12.8B |
+  | Late century, higher | $45.5B | $22.4B | $13.6B |
 
   The drop from the v1.19 column to the v1.20 column is NRI's own update to today's losses. It
   is not our multiplier.
 - **Ratings** (FEMA's fixed bins, same v1.19 baseline): 82-84% of counties keep FEMA's projected
   loss rating and 16-18% drop one bin. None drop two bins and none rise.
-- **Pattern:** ours is highest where intense storms already make up a large share of the wind:
-  south Florida, the Keys, the Gulf coast. It falls off inland and to the north. FEMA's is flat
-  at about 2, with its largest values at the inland edge of its coverage (`map_fema_vs_ours.png`).
+- **Ranking:** on the same baseline, our projected loss ranks counties almost exactly as FEMA's
+  does (Spearman 0.996). FEMA's doubling changed levels, not order.
 
 ### Cross-check with STORM's climate-model storms (`storm_check.csv`)
 
 For 2050 under SSP5-8.5, STORM's four high-resolution GCMs give a county median of 1.25,
 against our central 1.05.
 
-- 64% of counties fall inside our Knutson range and 36% above it.
-- The two routes don't agree on which counties change most (Spearman 0.02).
+- 67% of counties fall inside our range and 33% above it.
+- The two routes don't agree on which counties change most (Spearman −0.18).
 
-The models agree that the change is far below FEMA's 2. They disagree on its size and where it
-falls. That disagreement is real uncertainty, and the range should be published with the central
-value.
+All the sources agree that the change is far below FEMA's 2. They disagree on its size and where
+it falls, which is why the range is published with the central value.
 
-### Census tracts: Florida pilot (`tract_multipliers_FL.csv`, `tract_summary_FL.csv`)
+## Is it believable?
 
-- **Coverage:** all 5,160 Florida tracts get Cat 1 wind. The multiplier runs from 1.02 to 1.04
-  (5th-95th percentile) for mid-century lower and from 1.09 to 1.14 for late-century higher.
-- **Variation inside a county is small.** The highest tract multiplier in a county is a median
-  0.5% above the lowest (1.5% for late-century higher), and at most 3.4%.
-- **Tracts add up to the county.** Projected loss summed over tracts (NRI v1.20 tract EAL × tract
-  HM) is within 0.3% of the county figure.
-- **Tract-level projected loss is technically sound, but nearly all of its detail comes from
-  NRI's tract EAL, not from the multiplier.** NRI's tract hurricane EAL fell to a median 0.44
-  of its v1.19 value in Florida's v1.20 release.
+The worry: someone sees a multiplier of 1.05 for Miami and concludes Miami isn't at high risk.
+Two checks.
+
+### 1. The places people check first (`check_places.csv`, mid-century higher)
+
+| County | NRI v1.20 loss today | FEMA HM | Our HM (range) | FEMA rating | Ours, v1.19 baseline | Ours, v1.20 | National rank, FEMA → ours |
+|---|---|---|---|---|---|---|---|
+| Harris (Houston), TX | $458M | 2.01 | 1.01 (1.00-1.56) | Very High | Very High | Very High | 1 → 1 |
+| Miami-Dade, FL | $331M | 2.07 | 1.06 (1.00-1.71) | Very High | Very High | Very High | 4 → 2 |
+| Palm Beach, FL | $287M | 2.05 | 1.06 (1.00-1.68) | Very High | Very High | Very High | 3 → 4 |
+| Broward, FL | $280M | 2.06 | 1.06 (1.00-1.70) | Very High | Very High | Very High | 2 → 6 |
+| Charleston, SC | $281M | 2.03 | 1.02 (1.00-1.56) | Very High | Very High | Very High | 8 → 7 |
+| Orleans, LA | $223M | 2.05 | 1.05 (1.00-1.71) | Very High | Relatively High | Very High | 33 → 9 |
+| Horry (Myrtle Beach), SC | $200M | 2.01 | 1.04 (1.00-1.64) | Very High | Very High | Very High | 11 → 11 |
+| Beaufort, SC | $201M | 2.04 | 1.02 (1.00-1.54) | Very High | Very High | Very High | 18 → 12 |
+| New Hanover (Wilmington), NC | $181M | 2.00 | 1.04 (1.00-1.63) | Very High | Very High | Relatively High | 14 → 15 |
+| Hillsborough (Tampa), FL | $178M | 2.03 | 1.06 (1.00-1.69) | Very High | Very High | Relatively High | 5 → 16 |
+| Brunswick, NC | $111M | 2.00 | 1.04 (1.00-1.65) | Very High | Relatively High | Relatively High | 29 → 29 |
+| Carteret, NC | $109M | 2.00 | 1.03 (1.00-1.59) | Very High | Relatively High | Relatively High | 26 → 30 |
+| Monroe (Keys), FL | $65M | 2.08 | 1.06 (1.00-1.71) | Very High | Relatively High | Relatively High | 50 → 49 |
+| Dare (Outer Banks), NC | $65M | 2.00 | 1.02 (1.00-1.53) | Relatively High | Relatively High | Relatively High | 52 → 52 |
+| Galveston, TX | $42M | 2.01 | 1.01 (1.00-1.57) | Very High | Relatively High | Relatively Moderate | 36 → 67 |
+
+- **Southeast Florida, coastal South Carolina, Houston and New Orleans stay Very High** and
+  near the top of the national ranking.
+- **Rating drops caused by our multiplier** (v1.19 column): Monroe, Brunswick, Carteret and
+  Galveston were Very High under FEMA only because of the ×2. They are Relatively High on the same
+  losses, which is still the second-highest of five ratings.
+- **Rating and rank drops caused by NRI v1.20** (v1.20 column): New Hanover, Hillsborough and
+  Galveston. FEMA itself cut their current losses in v1.20 (Galveston from $132M to $42M a
+  year). That change happens with or without our multiplier.
+
+### 2. Today's storms against the observed record (`check_return_periods.csv`)
+
+We count how often a hurricane, or a major hurricane, passes within 50 nautical miles. That is
+the statistic NHC publishes (HURISK, data through 2010; https://www.nhc.noaa.gov/climo/). We
+read NHC's values off its two maps by eye.
+
+| Place | Hurricane, years between: STORM / observed 1900-2024 / NHC | Major hurricane: STORM / observed / NHC |
+|---|---|---|
+| Miami, FL | 13 / 4.6 / 6 | 31 / 11 / 14 |
+| Key West, FL | 15 / 5.4 / 8 | 35 / 10 / 18 |
+| Charleston, SC | 16 / 6.6 / 8 | 38 / 31 / 22 |
+| Wilmington, NC | 14 / 6.0 / 6 | 36 / 25 / 17 |
+| Cape Hatteras, NC | 13 / 4.0 / 5 | 33 / 25 / 16 |
+| New Orleans, LA | 19 / 7.8 / 8 | 62 / 31 / 25 |
+| Galveston, TX | 21 / 6.2 / 11 | 86 / 25 / 26 |
+
+- **STORM puts about half to a third of the observed hurricanes near the US coast.** This holds
+  even against the observed 1980-2018 record it is built from (Miami 9.8 years observed). Its
+  basin-wide counts are right (10.5 storms and 5.6 hurricanes a year), and STORM's own landfall
+  flag gives about 0.85 US hurricane landfalls a year against roughly 1.5-1.75 observed.
+- **That is why the historical catalogue is in the layer.** It is built from the observed tracks,
+  so its frequencies match the record by construction. Our central multiplier averages the two.
+- **It matters less than it looks.**
+  - A multiplier is a ratio of future to today's storms in the same catalogue, so a catalogue
+    that is too quiet overall cancels out.
+  - Both catalogues give the same typical multiplier: 1.03 and 1.03 for mid-century lower, 1.12
+    and 1.11 for late-century higher (`check_catalogues.csv`).
+  - Absolute risk comes from NRI's Hazus-based EAL, not from STORM.
 
 ## Can we go below the county?
 
-**Yes, to census tracts. Most of the value is in the economic part, and the climate part can
-safely be the county value.**
+**Yes, for projected loss: every tract in the 29 states with hurricane wind
+(`tract_projected_loss.csv.gz`, 54,919 tracts). The climate multiplier stays at county level.**
 
 - **What makes tracts possible:** parametric wind fields can be evaluated at any point, unlike
-  the 25 km climate grids behind the other FRI hazards. So a tract multiplier is the same
-  published method, evaluated at the tract's population centre.
-- **Why the multiplier barely varies:** Knutson's changes are basin-wide, so within a county the
-  multiplier only varies with the mix of storm categories that reach each tract, which changes
-  over tens of kilometres. Florida shows 0.5-1.5% typical variation inside a county.
-- **What to publish:** tract projected loss = NRI tract EAL × tract HM. Using the county HM
-  instead would change the total by under 0.3%. Below tracts (block groups or buildings), the
-  inputs would claim more precision than they have.
-- **What would make the multiplier itself vary more:** climate-model storms (STORM's GCMs, RAFT)
-  carry local changes in where storms go. But their four-model spread is larger than the local
-  signal (Spearman 0.02 between routes), so we don't use them for the central value.
+  the 25 km climate grids behind the other FRI hazards.
+- **Florida pilot** (STORM wind at all 5,160 tract population centres, `tract_summary_FL.csv`):
+  - The highest tract multiplier in a county is a median 0.5% above the lowest (1.5% for
+    late-century higher), and at most 3.4%.
+  - That is smaller than the disagreement between the two catalogues, so a tract-level
+    multiplier would be false precision.
+- **What we publish:** tract projected loss = NRI v1.20 tract EAL × its county's multiplier
+  (central, low and high). The detail inside a county comes from NRI, which already models
+  buildings and exposure by tract.
+- **Below tracts** (block groups or buildings), the inputs would claim more precision than they
+  have.
 
 ## Updating it
 
 - **Each NRI release:** multiply the new county and tract EAL by the existing multipliers. A
-  `hurloss-layer` rerun with cached inputs takes about a minute.
+  `hurloss-layer` rerun with cached inputs takes a few minutes.
 - **When an input changes** (a new STORM version, a new Knutson-style assessment, new
   climate-model tracks): rerun everything, about 1.5 hours on 4 cores. Publish both versions'
   multipliers so the change can be traced.
 - **If FEMA releases ARA's file:** rerun the spike's comparison against it, and revisit the
   section on why we don't reuse FEMA's values.
-

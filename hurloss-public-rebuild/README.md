@@ -48,24 +48,31 @@ climate signal.
 ## Our own hurricane layer (follow-up)
 
 The spike above is the question the issue asked. After it, we built our own county and tract
-hurricane multipliers for all four FRI scenarios. They use FEMA's documented formula on
-published open methods only: STORM synthetic tracks, CLIMADA wind fields, and Knutson et al.
-(2020) as converted by Jewson (2021). They come with a range across Knutson's published
-percentiles. **[METHOD.md](METHOD.md)** sets out the method, the case for not reusing FEMA's
-values, the full results and the update policy. In short:
+hurricane layer for all four FRI scenarios. It uses FEMA's documented formula on published open
+methods only: two storm catalogues (STORM synthetic tracks, and the observed tracks with
+perturbed copies), CLIMADA wind fields, and Knutson et al. (2020) as converted by Jewson (2021).
+It comes with a range across both catalogues and Knutson's published percentiles.
+**[METHOD.md](METHOD.md)** sets out the method, the case for not reusing FEMA's values, the
+believability checks and the update policy. In short:
 
-- **Central multipliers** in the 1,241 counties with hurricane wind: 1.03, 1.05, 1.05 and 1.13
+- **Central multipliers** in the 1,333 counties with hurricane wind: 1.04, 1.05, 1.06 and 1.15
   (mid lower, mid higher, late lower, late higher). FEMA published 1.96-2.09.
-- **FEMA's value lies outside our whole Knutson range** in 98% of covered counties for three
-  scenarios. Only late century under RCP 8.5 reaches it, at the top percentile.
-- **National projected hurricane loss** on FEMA's own v1.19 baseline: $20.8-22.5B a year against
+- **FEMA's value lies outside our whole range** in 97-98% of covered counties for three
+  scenarios. Only late century under RCP 8.5 reaches it, at the top Knutson percentile.
+- **National projected hurricane loss** on FEMA's own v1.19 baseline: $20.8-22.4B a year against
   FEMA's $40.5-45.5B. 16-18% of counties drop one rating bin; none drop two.
-- **Census tracts (Florida pilot):** possible, and they add up to the county within 0.3%. But the
-  multiplier varies by only 0.5-1.5% inside a typical county, so tract detail comes from NRI's tract
-  EAL, not from the climate part.
+- **The ranking of counties barely moves** (Spearman 0.996 against FEMA's projected loss).
+  Miami-Dade is 2nd nationally, Palm Beach 4th, Broward 6th, Charleston 7th and Horry 11th, all
+  still Very High.
+- **STORM puts too few hurricanes on the US coast:** about a third to a half of the observed rate
+  near Miami, Charleston and Wilmington, checked against NHC's return periods. That's why the
+  layer averages it with a catalogue built from the observed tracks. Both give the same typical
+  multiplier.
+- **Census tracts:** projected loss for all 54,919 tracts in 29 states, as NRI tract EAL × the
+  county multiplier. A Florida tract-wind pilot showed the multiplier varies only 0.5-1.5%
+  inside a county, less than the catalogue disagreement.
 
-![FEMA's published multipliers against ours](results/layer/map_fema_vs_ours.png)
-
+![Projected annual hurricane loss, FEMA against ours](results/layer/map_projected_loss.png)
 ## How to run it
 
 ```bash
@@ -84,8 +91,9 @@ cached wind fields. It runs two steps. The first is `uv run hurloss-run`, the sp
    published values, and writes the tables and figures in `results/`.
 
 The second is `uv run hurloss-layer`, our own layer. It builds 10,000 years of STORM wind
-fields for counties and for the Florida tracts, computes the multipliers and ranges, and writes
-the comparison with FEMA's values to `results/layer/`.
+fields for counties and for the Florida tracts, combines them with the historical catalogue,
+computes the multipliers and ranges, runs the believability checks, and writes the comparison
+with FEMA's values and the tract projected loss to `results/layer/`.
 
 All of it runs on this 4-core machine. Timings for a clean run are under "Checked from a clean
 checkout"; with the event sets cached it takes about two minutes. It makes no model calls and
@@ -405,8 +413,17 @@ from that run's `results/`, which are the files committed here.
 | Layer: STORM present, 5,000 more years | 695 |
 | Layer: county multipliers, FRI comparison, STORM check | 2 |
 | Layer: Florida tracts, 10,000 years of wind at 5,160 tract centres | 800 |
+| Layer: return-period check (STORM and IBTrACS fixes) | 60 |
+| Layer: tract projected loss (NRI v1.20 tracts for 29 states) | 33 |
 
-Per-step times are in `results/timings.csv` and `results/layer/timings.csv`.
+- **Where the times come from.** The spike's per-step times are in `results/timings.csv`. After
+  that run we added the second catalogue, the believability checks and the tract projected loss
+  to the layer.
+- **Where the tables come from.** We pulled that commit into the same clone and reran
+  `./run.sh` on the same cache. The layer's tables in `results/layer/` come from that second run.
+- **Timing of the second run.** It reused every cached wind field (the historical catalogue was
+  already built by the spike step), so its `results/layer/timings.csv` shows only the new steps.
+  The last two rows above come from it.
 
 - **Run-to-run noise.** CLIMADA's perturbed historical tracks are not exactly reproducible when
   run on a process pool, even with a fixed seed. Everything built on STORM is: the layer's tables
@@ -426,9 +443,10 @@ pyproject.toml, uv.lock uv project; CLIs hurloss-run and hurloss-layer
 src/hurloss_rebuild/
   run.py                the spike: inputs, event sets, routes, scoring, figures, timings
   layer_run.py          our layer: county and tract multipliers, FRI comparison, STORM check
-  layer.py              FEMA's formula plus Knutson/Jewson at every published percentile
+  layer.py              FEMA's formula plus Knutson/Jewson at every percentile; combine catalogues
+  validation.py         return periods against NHC and the observed record; named places
   compare_fri.py        our multipliers, projected loss and ratings against FEMA's
-  tract_layer.py        tract table, spread inside counties, roll-up to the county
+  tract_layer.py        Florida tract-wind pilot; tract projected loss from county multipliers
   fri_formula.py        FEMA's Eq. 11-12 and county aggregation (pure)
   grid.py               grid points and their counties (1 km buffer)
   hazard.py             CLIMADA wind fields, cached per event set
@@ -443,7 +461,7 @@ src/hurloss_rebuild/
   sources/              answer key, counties, IBTrACS, STORM (range reads), NRI v1.20,
                         tract centroids and NRI tract EAL
 notebooks/walkthrough.py  marimo notebook over results/
-tests/                  formula, conditioning, ARA method, layer and stacking tests
+tests/                  formula, conditioning, ARA method, layer, catalogue and stacking tests
 results/                spike tables and figures; results/layer/ for our layer
                         (scores_by_county.csv is not committed)
 ```
