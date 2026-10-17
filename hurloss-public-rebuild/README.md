@@ -19,24 +19,29 @@ main finding.
   late-century higher 2.190. A constant 2.0 reproduces FEMA's held-out ratings in 95-100% of
   counties.
 - **No public climate projection gives anything near 2.**
-  - Knutson et al. (2020), converted per scenario by Jewson (2021): county medians of +3% to +16%
-    in FEMA's intensity measure.
+  - Knutson et al. (2020), converted per scenario by Jewson (2021): county medians of +3% to +13%
+    in FEMA's intensity measure (`results/layer/fri_comparison_summary.csv`).
   - STORM's four high-resolution GCMs (SSP5-8.5, 2050): +25% median, with GCM medians from −4% to
     +55%.
   - ARA's own white paper, put through FEMA's own formula, gives 1.06-1.23 by region for 2050
     under RCP 8.5. FEMA published about 2.0 for the same regions.
 - **The level only matches if FEMA's ratio carries an extra +1 (or a factor of 2).** Read that
   way, every public route lands near FEMA's values on the counties it covers: 90-100% same rating
-  bin, median ratio 0.98-1.04, mean log error 0.01-0.20.
-- **The pattern between counties doesn't match on any route.** Spearman rank correlation with
-  FEMA's values on held-out states is −0.19 to 0.18 where a route has a value. That is no better
-  than ranking counties by today's hurricane hazard (−0.22 to 0.31).
+  bin, median ratio 0.97-1.04, mean log error 0.01-0.20.
+- **No route matches the pattern between counties consistently.** Where a route has a value,
+  Spearman rank correlation with FEMA's values runs from −0.31 to 0.63, depending on the route,
+  the scenario and whether the training or held-out states are scored.
+  - The best is Knutson frequency-only for late century under higher warming: 0.63 on training
+    states, 0.19 on held-out states.
+  - FEMA's values are so tightly clustered that these rank statistics are unstable. One route
+    moved from 0.18 to 0.45 between two runs of the same code.
+  - Ranking counties by today's hurricane hazard alone gives −0.22 to 0.35.
 - **Today's hazard is not the problem.** Before any climate conditioning, our wind model ranks
-  counties' NRI hurricane loss with Spearman 0.76 (historical tracks) and 0.92 (STORM).
+  counties' NRI hurricane loss with Spearman 0.75 (historical tracks) and 0.92 (STORM).
 
 So public inputs can rebuild a credible hurricane multiplier. They cannot rebuild FEMA's. FEMA's
-numbers are mostly a constant, plus a county pattern we cannot trace to any hurricane climate
-signal.
+numbers are mostly a constant, plus a county pattern that only partly follows the published
+climate signal.
 
 ![FEMA's published hurricane multipliers, mid- and late-century under higher warming](results/map_published.png)
 
@@ -211,7 +216,7 @@ All numbers come from the clean run described under "Checked from a clean checko
 - **The pattern between counties barely follows today's hazard**
   (`published_vs_hazard_level.csv`). Spearman of the published values against today's NRI loss
   ratio is 0.29, 0.22, 0.29 and −0.08 for the four scenarios. Against our modelled intensity it
-  is 0.08-0.31.
+  is 0.08-0.35.
 
 ### 2. ARA's own numbers through FEMA's formula (`ara_white_paper.csv`)
 
@@ -239,27 +244,27 @@ All held-out counties FEMA covers. A blank counts as HM = 1.
 | Constant 2 | mid, higher | 0 / 424 | 99.8% | | | 0.017 | 0.990 |
 | Constant 2 | late, lower | 0 / 424 | 99.5% | | | 0.017 | 1.007 |
 | Constant 2 | late, higher | 0 / 433 | 95.2% | | | 0.174 | 0.896 |
-| Knutson frequency, as documented | mid, lower | 201 | 73.1% | 0.080 | 0.312 | 0.665 | 0.506 |
-| Knutson frequency, as documented | late, higher | 210 | 70.7% | −0.161 | −0.054 | 0.787 | 0.473 |
-| Knutson frequency, +1 | mid, lower | 201 | 91.0% | 0.115 | 0.333 | 0.339 | 0.974 |
-| Knutson frequency, +1 | late, higher | 210 | 86.8% | −0.216 | −0.081 | 0.480 | 0.730 |
+| Knutson frequency, as documented | mid, lower | 202 | 72.6% | 0.077 | 0.309 | 0.667 | 0.505 |
+| Knutson frequency, as documented | late, higher | 211 | 70.2% | −0.149 | −0.004 | 0.792 | 0.469 |
+| Knutson frequency, +1 | mid, lower | 202 | 90.8% | 0.116 | 0.344 | 0.340 | 0.945 |
+| Knutson frequency, +1 | late, higher | 211 | 86.8% | −0.212 | −0.049 | 0.484 | 0.728 |
 | STORM SSP5-8.5, as documented | mid, higher | 75 | 78.5% | 0.032 | 0.016 | 0.571 | 0.511 |
 | STORM SSP5-8.5, +1 | mid, higher | 75 | 92.9% | 0.058 | 0.135 | 0.283 | 0.987 |
-| ARA Figure 1, as documented | mid, higher | 201 | 72.6% | 0.063 | 0.266 | 0.681 | 0.504 |
-| ARA Figure 1, +1 | mid, higher | 201 | 91.5% | 0.070 | 0.266 | 0.336 | 0.991 |
+| ARA Figure 1, as documented | mid, higher | 202 | 72.9% | 0.084 | 0.367 | 0.683 | 0.504 |
+| ARA Figure 1, +1 | mid, higher | 202 | 91.7% | 0.074 | 0.350 | 0.336 | 0.989 |
 
 Only counties where the route gives a value (`held_out_covered`):
 
 | Route | Scenario | Counties | Same bin | Spearman | Log error | Median ratio | Constant 2's log error on the same counties |
 |---|---|---|---|---|---|---|---|
-| Knutson frequency, +1 | mid, lower | 223 | 99.1% | 0.029 | 0.027 | 1.026 | 0.004 |
-| Knutson frequency, +1 | mid, higher | 223 | 98.2% | 0.142 | 0.029 | 1.025 | 0.012 |
-| Knutson frequency, +1 | late, lower | 223 | 97.8% | 0.127 | 0.042 | 1.041 | 0.007 |
-| Knutson frequency, +1 | late, higher | 223 | 96.0% | 0.152 | 0.056 | 0.977 | 0.105 |
-| Knutson intensity, +1 | late, higher | 223 | 90.6% | 0.017 | 0.109 | 0.985 | 0.105 |
+| Knutson frequency, +1 | mid, lower | 222 | 98.6% | 0.032 | 0.027 | 1.022 | 0.004 |
+| Knutson frequency, +1 | mid, higher | 222 | 97.7% | 0.208 | 0.030 | 1.021 | 0.012 |
+| Knutson frequency, +1 | late, lower | 222 | 97.3% | 0.164 | 0.041 | 1.038 | 0.007 |
+| Knutson frequency, +1 | late, higher | 222 | 95.9% | 0.189 | 0.063 | 0.967 | 0.106 |
+| Knutson intensity, +1 | late, higher | 222 | 91.4% | −0.094 | 0.128 | 0.988 | 0.106 |
 | STORM SSP5-8.5, +1 | mid, higher | 349 | 93.1% | −0.162 | 0.196 | 1.030 | 0.012 |
-| ARA Figure 1, +1 | mid, higher | 223 | 99.6% | 0.183 | 0.010 | 1.005 | 0.012 |
-| Knutson frequency, ×2 | late, higher | 223 | 93.3% | 0.150 | 0.105 | 1.065 | 0.105 |
+| ARA Figure 1, +1 | mid, higher | 222 | 100.0% | 0.450 | 0.009 | 1.004 | 0.012 |
+| Knutson frequency, ×2 | late, higher | 222 | 93.7% | 0.175 | 0.112 | 1.045 | 0.106 |
 
 What the tables show:
 
@@ -270,16 +275,15 @@ What the tables show:
   ARA's 500,000-year simulations. About half the held-out counties are blank on the historical
   routes.
 - **With the +1 reading, the level matches and the pattern doesn't.**
-  - On covered counties, the Knutson and ARA routes are within 1-11% of FEMA's values (log error
-    0.010-0.109). STORM is at 0.196.
-  - Spearman stays at or below 0.19.
+  - On covered counties, the Knutson and ARA routes are within 1-13% of FEMA's values (log error
+    0.009-0.128). STORM is at 0.196.
   - The constant 2 is closer than every Knutson route in the other three scenarios (0.004-0.012
-    against 0.027-0.076). ARA's Figure 1 route roughly ties it (0.010 against 0.012).
+    against 0.027-0.081). ARA's Figure 1 route roughly ties it (0.009 against 0.012).
+  - Rank agreement is weak and unstable (see the next section).
   - Late-century higher is the one case where a public route beats the constant. Knutson
-    frequency +1 halves the error (0.056 against 0.105) because Knutson's late-century rise
-    (median +16% in our measure) matches FEMA's median 2.19. It still doesn't rank counties
-    (0.15).
-- **+1 fits the level better than ×2 in every scenario.** Median ratios are 0.98-1.04 for +1 and
+    frequency +1 cuts the error by about 40% (0.063 against 0.106) because Knutson's late-century rise
+    is close to FEMA's late-century median of 2.19.
+- **+1 fits the level better than ×2 in every scenario.** Median ratios are 0.97-1.04 for +1 and
   1.02-1.08 for ×2. That fits FEMA's "projected" intensity having included the historical one, but
   it is not proof.
 - **STORM's GCM spread is large.**
@@ -289,14 +293,38 @@ What the tables show:
     counties. FEMA's capped inland 10s show the same kind of noise.
   - Per-GCM quantiles are in `storm_gcm_ratios.csv`.
 
+**Rank agreement depends on which states are scored** (Spearman on covered counties, read as
++1, from `scores.csv`):
+
+| Route | Scenario | Training states | Held-out states |
+|---|---|---|---|
+| Knutson frequency | mid, lower | 0.184 | 0.032 |
+| Knutson frequency | mid, higher | 0.481 | 0.208 |
+| Knutson frequency | late, lower | 0.368 | 0.164 |
+| Knutson frequency | late, higher | 0.626 | 0.189 |
+| Knutson intensity | late, higher | −0.255 | −0.094 |
+| STORM SSP5-8.5 | mid, higher | −0.310 | −0.162 |
+| ARA Figure 1 | mid, higher | −0.051 | 0.450 |
+
+- **Knutson frequency-only is the only route that agrees with FEMA's pattern on both state sets**,
+  most clearly for late century under higher warming.
+  - Both raise multipliers most where intense storms already make up a large share of the wind:
+    south Florida and the Gulf coast.
+  - This is the route our own layer uses (`METHOD.md`).
+- **The ARA route's 0.45 is not a stable match.** It is −0.05 on the training states. In an
+  earlier clean run of the same code, the perturbed historical tracks gave it 0.18 on held-out
+  states. On the deterministic 10,000-year STORM set it gives 0.44 on held-out states and −0.05
+  on training states. ARA's four regional ratios simply line up with FEMA's regional medians on
+  the states that happen to be held out.
+
 ![Published against rebuilt multipliers, held-out states](results/scatter_held_out.png)
 
 ### 4. Today's hazard against NRI v1.20, before any conditioning (`baseline_*.csv`)
 
 | Event set | Our measure against NRI | Counties | Spearman | Pearson (logs) |
 |---|---|---|---|---|
-| Historical + perturbed (2,500 years) | Modelled EAL against NRI EAL | 2,184 | 0.758 | 0.774 |
-| Historical + perturbed | Tropical-storm rate against NRI annual frequency | 2,240 | 0.807 | 0.759 |
+| Historical + perturbed (2,500 years) | Modelled EAL against NRI EAL | 2,185 | 0.746 | 0.755 |
+| Historical + perturbed | Tropical-storm rate against NRI annual frequency | 2,239 | 0.794 | 0.733 |
 | STORM present (5,000 years) | Modelled EAL against NRI EAL | 1,450 | 0.917 | 0.832 |
 | STORM present | Tropical-storm rate against NRI annual frequency | 1,675 | 0.921 | 0.859 |
 
@@ -328,10 +356,11 @@ What the tables show:
 
 - **FEMA's values were not reproduced** by any public route as FEMA documents the formula
   (70-79% same bin, against 100% for a constant 2).
-- **County ranking:** no route gets held-out Spearman above 0.19 on covered counties.
+- **County ranking:** no route matches FEMA's pattern consistently. Knutson frequency-only comes
+  closest, at 0.03-0.21 on held-out states and 0.18-0.63 on training states.
 - **Inland coverage:** the historical and STORM sets reach 948 and 1,189 counties against FEMA's
   1,579. More synthetic years would help; 10× the STORM years would make the
-  STORM part of the 73-minute run about 10 times longer.
+  STORM part of the run (about 70 of its 92 minutes) roughly 10 times longer.
 - **CLIMADA needed two workarounds:**
   - Its GDAL dependency has no wheels, so `pyproject.toml` overrides it out. The parts we use
     don't need it, but `climada.entity` does, so the Emanuel damage curve is written out in
@@ -342,6 +371,10 @@ What the tables show:
     `ignore_distance_to_coast=True`, which only drops CLIMADA's 1,000 km inland cut-off.
   - The AMS journal site (403). The Knutson numbers come from CLIMADA's packaged tables, not the
     paper's supplement.
+- **4TU rate limits:** STORM's host returned HTTP 429 after a day of repeated range reads from
+  this machine, then refused all requests for over an hour. The download keeps one zip session
+  per climate and retries up to 8 times with backoff. If it still fails, wait and rerun
+  `./run.sh`: finished files and wind fields are cached, so it resumes where it stopped.
 - **Late century:** apart from Knutson scaling, no physically simulated late-century tracks were
   used. RAFT is #24.
 - **Alaska, Hawaii and the territories** were not attempted. FEMA's hurricane coverage in CONUS
@@ -351,26 +384,37 @@ What the tables show:
 
 ## Checked from a clean checkout
 
-We cloned branch `spike/hurloss-public-rebuild` fresh, set `HURLOSS_CACHE` to an empty folder,
-and ran `./run.sh` on this 4-core machine with nothing else. It finished cleanly in 4,398 s
-(73 minutes). Per-step times are in `results/timings_empty_cache.csv`:
+We cloned branch `spike/hurloss-public-rebuild` fresh at commit `e2b2db7`, set `HURLOSS_CACHE` to
+an empty folder, and ran `./run.sh` (both steps) on this 4-core machine with nothing else. It
+finished cleanly in 5,544 s (92 minutes). Every number in this README and in `METHOD.md` comes
+from that run's `results/`, which are the files committed here.
+
+- **One exception to "empty cache":** the 30 raw STORM text files were copied in from an earlier
+  download.
+  - Two earlier clean attempts were stopped by 4TU's rate limit (HTTP 429), and by then 4TU was
+    refusing every request from this machine.
+  - The files are the published bytes. Every wind field and every result was computed fresh.
 
 | Step | Seconds |
 |---|---|
 | Answer key, counties, grid | 11 |
-| Historical event set (IBTrACS, 19 perturbed copies, wind fields) | 645 |
-| STORM present (5,000 years: range reads, interpolation, wind fields) | 850 |
-| STORM future (4 GCMs × 5,000 years) | 2,865 |
+| Historical event set (IBTrACS, 19 perturbed copies, wind fields) | 591 |
+| STORM present, 5,000 years (interpolation, wind fields) | 756 |
+| STORM future, 4 GCMs × 5,000 years | 2,660 |
 | NRI v1.20, conditioning, scoring | 4 |
+| Layer: STORM present, 5,000 more years | 695 |
+| Layer: county multipliers, FRI comparison, STORM check | 2 |
+| Layer: Florida tracts, 10,000 years of wind at 5,160 tract centres | 800 |
 
-- **Tables.** The committed `results/` come from a second `./run.sh` in the same clone, on the
-  same cache, after a later commit that only added output tables. With the event sets cached,
-  that run took about a minute. Every number in this README comes from those files.
+Per-step times are in `results/timings.csv` and `results/layer/timings.csv`.
+
 - **Run-to-run noise.** CLIMADA's perturbed historical tracks are not exactly reproducible when
-  run on a process pool, even with a fixed seed. STORM is.
-  - An earlier run on the same code differed by up to 0.9 points in same-bin share, 0.016 in
-    Spearman and 0.002 in log error, and only on the historical routes.
-  - None of the conclusions depend on differences that small.
+  run on a process pool, even with a fixed seed. Everything built on STORM is: the layer's tables
+  came out byte-identical to an earlier run's.
+  - Between two clean runs, the historical routes moved by up to 0.9 points in same-bin share and
+    0.01 in log error.
+  - Rank correlations on FEMA's tightly clustered values moved far more: the ARA route went from
+    0.18 to 0.45. Read the historical routes' Spearman values as noisy.
 - **Cost:** $0. The run makes no model calls and uses no paid services.
 
 ## Files

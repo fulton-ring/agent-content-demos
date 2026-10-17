@@ -23,21 +23,25 @@ don't support it.
    scenario.
 3. **The published climate science doesn't give it.**
    - Knutson et al. (2020), the standard assessment, converted to FEMA's scenarios (Jewson
-     2021), gives county medians of +3% to +16%.
+     2021), gives county medians of +3% to +13% (table below).
    - STORM's four high-resolution climate models (2050, SSP5-8.5) give a median of +25%.
    - Only the 90th-percentile Knutson case for late century under RCP 8.5 reaches about 2.
 4. **FEMA's numbers don't behave like FEMA's documented formula.**
    - Equation 12 is HM = max(1, projected / historical). It should give values near 1 with a
      pile-up at exactly 1.
    - The published values have no value between 1 and 1.26.
-   - A model that adds 1 to the ratio fits FEMA's level within 2-4% on every public route. This
+   - A model that adds 1 to the ratio fits FEMA's level within 3-4% (median ratio) on every
+     public route. This
      is consistent with the projected frequencies having included the historical ones, but we
      can't confirm that without ARA's file.
-5. **The pattern between counties doesn't follow any hurricane signal we could find.**
-   - Rank correlation of FEMA's values with today's hurricane hazard is −0.22 to 0.31.
-   - With every public climate route it is −0.19 to 0.18.
+5. **Only a weak, partial hurricane signal shows in the pattern between counties.**
+   - Rank correlation of FEMA's values with today's hurricane hazard is −0.22 to 0.35.
+   - With Knutson frequency-only, the route we use, it is 0.18-0.63 on the spike's training states
+     and 0.03-0.21 on its held-out states. Other routes are inconsistent or negative.
    - The largest values (up to the cap of 10) sit at the inland edge of ARA's coverage, where a
      few rare simulated storms decide the ratio.
+   - So FEMA's numbers carry some of the same direction we find, most clearly late century, but
+     on top of a level of 2 that nothing explains.
 
 The evidence is in `README.md` (the spike) and `results/`. FEMA's technical document says the
 ARA file is available from FEMA-NRI@fema.dhs.gov. We have not seen it, and it may explain the
@@ -166,7 +170,7 @@ safely be the county value.**
 - **Each NRI release:** multiply the new county and tract EAL by the existing multipliers. A
   `hurloss-layer` rerun with cached inputs takes about a minute.
 - **When an input changes** (a new STORM version, a new Knutson-style assessment, new
-  climate-model tracks): rerun everything, about 2.5 hours on 4 cores. Publish both versions'
+  climate-model tracks): rerun everything, about 1.5 hours on 4 cores. Publish both versions'
   multipliers so the change can be traced.
 - **If FEMA releases ARA's file:** rerun the spike's comparison against it, and revisit the
   section on why we don't reuse FEMA's values.
