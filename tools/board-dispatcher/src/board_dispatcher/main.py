@@ -2,12 +2,13 @@
 
 import os
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 
 from board_dispatcher.board import IN_PROGRESS, WORKER_STARTED, Card, cards_to_start
 from board_dispatcher.github import BoardFields, BoardItem, GitHub
-from board_dispatcher.routine import start_worker
+from board_dispatcher.routine import RoutineError, start_worker
 from board_dispatcher.sync import update_for
 
 
@@ -74,16 +75,39 @@ def run(config: Config) -> int:
     now = datetime.now(UTC)
     chosen = cards_to_start(cards, now, config.max_in_progress, config.cooldown)
     print(f"{len(cards)} cards on the board, {len(chosen)} to start")
-    for card in chosen:
-        if config.dry_run:
+    if config.dry_run:
+        for card in chosen:
             print(f"dry run: would start a worker on {card.issue_ref}")
+        return 0
+
+    def start(issue_ref: str) -> str:
+        return start_worker(config.worker_routine_id, config.worker_token, issue_ref)
+
+    failures = start_workers(github, fields, chosen, start, now)
+    return 1 if failures else 0
+
+
+def start_workers(
+    github: GitHub,
+    fields: BoardFields,
+    chosen: list[Card],
+    start: Callable[[str], str],
+    now: datetime,
+) -> int:
+    """Start a worker on each card, carrying on past failed starts. Returns how many failed."""
+    failures = 0
+    stamp = now.strftime("%Y-%m-%dT%H:%MZ")
+    for card in chosen:
+        try:
+            session_url = start(card.issue_ref)
+        except (RoutineError, OSError) as error:
+            failures += 1
+            print(f"couldn't start a worker on {card.issue_ref}: {error}")
             continue
-        session_url = start_worker(config.worker_routine_id, config.worker_token, card.issue_ref)
         github.set_status(fields, card.item_id, IN_PROGRESS)
-        stamp = now.strftime("%Y-%m-%dT%H:%MZ")
         github.comment(card.issue_id, f"{WORKER_STARTED} {stamp}: {session_url}")
         print(f"started a worker on {card.issue_ref}: {session_url}")
-    return 0
+    return failures
 
 
 def main() -> None:
