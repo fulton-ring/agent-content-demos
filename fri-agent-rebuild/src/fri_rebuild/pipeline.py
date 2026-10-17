@@ -8,7 +8,7 @@ from types import ModuleType
 from fri_rebuild.paths import HAZARDS_DIR
 
 
-def load_pipeline(path: Path):  # noqa: ANN201 - returns a module
+def load_pipeline(path: Path) -> ModuleType:
     spec = importlib.util.spec_from_file_location(f"pipeline_{path.parent.name}", path)
     if spec is None or spec.loader is None:
         raise ImportError(f"cannot load {path}")
@@ -25,6 +25,6 @@ def load_source(code: str, name: str) -> ModuleType:
     return module
 
 
-def hazard_pipeline(hazard: str):  # noqa: ANN201 - returns a module
+def hazard_pipeline(hazard: str) -> ModuleType:
     """The final (kept) pipeline for one hazard folder under hazards/."""
     return load_pipeline(HAZARDS_DIR / hazard / "pipeline.py")

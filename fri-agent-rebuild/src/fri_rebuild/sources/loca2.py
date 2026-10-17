@@ -9,6 +9,7 @@ raw values.
 
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
+from pathlib import Path
 
 import aiohttp
 import fsspec
@@ -37,6 +38,9 @@ VALUE_BINS = len(EDGES) - 1
 # One extra row after the value bins counts days with no data (ocean or masked cells).
 MISSING_ROW = VALUE_BINS
 WORKERS = 4
+# Days per piece. A finished piece is saved, so an interrupted run loses at most the pieces in
+# flight (about 15 minutes of reading each on 4 cores), at about 220 MB of disk per saved piece.
+PIECE_DAYS = 3 * 365
 
 
 @dataclass(frozen=True)
@@ -78,7 +82,7 @@ def county_weights() -> tuple[np.ndarray, sparse.csr_matrix, pd.Index]:
 
 
 def day_slices(scenario: str, period: str) -> list[Slice]:
-    """Split a period's days into WORKERS contiguous pieces, each inside one source file."""
+    """Split a period's days into contiguous pieces of about PIECE_DAYS, each inside one file."""
     first, last = PERIODS[period]
     run = "historical" if period == "historical" else scenario
     pieces = []
@@ -90,7 +94,8 @@ def day_slices(scenario: str, period: str) -> list[Slice]:
         origin = np.datetime64(f"{start_year}-01-01")
         begin = int((np.datetime64(f"{lo}-01-01") - origin).astype(int))
         end = int((np.datetime64(f"{hi + 1}-01-01") - origin).astype(int))
-        bounds = np.linspace(begin, end, WORKERS + 1).astype(int)
+        count = max(1, round((end - begin) / PIECE_DAYS))
+        bounds = np.linspace(begin, end, count + 1).astype(int)
         pieces += [
             Slice(run, span, int(a), int(b)) for a, b in zip(bounds[:-1], bounds[1:], strict=True)
         ]
@@ -130,7 +135,7 @@ def histogram_slice(piece: Slice, cells: np.ndarray, out_name: str) -> str:
     return str(target)
 
 
-def histogram_path(scenario: str, period: str):  # noqa: ANN201 - Path
+def histogram_path(scenario: str, period: str) -> Path:
     return cache_path("loca2", "hist", f"{scenario}_{period}.npy")
 
 

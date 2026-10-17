@@ -7,6 +7,7 @@ exceeds 298 K. HM = max(1, projected event-days / historical days over percentil
 
 import numpy as np
 import pandas as pd
+from scipy import sparse
 
 from fri_rebuild import inputs
 
@@ -43,25 +44,27 @@ def event_days(scenario: str, period: str, thresholds: np.ndarray) -> np.ndarray
     return ((tasmin > thresholds) & (hot_enough > HEAT_INDEX_FLOOR_C)).sum(axis=0).astype(float)
 
 
-def county_mean(values: np.ndarray) -> np.ndarray:
-    weights, _ = inputs.county_weights()
+def area_mean(values: np.ndarray, weights: sparse.csr_matrix) -> np.ndarray:
     totals = weights @ np.nan_to_num(values)
     return totals / np.asarray(weights.sum(axis=1)).ravel()
 
 
-def hazard_multipliers() -> pd.DataFrame:
-    """Columns EXHT_N95_<scenario>_HM and EXHT_N99_<scenario>_HM, indexed by county FIPS."""
-    _, fips = inputs.county_weights()
+def hazard_multipliers(areas: inputs.AreaWeights | None = None) -> pd.DataFrame:
+    """Columns EXHT_N95_<scenario>_HM and EXHT_N99_<scenario>_HM.
+
+    Indexed by county FIPS, or by the ids of `areas` when given.
+    """
+    weights, fips = areas or inputs.county_weights()
     history = inputs.daily("tasmin", "historical", "historical")
     result = {}
     for name, percentile in PERCENTILES.items():
         thresholds = np.nanpercentile(history, percentile, axis=0)
         # Denominator: historical days with tasmin over the percentile only.
         past_counts = (history > thresholds).sum(axis=0).astype(float)
-        past = county_mean(past_counts)
+        past = area_mean(past_counts, weights)
         for warming, ssp in inputs.SSP.items():
             for period in ("MID", "LATE"):
-                future = county_mean(event_days(ssp, period, thresholds))
+                future = area_mean(event_days(ssp, period, thresholds), weights)
                 with np.errstate(divide="ignore", invalid="ignore"):
                     ratio = np.where(past > 0, future / past, np.nan)
                 result[f"EXHT_{name}_{period}_{warming}_HM"] = np.maximum(1.0, ratio)

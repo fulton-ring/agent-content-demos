@@ -21,7 +21,7 @@ CURRENT_DECADES = (2030,)
 ANNUAL_CHANCE = pd.Series({"minor": 1.0, "moderate": 0.06, "major": 0.005})
 
 
-def saturate(days):
+def saturate(days: pd.DataFrame) -> pd.DataFrame:
     """Convert flood days per year to a saturating annual frequency (probability-like)."""
     return 1.0 - np.exp(-days / 365.0)
 

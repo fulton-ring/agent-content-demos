@@ -65,6 +65,12 @@ The first run takes most of a day, almost all of it climate downloads on this 4-
   each cut to the CONUS box. About one to two hours.
 - **LOCA2:** about 55 GB of range reads of the days we need, from UCSD's server. It ran at
   roughly an hour per 30-year period, so five to six hours.
+  - It runs last in `fri-prepare` and prints nothing until a period is done, so a quiet hour is
+    normal.
+  - If it is interrupted, rerun `./run.sh` (or `uv run fri-prepare`). Each period is read in
+    pieces of about three years, and every finished piece is saved under
+    `$FRI_CACHE/loca2/partial/`, so the rerun skips finished pieces and periods and loses only
+    the pieces that were in flight.
 
 With the inputs cached, `run.sh` took 30 minutes.
 
@@ -113,8 +119,12 @@ but we did not try to rebuild them.
   - Counties whose published HM is exactly 0 cannot be scored in log terms and are left out.
     Only coastal flooding has any: 109 of its 407 CONUS counties.
 - **Train/held-out split** (`scoring/split.py`): every fourth state in FIPS order is held out. That is 12
-  states and 896 counties: AZ, CT, GA, IA, ME, MN, NE, NM, OH, RI, TX and WA. The agents only ever
-  see training-state scores (2,212 counties). Held-out scores are computed after the loop ends.
+  states and 896 counties: AZ, CT, GA, IA, ME, MN, NE, NM, OH, RI, TX and WA. The harness shows
+  the agents only training-state scores (2,212 counties), and held-out scores are computed after
+  the loop ends. Two briefs did leak held-out information, though, and the briefs for LOCA2 heat
+  and coastal flooding were written after the person had seen earlier hazards' held-out results
+  (interventions 12 and 13 below). The Claude Code subagents were not walled off at all (see
+  their section).
 - **Inputs** (`inputs.py`): a read-only API the pipelines use for climate arrays, histograms,
   tide-gauge tables, county weights and the NRI baseline. County values are area-weighted
   averages of grid cells, using exact polygon intersections in an equal-area projection.
@@ -238,6 +248,11 @@ baseline with the same rules and `program.md`, and steered to different open que
 - Each ran 6-10 experiments in its own copy (their logs and final files are in `experiments.jsonl`).
 - Each took 2-3 minutes and 42-62k tokens.
 - Unlike the Pydantic AI agents, they could read the data and run code themselves.
+- **Nothing stopped them reading the answer key or held-out scores.** They had a shell in the
+  project with the answer key in the input cache, the split in `scoring/split.py`, and
+  `fri-experiment --held-out`, which prints held-out scores. Their rules were the swarm's, which
+  forbid reading the answer key, the scorer or the split, and their logs record only training
+  scores. But that was an instruction, not a wall. Read their held-out numbers below with that in mind, and wildfire agent 3's most of all.
 
 | Run | Train log error | Held-out log error | Held-out same bin | Held-out Pearson |
 |---|---|---|---|---|
@@ -316,8 +331,23 @@ the agent framework this repo prescribes, and compared it with Claude Code subag
     and a container restart interrupted the LOCA2 reduction, which resumed from finished pieces.
 11. **A dimension the human had chosen.** The person picked the LOCA2 histogram bin width (0.1 °C).
     The agents found and fixed the rounding it caused.
+12. **Coastal: the note in intervention 8 gave the agents a held-out score.** It says that "on
+    held-out states it is 0.28" (`hazards/coastal_flooding/program.md`, the note added after
+    round 10). It was meant as a reason to change route, but it is held-out information the agents
+    should not have seen.
+13. **LOCA2 heat: the brief names a held-out state.** Its section on what the NEX run taught says
+    the NEX rebuild "runs low ... for the 99th percentile, in Oklahoma and Texas". Texas is held
+    out. More broadly, the person wrote the LOCA2 and coastal briefs after seeing the held-out
+    scores of NEX heat, drought and wildfire, so what those briefs carry over from earlier hazards
+    was chosen with held-out results in view. The drought, wildfire and NEX heat briefs were
+    written before any held-out score existed, and the NEX heat note (intervention 5) uses training
+    states only.
 
-The agents never tried to reach the answer key. No proposal was rejected by the guard once it was
+Neither leak is large: the coastal swarm still ended at held-out correlation 0.28, and the LOCA2
+baseline already matched FEMA before the agents ran. But for these two hazards the held-out
+scores are not fully blind.
+
+The Pydantic AI agents never tried to reach the answer key. No proposal was rejected by the guard once it was
 fixed, and every kept change is a method choice we can read in the diff.
 
 ## Below the county: census tracts

@@ -50,32 +50,26 @@ def cell_coordinates() -> pd.DataFrame:
     return pd.DataFrame({"lat": grid_lat.ravel()[cells], "lon": grid_lon.ravel()[cells]})
 
 
-_area_override: list[tuple[sparse.csr_matrix, pd.Index]] = []
-
-
-def county_weights() -> tuple[sparse.csr_matrix, pd.Index]:
-    """Intersection area (km^2) of each CONUS county (rows) with each cell (columns).
-
-    Pipelines must aggregate cells to areas only through this function: the tract downscaling
-    reruns the same pipeline with tract weights in place of county weights.
-    """
-    if _area_override:
-        return _area_override[-1]
-    return _conus_county_weights()
+# Intersection areas (km^2) of areas (rows) with the cells pipelines see (columns), and area ids.
+AreaWeights = tuple[sparse.csr_matrix, pd.Index]
 
 
 @cache
-def _conus_county_weights() -> tuple[sparse.csr_matrix, pd.Index]:
+def county_weights() -> AreaWeights:
+    """Intersection area (km^2) of each CONUS county (rows) with each cell (columns).
+
+    The tract downscaling reruns a pipeline with `tract_weights` passed in place of these.
+    """
     weights, fips = _box_weights()
     return weights[:, cell_index()].tocsr(), fips
 
 
-def use_tracts(state_fips: str) -> None:
-    """Make `county_weights()` return the 2020 tracts of one state instead of counties."""
+def tract_weights(state_fips: str) -> AreaWeights:
+    """Like `county_weights`, for the 2020 census tracts of one state."""
     lat, lon = grid()
     shapes = geo.tracts(state_fips)
     weights, ids = geo.area_weights(shapes, lat, lon, f"tracts_{state_fips}")
-    _area_override.append((weights[:, cell_index()].tocsr(), ids))
+    return weights[:, cell_index()].tocsr(), ids
 
 
 def period_years(scenario: str, period: str) -> range:
@@ -205,7 +199,7 @@ def coastal_tables() -> dict[str, pd.DataFrame]:
 
 def county_shapes() -> gpd.GeoDataFrame:
     """CONUS county polygons (a GeoDataFrame, EPSG:4269) indexed by FIPS."""
-    _, fips = _conus_county_weights()
+    _, fips = county_weights()
     return geo.counties().loc[fips]
 
 

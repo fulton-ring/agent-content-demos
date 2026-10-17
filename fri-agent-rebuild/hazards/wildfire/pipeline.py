@@ -7,6 +7,7 @@ fuel-type shares as controls. The agent loop settled the open choices (see progr
 
 import numpy as np
 import pandas as pd
+from scipy import sparse
 
 from fri_rebuild import inputs
 
@@ -15,8 +16,7 @@ ENSEMBLE = "MME75"
 VARIABLE = "FWI_P95"
 
 
-def county_mean(values: np.ndarray) -> np.ndarray:
-    weights, _ = inputs.county_weights()
+def area_mean(values: np.ndarray, weights: sparse.csr_matrix) -> np.ndarray:
     valid = np.isfinite(values)
     totals = weights @ np.where(valid, values, 0.0)
     covered = weights @ valid.astype(float)
@@ -24,9 +24,10 @@ def county_mean(values: np.ndarray) -> np.ndarray:
         return totals / covered
 
 
-def period_fwi(scenario: str, period: str) -> np.ndarray:
-    return county_mean(
-        np.nanmean(inputs.fwi(scenario, period, variable=VARIABLE, ensemble=ENSEMBLE), axis=0)
+def period_fwi(scenario: str, period: str, weights: sparse.csr_matrix) -> np.ndarray:
+    return area_mean(
+        np.nanmean(inputs.fwi(scenario, period, variable=VARIABLE, ensemble=ENSEMBLE), axis=0),
+        weights,
     )
 
 
@@ -53,14 +54,18 @@ def elasticity(historic_fwi: pd.Series) -> float:
     return float(coefficients[0])
 
 
-def hazard_multipliers() -> pd.DataFrame:
-    """Columns WFIR_<period>_<warming>_HM indexed by county FIPS."""
-    _, fips = inputs.county_weights()
-    historic = pd.Series(period_fwi("historical", "historical"), index=fips)
-    gamma = elasticity(historic)
+def hazard_multipliers(areas: inputs.AreaWeights | None = None) -> pd.DataFrame:
+    """Columns WFIR_<period>_<warming>_HM indexed by county FIPS (or `areas` ids).
+
+    gamma is always fitted across counties, where NRI EAL and fuel shares exist.
+    """
+    county_weights, counties = inputs.county_weights()
+    gamma = elasticity(pd.Series(period_fwi("historical", "historical", county_weights), counties))
+    weights, ids = areas or (county_weights, counties)
+    historic = pd.Series(period_fwi("historical", "historical", weights), index=ids)
     result = {}
     for warming, ssp in inputs.SSP.items():
         for period in PERIODS:
-            future = pd.Series(period_fwi(ssp, period), index=fips)
+            future = pd.Series(period_fwi(ssp, period, weights), index=ids)
             result[f"WFIR_{period}_{warming}_HM"] = (future / historic) ** gamma
-    return pd.DataFrame(result, index=fips)
+    return pd.DataFrame(result, index=ids)

@@ -6,6 +6,7 @@ fails); those are skipped and the README reports how many years each period has.
 """
 
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 import h5py
 import numpy as np
@@ -23,11 +24,11 @@ YEARS = {
 }
 
 
-def year_path(ensemble: str, scenario: str, year: int):  # noqa: ANN201 - Path
+def year_path(ensemble: str, scenario: str, year: int) -> Path:
     return cache_path("fwi", ensemble, scenario, f"{year}.npz")
 
 
-def missing_path(ensemble: str, scenario: str, year: int):  # noqa: ANN201 - Path
+def missing_path(ensemble: str, scenario: str, year: int) -> Path:
     return cache_path("fwi", ensemble, scenario, f"{year}.missing")
 
 

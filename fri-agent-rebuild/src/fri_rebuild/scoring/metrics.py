@@ -21,11 +21,6 @@ class Score:
     median_ratio: float
 
 
-def hm_columns(table: pd.DataFrame, prefix: str) -> list[str]:
-    """Published multiplier columns for one hazard variant, e.g. 'EXHT_N95' or 'DRGT'."""
-    return [f"{prefix}_{scenario}_HM" for scenario in answer_key.SCENARIOS]
-
-
 def score_column(
     key: pd.DataFrame, rebuilt: pd.Series, column: str, subset: str
 ) -> tuple[Score, pd.DataFrame]:

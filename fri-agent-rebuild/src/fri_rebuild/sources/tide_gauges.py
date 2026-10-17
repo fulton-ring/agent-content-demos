@@ -34,6 +34,17 @@ def get_json(url: str) -> dict:
     return response.json()
 
 
+def station_json(station: str, resource: str) -> dict | None:
+    """One CO-OPS metadata resource for a station, or None if the station doesn't publish it."""
+    response = http.session().get(
+        f"{STATION_API}/{station}/{resource}.json?units=metric", timeout=120
+    )
+    if response.status_code == 404:
+        return None
+    response.raise_for_status()
+    return response.json()
+
+
 def report_table(name: str) -> pd.DataFrame:
     """One CSV from the 2022 report zip, with its citation preamble skipped."""
     raw = cache_path("coastal", "Sea_Level_Rise_Datasets_2022.zip")
@@ -92,10 +103,9 @@ def flood_thresholds(stations: list[str]) -> pd.DataFrame:
     """NOAA minor/moderate/major flood thresholds in metres above MHHW per station."""
     rows = []
     for station in stations:
-        try:
-            levels = get_json(f"{STATION_API}/{station}/floodlevels.json?units=metric")
-            datums = get_json(f"{STATION_API}/{station}/datums.json?units=metric")
-        except Exception:  # noqa: BLE001 - stations without published levels stay blank
+        levels = station_json(station, "floodlevels")
+        datums = station_json(station, "datums")
+        if levels is None or datums is None:
             rows.append({"station": station})
             continue
         mhhw = next((d["value"] for d in datums.get("datums", []) if d["name"] == "MHHW"), None)
@@ -113,9 +123,8 @@ def tidal_datums(stations: list[str]) -> pd.DataFrame:
     """Great diurnal tide range (GT) and MHHW per station, in metres, from CO-OPS datums."""
     rows = []
     for station in stations:
-        try:
-            datums = get_json(f"{STATION_API}/{station}/datums.json?units=metric")
-        except Exception:  # noqa: BLE001 - stations without published datums stay blank
+        datums = station_json(station, "datums")
+        if datums is None:
             rows.append({"station": station})
             continue
         values = {d["name"]: d["value"] for d in datums.get("datums", [])}

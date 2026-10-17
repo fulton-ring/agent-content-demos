@@ -21,8 +21,7 @@ def tract_table(hazard: str, column: str, state_fips: str) -> tuple[pd.DataFrame
     """Tract multipliers with NRI tract EAL, and the same pipeline's county multipliers."""
     pipeline = hazard_pipeline(hazard)
     counties = pipeline.hazard_multipliers()
-    inputs.use_tracts(state_fips)
-    tracts = pipeline.hazard_multipliers()
+    tracts = pipeline.hazard_multipliers(inputs.tract_weights(state_fips))
     eal = nri.tracts()[f"{HAZARD_NRI[column[:4]]}_EALT"]
     table = tracts.join(eal.rename("EAL"), how="left")
     table["county"] = table.index.str[:5]

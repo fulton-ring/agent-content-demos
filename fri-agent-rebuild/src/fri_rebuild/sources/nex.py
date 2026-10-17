@@ -39,6 +39,8 @@ MONTHLY_YEARS = {
 }
 DAILY_VARIABLES = ("tasmin", "tasmax", "tas", "hurs")
 MONTHLY_VARIABLES = ("tas", "pr")
+# S3 lists 1,000 keys a page; one variable and scenario has at most 151 yearly files.
+MAX_LIST_PAGES = 10
 
 
 @dataclass(frozen=True)
@@ -55,16 +57,19 @@ def list_versions(variable: str, scenario: str) -> dict[int, str]:
     prefix = f"NEX-GDDP-CMIP6/{MODEL}/{scenario}/{MEMBER}/{variable}/"
     keys: list[str] = []
     token = None
-    while True:
+    for _ in range(MAX_LIST_PAGES):
         params = {"list-type": "2", "prefix": prefix}
         if token:
             params["continuation-token"] = token
-        text = requests.get(BUCKET, params=params, timeout=60).text
-        keys += re.findall(r"<Key>([^<]+)</Key>", text)
-        match = re.search(r"<NextContinuationToken>([^<]+)</NextContinuationToken>", text)
+        response = http.session().get(BUCKET, params=params, timeout=60)
+        response.raise_for_status()
+        keys += re.findall(r"<Key>([^<]+)</Key>", response.text)
+        match = re.search(r"<NextContinuationToken>([^<]+)</NextContinuationToken>", response.text)
         if not match:
             break
         token = match.group(1)
+    else:
+        raise RuntimeError(f"{prefix} lists more than {MAX_LIST_PAGES} pages")
     newest: dict[int, tuple[str, str]] = {}
     for key in keys:
         found = re.search(r"_(\d{4})(?:_v(\d+\.\d+))?\.nc$", key)

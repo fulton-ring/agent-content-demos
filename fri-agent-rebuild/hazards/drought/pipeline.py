@@ -8,7 +8,7 @@ rate, per 0.25-degree cell, then area-weighted to counties.
 
 import numpy as np
 import pandas as pd
-from scipy import stats
+from scipy import sparse, stats
 
 from fri_rebuild import inputs
 
@@ -89,8 +89,7 @@ def drought_days(
     return count, float(days.sum()), valid
 
 
-def county_mean(values: np.ndarray) -> np.ndarray:
-    weights, _ = inputs.county_weights()
+def area_mean(values: np.ndarray, weights: sparse.csr_matrix) -> np.ndarray:
     valid = np.isfinite(values)
     totals = weights @ np.where(valid, values, 0.0)
     covered = weights @ valid.astype(float)
@@ -98,9 +97,9 @@ def county_mean(values: np.ndarray) -> np.ndarray:
         return totals / covered
 
 
-def hazard_multipliers() -> pd.DataFrame:
-    """Columns DRGT_<period>_<warming>_HM indexed by county FIPS."""
-    _, fips = inputs.county_weights()
+def hazard_multipliers(areas: inputs.AreaWeights | None = None) -> pd.DataFrame:
+    """Columns DRGT_<period>_<warming>_HM indexed by county FIPS (or `areas` ids)."""
+    weights, fips = areas or inputs.county_weights()
     lat = inputs.cell_coordinates()["lat"].to_numpy()
     result = {}
     for warming, ssp in inputs.SSP.items():
@@ -116,5 +115,5 @@ def hazard_multipliers() -> pd.DataFrame:
             with np.errstate(divide="ignore", invalid="ignore"):
                 ratio = fut_rate / past_rate
             cell_hm = np.where(np.isfinite(ratio), ratio, np.nan)
-            result[f"DRGT_{period}_{warming}_HM"] = np.maximum(1.0, county_mean(cell_hm))
+            result[f"DRGT_{period}_{warming}_HM"] = np.maximum(1.0, area_mean(cell_hm, weights))
     return pd.DataFrame(result, index=fips)
