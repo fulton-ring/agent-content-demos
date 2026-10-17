@@ -50,7 +50,8 @@ def _(mo):
     ## Scores
 
     `log_mae` is the mean absolute ln(rebuilt / published); `same_bin` is the share of counties
-    in the same rating bin; held-out states were never shown to the agents.
+    in the same rating bin; the agents were scored on training states only (README, "Train/held-out
+    split", says where held-out information still reached them).
     """)
     return
 

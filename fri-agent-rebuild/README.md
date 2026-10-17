@@ -6,7 +6,8 @@ for [issue #15](https://github.com/fulton-ring/agent-content-demos/issues/15)
 ([proposal card](https://app.notion.com/p/3facc69045cb8004a763e1047da67297)).
 
 **Short answer.** The FRI has five hazards and seven sets of published county multipliers. Here
-is where each landed on the 12 states the agents never saw:
+is where each landed on the 12 states the agents were never scored on (two briefs leaked a
+little held-out information; see "Train/held-out split"):
 
 | Hazard (FRI columns) | Rebuilt? | Same rating bin | Pearson | Typical error |
 |---|---|---|---|---|
