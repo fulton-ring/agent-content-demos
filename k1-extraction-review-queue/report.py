@@ -1,0 +1,262 @@
+"""Build output/index.html: the review screen shown in the demo.
+
+Left, the documents. Middle, every extracted value with its status; click one
+to see it highlighted on the page. The review queue tab lists everything that
+needs a person, with the box cropped from the page, the reason, and a field to
+correct it. Corrections stay in the browser and export to CSV.
+"""
+
+import json
+import sys
+from pathlib import Path
+
+HERE = Path(__file__).parent
+# The Tesseract pipeline writes to output/; the model pipeline to output/<model>/, given as the argument.
+OUT = Path(sys.argv[1]) if len(sys.argv) > 1 else HERE / "output"
+
+PAGE = r"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>K-1 review queue</title>
+<style>
+:root { --bg:#f6f5f2; --panel:#fff; --ink:#1d1d1b; --muted:#6b6a66; --line:#e2e0da; --accent:#1f5f8b;
+        --ok:#2f7d4f; --okbg:#e6f2ea; --warn:#a15c07; --warnbg:#fbefdc; --bad:#b3261e; --hl:rgba(255,196,0,.35); }
+* { box-sizing:border-box; }
+body { margin:0; font:14px/1.45 -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; color:var(--ink); background:var(--bg); }
+header { padding:14px 20px 10px; border-bottom:1px solid var(--line); background:var(--panel); }
+h1 { font-size:18px; margin:0 0 2px; }
+.sub { color:var(--muted); font-size:13px; }
+.stats { display:flex; gap:22px; margin-top:10px; flex-wrap:wrap; }
+.stat b { display:block; font-size:20px; }
+.stat span { color:var(--muted); font-size:12px; }
+nav { display:flex; gap:4px; padding:8px 20px 0; background:var(--panel); border-bottom:1px solid var(--line); }
+nav button { border:0; background:none; padding:8px 12px; font:inherit; cursor:pointer; color:var(--muted); border-bottom:2px solid transparent; }
+nav button.on { color:var(--ink); border-color:var(--accent); font-weight:600; }
+.count { background:var(--warnbg); color:var(--warn); border-radius:9px; padding:0 7px; font-size:12px; margin-left:4px; }
+main { display:grid; grid-template-columns:230px minmax(380px, 1fr) minmax(420px, 1.15fr); height:calc(100vh - 150px); }
+.col { overflow:auto; border-right:1px solid var(--line); }
+.docs a { display:block; padding:9px 14px; border-bottom:1px solid var(--line); color:inherit; text-decoration:none; cursor:pointer; }
+.docs a.on { background:#e9f1f7; }
+.docs small { color:var(--muted); display:block; }
+table { border-collapse:collapse; width:100%; }
+th, td { text-align:left; padding:6px 10px; border-bottom:1px solid var(--line); vertical-align:top; }
+th { position:sticky; top:0; background:var(--bg); font-weight:600; font-size:12px; color:var(--muted); z-index:1; }
+tr.v { cursor:pointer; }
+tr.v:hover { background:#fafaf7; }
+tr.v.on { background:#fff7d6; }
+td.num { text-align:right; font-variant-numeric:tabular-nums; font-family:ui-monospace, Menlo, monospace; white-space:nowrap; }
+.pill { font-size:11px; border-radius:9px; padding:1px 7px; white-space:nowrap; }
+.pill.ok { background:var(--okbg); color:var(--ok); }
+.pill.rv { background:var(--warnbg); color:var(--warn); }
+.pill.fx { background:#e8eef9; color:var(--accent); }
+.why { color:var(--warn); font-size:12px; }
+.key { font-size:12px; }
+.key.no { color:var(--bad); font-weight:600; }
+.key.yes { color:var(--ok); }
+.pagewrap { position:relative; margin:12px; background:#fff; box-shadow:0 1px 3px rgba(0,0,0,.12); }
+.pagewrap img { display:block; width:100%; }
+.box { position:absolute; border:2px solid #e0a100; background:var(--hl); pointer-events:none; transition:all .15s; }
+.pagebar { display:flex; gap:8px; align-items:center; padding:10px 12px 0; color:var(--muted); font-size:12px; }
+.pagebar button { font:inherit; font-size:12px; }
+#queue { display:none; padding:14px 20px; overflow:auto; height:calc(100vh - 150px); }
+.item { display:grid; grid-template-columns:330px 1fr; gap:16px; background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:12px; margin-bottom:10px; }
+.item.done { opacity:.55; }
+.crop { width:330px; height:84px; border:1px solid var(--line); background-repeat:no-repeat; background-color:#fff; }
+.item h3 { margin:0 0 2px; font-size:14px; }
+.item input { font:inherit; font-family:ui-monospace, Menlo, monospace; padding:4px 6px; width:140px; }
+.item button, .toolbar button { font:inherit; padding:4px 10px; cursor:pointer; }
+.toolbar { display:flex; gap:10px; align-items:center; margin-bottom:12px; color:var(--muted); font-size:13px; }
+.stmt { font-size:12px; color:var(--muted); margin-top:4px; }
+.stmt i { color:var(--bad); font-style:normal; }
+label.tg { font-size:12px; color:var(--muted); margin-left:auto; padding:8px 20px 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>K-1 extraction with a review queue</h1>
+  <div class="sub">Real sample K-1s published by Enviva Partners and The Blackstone Group, scanned copies of them, and made-up 1120-S, 1041 and brokerage 1099s. Every value links to the box it came from.</div>
+  <div class="sub" id="pipeline"></div>
+  <div class="stats" id="stats"></div>
+</header>
+<nav>
+  <button id="t-values" class="on">Values</button>
+  <button id="t-queue">Review queue <span class="count" id="qcount"></span></button>
+  <label class="tg"><input type="checkbox" id="showkey"> Check against answer key</label>
+</nav>
+<main id="values">
+  <div class="col docs" id="docs"></div>
+  <div class="col"><table><thead><tr><th>Box</th><th>Description</th><th style="text-align:right">Value</th><th>Status</th></tr></thead><tbody id="rows"></tbody></table></div>
+  <div class="col" style="border:0">
+    <div class="pagebar"><span id="pageinfo"></span><span style="flex:1"></span><button id="otherpage" hidden></button></div>
+    <div class="pagewrap" id="pagewrap"><img id="page" alt="Page the selected value came from"><div class="box" id="hl" hidden></div></div>
+  </div>
+</main>
+<section id="queue">
+  <div class="toolbar"><span id="qinfo"></span><span style="flex:1"></span><button id="export">Export CSV</button></div>
+  <div id="items"></div>
+</section>
+<script>
+const DATA = __DATA__;
+const METRICS = __METRICS__;
+const STORE = "k1-review-v1";
+let fixes = {};
+try { fixes = JSON.parse(localStorage.getItem(STORE) || "{}"); } catch (e) {}
+const save = () => { try { localStorage.setItem(STORE, JSON.stringify(fixes)); } catch (e) {} };
+const $ = id => document.getElementById(id);
+const fmt = v => v === null || v === undefined ? "" : typeof v === "number" ? (v < 0 ? "(" + Math.abs(v).toLocaleString("en-US") + ")" : v.toLocaleString("en-US")) : v;
+const NAMES = { "01": "Enviva Partners 2018", "02": "Enviva Partners 2021", "03": "Blackstone 2019" };
+function docTitle(d) {
+  const real = NAMES[d.file.slice(0, 2)];
+  const scan = d.file.match(/-scan(\d)([ab])\.pdf$/);
+  if (real) return real + (scan ? (scan[1] === "1" ? ", office scan" : ", bad scan") : "");
+  const kind = { "1120S": "1120-S K-1", "1041": "1041 K-1", "BROKER": "Brokerage 1099" }[d.form] || d.form;
+  return "Made-up " + kind;
+}
+const esc = t => String(t).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+if (DATA.models) $("pipeline").textContent = `Read by ${DATA.models.join(" and ")} through OpenRouter. A value is accepted only when both models read the same thing.`;
+else if (DATA.pipeline && DATA.pipeline.endsWith("alone")) $("pipeline").textContent = `Read by ${DATA.model} through OpenRouter, with no second read.`;
+else if (DATA.model) $("pipeline").textContent = `Read by ${DATA.model} through OpenRouter, each value checked against a second read of its box (Docling, or Tesseract on scans).`;
+else $("pipeline").textContent = "Read by Tesseract OCR and rules, with no language model.";
+const m = METRICS.all, h = METRICS.held_out_set;
+const pct = (a, b) => b ? (100 * a / b).toFixed(1) + "%" : "n/a";
+const all = DATA.documents.flatMap(d => d.fields);
+const inReview = all.filter(f => f.status === "review");
+$("stats").innerHTML = [
+  [DATA.documents.length, "documents"],
+  [all.length, "values read"],
+  [pct(m.accepted_correct, m.accepted), "right when accepted without review"],
+  [inReview.length, "sent to review (" + inReview.filter(f => f.value === "STMT").length + " are on a statement)"],
+  [m.wrong_caught_by_review + " of " + m.wrong, "misreads caught by the queue"],
+  [h.silent_errors, "silent errors on the held-out set"],
+].map(([b, s]) => `<div class="stat"><b>${b}</b><span>${s}</span></div>`).join("");
+
+let cur = 0, sel = null, curPage = null;
+function docs() {
+  $("docs").innerHTML = DATA.documents.map((d, i) => {
+    const n = d.fields.filter(f => f.status === "review" && !fixes[d.file + "|" + f.key]).length;
+    return `<a data-i="${i}" class="${i === cur ? "on" : ""}">${docTitle(d)}<small>${d.file} · ${d.source}${n ? ` · <span class="count">${n}</span>` : ""}</small></a>`;
+  }).join("");
+  document.querySelectorAll(".docs a").forEach(a => a.onclick = () => { cur = +a.dataset.i; sel = null; render(); });
+}
+function status(d, f) {
+  const fx = fixes[d.file + "|" + f.key];
+  if (fx) return `<span class="pill fx">${fx.action === "accept" ? "confirmed" : "corrected"}</span>`;
+  return f.status === "review" ? `<span class="pill rv">review</span><div class="why">${f.reasons.join("; ")}</div>` : `<span class="pill ok">accepted</span>`;
+}
+function keycell(f) {
+  if (!$("showkey").checked || f.correct === undefined) return "";
+  return f.correct ? `<div class="key yes">matches key</div>` : `<div class="key no">key: ${fmt(f.expected) || "blank"}</div>`;
+}
+function rows() {
+  const d = DATA.documents[cur];
+  $("rows").innerHTML = d.fields.map((f, i) => {
+    const fx = fixes[d.file + "|" + f.key];
+    const v = fx && fx.value !== undefined ? fx.value : f.value;
+    return `<tr class="v ${sel === i ? "on" : ""}" data-i="${i}"><td>${f.key}</td><td>${f.label}</td><td class="num">${fmt(v)}</td><td>${status(d, f)}${keycell(f)}</td></tr>`;
+  }).join("");
+  document.querySelectorAll("tr.v").forEach(tr => tr.onclick = () => { sel = +tr.dataset.i; rows(); show(); });
+}
+function show() {
+  const d = DATA.documents[cur];
+  const f = sel !== null ? d.fields[sel] : null;
+  const pg = f ? String(f.page) : Object.keys(d.pages)[0];
+  showPage(d, pg, f);
+}
+function showPage(d, pg, f) {
+  curPage = pg;
+  $("page").src = d.pages[pg];
+  $("pageinfo").textContent = `${d.file} · page ${+pg + 1}` + (d.year ? ` · ${d.form} K-1 for ${d.year}` : "");
+  const hl = $("hl");
+  if (f && f.bbox && String(f.page) === pg) {
+    const [x0, y0, x1, y1] = f.bbox, pad = 0.004;
+    Object.assign(hl.style, { left: (x0 - pad) * 100 + "%", top: (y0 - pad) * 100 + "%", width: (x1 - x0 + 2 * pad) * 100 + "%", height: (y1 - y0 + 2 * pad) * 100 + "%" });
+    hl.hidden = false;
+    requestAnimationFrame(() => {
+      const wrap = $("pagewrap"), col = wrap.parentElement;
+      col.scrollTo({ top: Math.max(0, wrap.offsetTop + y0 * wrap.offsetHeight - col.clientHeight / 2), behavior: "smooth" });
+    });
+  } else hl.hidden = true;
+  const other = $("otherpage");
+  if (f && f.statement_page !== undefined && d.pages[String(f.statement_page)]) {
+    other.hidden = false;
+    other.textContent = pg === String(f.statement_page) ? "Back to the K-1" : `Open the statement (page ${f.statement_page + 1})`;
+    other.onclick = () => showPage(d, pg === String(f.statement_page) ? String(f.page) : String(f.statement_page), f);
+  } else other.hidden = true;
+}
+function queue() {
+  const items = [];
+  DATA.documents.forEach(d => d.fields.forEach(f => { if (f.status === "review") items.push([d, f]); }));
+  const open = items.filter(([d, f]) => !fixes[d.file + "|" + f.key]).length;
+  $("qcount").textContent = open;
+  $("qinfo").textContent = `${open} of ${items.length} values still need a person`;
+  $("items").innerHTML = items.map(([d, f], i) => {
+    const id = d.file + "|" + f.key, fx = fixes[id];
+    let crop = "";
+    if (f.bbox) {
+      const [x0, y0, x1, y1] = f.bbox, cw = Math.max(x1 - x0, 0.001), chh = Math.max(y1 - y0, 0.001);
+      const scale = Math.min(300 / cw, 70 / chh, 2600);
+      crop = `background-image:url('${d.pages[String(f.page)]}');background-size:${scale}px auto;background-position:${-(x0 * scale) + 330 / 2 - cw * scale / 2}px ${-(y0 * scale * 11 / 8.5) + 42 - chh * scale * 11 / 8.5 / 2}px`;
+    }
+    return `<div class="item ${fx ? "done" : ""}">
+      <div class="crop" style="${crop}" title="The box on the page"></div>
+      <div><h3>${docTitle(d)} · box ${f.key}</h3>
+        <div class="sub">${f.label}</div>
+        <div class="why">${f.reasons.join("; ")}</div>
+        ${f.statement_lines && f.statement_lines.length ? `<div class="stmt">On the statement, the model read: ${f.statement_lines.map(l =>
+          `<span title="${esc(l.description)}">${esc(l.code)} <b class="num">${esc(l.printed)}</b>${l.docling_agrees ? "" : " <i>(not in Docling's table)</i>"}</span>`).join(" · ")}</div>` : ""}
+        <div style="margin-top:6px">Read: <b class="num">${f.value !== null && f.value !== undefined ? fmt(f.value) : f.raw ? "'" + f.raw + "'" : "(nothing)"}</b> ${keycell(f)}</div>
+        <div style="margin-top:6px"><input data-q="${i}" placeholder="correct value" value="${fx && fx.value !== undefined ? fx.value : ""}">
+          <button data-fix="${i}">Save correction</button> <button data-ok="${i}">Value is right</button>
+          <button data-go="${i}">Show on page</button></div>
+      </div></div>`;
+  }).join("");
+  const parse = s => { const t = s.trim().replace(/[$,\s]/g, ""); if (/^\(?-?\d+(\.\d+)?\)?$/.test(t)) { const n = parseFloat(t.replace(/[()]/g, "")); return /^\(|^-/.test(t) ? -Math.abs(n) : n; } return s.trim() || null; };
+  document.querySelectorAll("[data-fix]").forEach(b => b.onclick = () => { const [d, f] = items[+b.dataset.fix]; fixes[d.file + "|" + f.key] = { action: "correct", value: parse(document.querySelector(`[data-q="${b.dataset.fix}"]`).value) }; save(); queue(); docs(); });
+  document.querySelectorAll("[data-ok]").forEach(b => b.onclick = () => { const [d, f] = items[+b.dataset.ok]; fixes[d.file + "|" + f.key] = { action: "accept", value: f.value }; save(); queue(); docs(); });
+  document.querySelectorAll("[data-go]").forEach(b => b.onclick = () => { const [d, f] = items[+b.dataset.go]; cur = DATA.documents.indexOf(d); sel = d.fields.indexOf(f); tab("values"); render(); });
+}
+function tab(t) {
+  $("values").style.display = t === "values" ? "grid" : "none";
+  $("queue").style.display = t === "queue" ? "block" : "none";
+  $("t-values").classList.toggle("on", t === "values");
+  $("t-queue").classList.toggle("on", t === "queue");
+  if (t === "queue") queue();
+}
+$("t-values").onclick = () => tab("values");
+$("t-queue").onclick = () => tab("queue");
+$("showkey").onchange = () => { rows(); queue(); };
+$("export").onclick = () => {
+  const lines = [["file", "box", "description", "value", "status", "page", "reason"]];
+  DATA.documents.forEach(d => d.fields.forEach(f => {
+    const fx = fixes[d.file + "|" + f.key];
+    const st = fx ? (fx.action === "accept" ? "confirmed" : "corrected") : f.status;
+    lines.push([d.file, f.key, f.label, fx && fx.value !== undefined ? fx.value : f.value, st, f.page + 1, f.reasons.join("; ")]);
+  }));
+  const csv = lines.map(r => r.map(c => `"${String(c === null || c === undefined ? "" : c).replace(/"/g, '""')}"`).join(",")).join("\n");
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+  a.download = "k1-values.csv";
+  a.click();
+};
+function render() { docs(); rows(); show(); queue(); }
+render();
+</script>
+</body>
+</html>
+"""
+
+
+def main():
+    data = json.loads((OUT / "extracted.json").read_text())
+    # Each real K-1 first, then its scanned copies, then the made-up documents.
+    data["documents"].sort(key=lambda d: (d["file"][:2], "-scan" in d["file"], d["file"]))
+    metrics = json.loads((OUT / "metrics.json").read_text())
+    html = PAGE.replace("__DATA__", json.dumps(data)).replace("__METRICS__", json.dumps(metrics))
+    (OUT / "index.html").write_text(html)
+    print(f"wrote {OUT / 'index.html'}")
+
+
+if __name__ == "__main__":
+    main()
