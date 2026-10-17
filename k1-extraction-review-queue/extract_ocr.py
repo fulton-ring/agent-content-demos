@@ -203,7 +203,7 @@ async def run(engine, model_name, files):
             fields = model_fields(page, form, out, {})
         else:
             fields = model_fields(page, form, out, k1_1065_labels(year) if form == "1065" else K1_LABELS[form])
-        page_review = near_empty(page, fields)
+        page_review = near_empty(page, fields, form)
         if page_review:
             if not any(f["key"] == "page" for f in fields):
                 fields.append({"key": "page", "label": "The whole page", "value": None, "raw": "", "page": index,

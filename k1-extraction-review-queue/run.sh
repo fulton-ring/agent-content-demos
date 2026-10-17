@@ -24,6 +24,7 @@ if ! .venv/bin/python -c "import pytesseract, docling, pydantic_ai, modal" 2>/de
 fi
 PY=.venv/bin/python
 
+$PY fetch_forms.py   # blank IRS K-1 forms from irs.gov, hash-checked
 $PY generate.py      # made-up 1120-S and 1041 K-1s and brokerage 1099s, with their answer key
 $PY fetch_real.py    # real sample K-1s from the issuers' sites, plus scanned copies
 $PY layout.py        # Docling: words, page types and statement tables for every page

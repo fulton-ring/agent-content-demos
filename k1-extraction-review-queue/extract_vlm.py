@@ -744,7 +744,7 @@ async def process(runner, path, out_dir):
                 f["statement_lines_missed"] = missing
     # A model can return a valid but empty or near-empty answer. Every box it leaves out would read as blank, so
     # the whole page goes to review instead.
-    page_review = near_empty(main, fields)
+    page_review = near_empty(main, fields, form)
     if page_review:
         fields.append(field(main, "page", "The whole page", None, "", None, 0, [page_review]))
     for f in fields:
@@ -776,14 +776,24 @@ async def process(runner, path, out_dir):
 AMOUNT_WORD = re.compile(r"^[($-]*(\d{1,3}(,\d{3})+(\.\d\d)?|\d+\.\d\d)\)?$")
 
 
-def near_empty(page, fields):
+# The share of the amounts Docling sees printed on a page that a model must read for its answer to count as more
+# than near-empty. A K-1 prints many amounts the schema doesn't ask for (capital account, liabilities, statement
+# references), so only a much shorter answer is suspect there. A brokerage summary page prints only the 18 amounts
+# the schema asks for, so an answer that skips one section (GLM 5.3 Flash reading only the 1099-B rows, 8 of about
+# 16) is near-empty too.
+BROKER_MIN_READ_SHARE = 0.75
+K1_MIN_READ_SHARE = 0.25
+
+
+def near_empty(page, fields, form):
     """Why the whole page should go to review, or None. Docling's words give an independent count of the amounts
     printed on the page, so an answer with far fewer values than that is treated like an empty one."""
     read = [f for f in fields if f["raw"] and not f["key"].startswith("payer") and f["key"] != "page"]
     if not read:
         return "the model read nothing on this page"
     printed = sum(1 for w in page.words if AMOUNT_WORD.match(w["text"]) and re.search(r"[1-9]", w["text"]))
-    if printed >= 8 and len(read) < printed / 4:
+    share = BROKER_MIN_READ_SHARE if form == "BROKER" else K1_MIN_READ_SHARE
+    if printed >= 8 and len(read) < printed * share:
         n = f"{len(read)} value" + ("" if len(read) == 1 else "s")
         return f"the model read only {n} on a page that shows about {printed} amounts"
     if all(f["reasons"] for f in read):

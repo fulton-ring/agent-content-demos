@@ -10,14 +10,12 @@ Each K-1 page is also printed and "scanned" (rotated, blurred, noisy, JPEG) so
 the same real page can be read through OCR as well as from its text layer.
 """
 
-import hashlib
 import random
-import sys
-import urllib.request
 from pathlib import Path
 
 import pypdfium2 as pdfium
 
+from fetch_forms import download_checked
 from generate import degrade, image_pdf
 
 HERE = Path(__file__).parent
@@ -45,14 +43,7 @@ SCANS = [("01-enviva-2018-k1.pdf", 1, "a"), ("02-enviva-2021-k1.pdf", 1, "a"), (
 def main():
     SAMPLES.mkdir(exist_ok=True)
     for name, (url, sha, _page) in SOURCES.items():
-        path = SAMPLES / name
-        if not path.exists() or hashlib.sha256(path.read_bytes()).hexdigest() != sha:
-            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-            data = urllib.request.urlopen(req, timeout=60).read()
-            got = hashlib.sha256(data).hexdigest()
-            if got != sha:
-                sys.exit(f"{name}: the issuer's file has changed (sha256 {got}); the answer key no longer applies")
-            path.write_bytes(data)
+        download_checked(SAMPLES / name, url, sha)
         print(f"{name}: ok")
     rngs = {"a": random.Random(1065), "b": random.Random(1066)}
     for src, level, which in SCANS:
