@@ -518,6 +518,28 @@ def _(FILES):
     return (layouts,)
 
 
+@app.cell
+def _(FILES):
+    # Every page is rendered once, before any model runs, so rendering doesn't hold up the model calls and their
+    # timings: the 200-dpi image a model sees, and the 150-dpi image the review screen shows.
+    (OUT / "pages").mkdir(exist_ok=True)
+    for _path in FILES:
+        for _i, _page in enumerate(pdfium.PdfDocument(_path)):
+            _png = OUT / "pages" / f"{_path.stem}-p{_i + 1}.png"
+            if not _png.exists():
+                _page.render(scale=200 / 72).to_pil().convert("RGB").save(_png)
+                _page.render(scale=150 / 72).to_pil().convert("L").save(_png.with_suffix(".jpg"), quality=72)
+
+    def page_png(path: Path, index: int) -> bytes:
+        return (OUT / "pages" / f"{path.stem}-p{index + 1}.png").read_bytes()
+
+    def page_image(path: Path, index: int) -> str:
+        """Where the review screen in a run's folder finds the page."""
+        return f"../pages/{path.stem}-p{index + 1}.jpg"
+
+    return page_image, page_png
+
+
 @app.cell(hide_code=True)
 def _():
     mo.md(r"""
@@ -786,19 +808,7 @@ def _():
                     await asyncio.sleep(15 * (attempt + 1))
             raise AssertionError("unreachable")
 
-    def page_png(path: Path, index: int) -> bytes:
-        buf = io.BytesIO()
-        pdfium.PdfDocument(path)[index].render(scale=200 / 72).to_pil().convert("RGB").save(buf, "PNG")
-        return buf.getvalue()
-
-    def save_page_image(path: Path, index: int, out_dir: Path) -> str:
-        """The page as the review screen shows it, at 150 dpi."""
-        name = f"pages/{path.stem}-p{index + 1}.jpg"
-        (out_dir / "pages").mkdir(parents=True, exist_ok=True)
-        pdfium.PdfDocument(path)[index].render(scale=150 / 72).to_pil().convert("L").save(out_dir / name, quality=72)
-        return name
-
-    return Runner, page_png, save_page_image
+    return (Runner,)
 
 
 @app.cell(hide_code=True)
@@ -1033,7 +1043,7 @@ def _(
     layouts,
     page_png,
     parse_value,
-    save_page_image,
+    page_image,
 ):
     FORM_ANSWERS = {
         "Schedule K-1 (Form 1065)": "1065",
@@ -1112,7 +1122,7 @@ def _(
                     }
                 )
 
-    async def read_document(runner: Any, path: Path, out_dir: Path) -> dict[str, Any] | None:
+    async def read_document(runner: Any, path: Path) -> dict[str, Any] | None:
         layout = layouts[path.name]
         pages = layout["pages"]
         form, main = find_form(pages)
@@ -1150,7 +1160,7 @@ def _(
             "year": year,
             "source": "OCR" if main["ocr"] else "text layer",
             "page_review": reason,
-            "pages": {str(i): save_page_image(path, i, out_dir) for i in shown},
+            "pages": {str(i): page_image(path, i) for i in shown},
             "docling_seconds": layout["seconds"],
             "model_seconds": round(spent["seconds"], 1),
             "seconds": round(layout["seconds"] + spent["seconds"], 1),
@@ -1213,7 +1223,7 @@ async def _(FILES, Runner, read_document):
 
     async def read_with(name: str, model_name: str) -> dict[str, Any]:
         runner, out_dir = Runner(model_name, OUT / "answers" / name), OUT / f"{name}-alone"
-        run = await read_all(name, model_name, lambda p: read_document(runner, p, out_dir), out_dir)
+        run = await read_all(name, model_name, lambda p: read_document(runner, p), out_dir)
         description = f"Read by {model_name} through OpenRouter, with no second read."
         return run | {"dir": out_dir, "label": f"{name}, alone", "description": description}
 
@@ -1261,7 +1271,6 @@ def _(PAIR, agrees, model_runs, same_text):
         slower = max(da["model_seconds"], db["model_seconds"])
         return da | {
             "fields": fields,
-            "pages": {k: f"../{na}-alone/{v}" for k, v in da["pages"].items()},
             "page_review": da["page_review"] or db["page_review"],
             "cost_usd": round(da["cost_usd"] + db["cost_usd"], 6),
             "cost_missing_responses": da["cost_missing_responses"] + db["cost_missing_responses"],
@@ -1381,7 +1390,7 @@ async def _(
     ocr_pages,
     page_png,
     read_all,
-    save_page_image,
+    page_image,
     whole_page,
 ):
     def form_of(text: str) -> str | None:
@@ -1393,7 +1402,7 @@ async def _(
         m = re.search(r"Schedule K-1\s*\(Form (1065|1120-?S|1041)\)", text[:600], re.I)
         return m.group(1).upper().replace("-", "") if m else None
 
-    async def read_ocr_text(runner: Any, engine: str, path: Path, ocr: dict[str, Any], out_dir: Path) -> dict[str, Any]:
+    async def read_ocr_text(runner: Any, engine: str, path: Path, ocr: dict[str, Any]) -> dict[str, Any]:
         page = find_form(layouts[path.name]["pages"])[1]
         text = re.sub(r"\A---\n.*?\n---\n", "", ocr["markdown"], flags=re.S).strip()  # without olmOCR's front matter
         note = (
@@ -1425,7 +1434,7 @@ async def _(
             "year": year,
             "source": f"{engine} OCR",
             "page_review": reason,
-            "pages": {str(page["index"]): save_page_image(path, page["index"], out_dir)},
+            "pages": {str(page["index"]): page_image(path, page["index"])},
             "docling_seconds": 0.0,
             "ocr_seconds": gpu,
             "model_seconds": round(spent["seconds"], 1),
@@ -1442,9 +1451,7 @@ async def _(
             ocr_pages, engine, {p: find_form(layouts[p.name]["pages"])[1]["index"] for p in FILES}, page_png
         )
         runner, out_dir = Runner(model_name, OUT / "answers" / name), OUT / name
-        run = await read_all(
-            name, model_name, lambda p: read_ocr_text(runner, engine, p, ocr[p.name], out_dir), out_dir
-        )
+        run = await read_all(name, model_name, lambda p: read_ocr_text(runner, engine, p, ocr[p.name]), out_dir)
         description = f"Read by {ENGINES[engine]} on Modal; {model_name} filled the form from its text."
         return run | {
             "dir": out_dir,
