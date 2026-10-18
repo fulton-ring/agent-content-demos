@@ -605,12 +605,12 @@ def _(OUTPUT_DIR, Patch, plt, sabin_edition, table):
     lower48 = table[~table["STUSPS"].isin(["AK", "HI"])].copy()
     lower48["category"] = lower48["restricted_main"].map({True: "restricted", False: "unrestricted"}) + lower48[
         "holds_230"
-    ].map({True: ", holds 230 kV+", False: ""})
+    ].map({True: ", holds 230 kV+", False: ", no 230 kV+"})
     colors = {
         "restricted, holds 230 kV+": "#b2182b",
-        "restricted": "#f4a582",
-        "unrestricted, holds 230 kV+": "#4393c3",
-        "unrestricted": "#e8e8e8",
+        "restricted, no 230 kV+": "#f4a582",
+        "unrestricted, holds 230 kV+": "#bcd6ea",
+        "unrestricted, no 230 kV+": "#f0f0f0",
     }
     fig, ax = plt.subplots(figsize=(12, 7.5))
     lower48.plot(ax=ax, color=lower48["category"].map(colors), edgecolor="white", linewidth=0.1)
