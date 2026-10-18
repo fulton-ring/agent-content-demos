@@ -8,6 +8,7 @@ Run `uv run python -m fri_rebuild.data` to fetch everything up front.
 import io
 import os
 import re
+import time
 import zipfile
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -403,7 +404,7 @@ def loca2_cells() -> tuple[np.ndarray, sparse.csr_matrix, pd.Index]:
 
 
 def loca2_piece(run: str, span: str, days: tuple[int, int], cells: np.ndarray, name: str) -> Path:
-    """Histogram of one run of days, read 60 days at a time (5 tries per read)."""
+    """Histogram of one run of days, read 60 days at a time (5 tries per read, with backoff)."""
     target = cache("loca2", "partial", name)
     if target.exists():
         return target
@@ -417,6 +418,7 @@ def loca2_piece(run: str, span: str, days: tuple[int, int], cells: np.ndarray, n
             except (OSError, aiohttp.ClientError):
                 if attempt == 4:
                     raise
+                time.sleep(30 * 2**attempt)  # the server drops reads now and then
         for day in block.reshape(block.shape[0], -1)[:, cells] - 273.15:
             bins = np.searchsorted(EDGES, day, side="right") - 1
             bins = np.where(np.isfinite(day) & (np.abs(day) < 1e10), bins, NO_DATA_ROW)
