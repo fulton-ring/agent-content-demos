@@ -13,13 +13,14 @@ def _():
     import random
     import re
     import time
+    from dataclasses import replace
     from pathlib import Path
 
     import httpx
     import marimo as mo
     import polars as pl
     from pydantic import BaseModel, Field
-    from pydantic_ai import Agent
+    from pydantic_ai import Agent, capture_run_messages
     from pydantic_ai.mcp import MCPToolset
     from pydantic_ai.messages import ModelMessagesTypeAdapter
     from pydantic_ai.usage import UsageLimits
@@ -33,6 +34,7 @@ def _():
         Path,
         UsageLimits,
         asyncio,
+        capture_run_messages,
         csv,
         httpx,
         json,
@@ -41,6 +43,7 @@ def _():
         pl,
         random,
         re,
+        replace,
         time,
     )
 
@@ -80,9 +83,12 @@ def _(mo, os):
         "colleges-and-universities": "IPEDSID",
         "prison-boundaries-1": "FACILITYID",
     }
-    MODELS = os.environ.get("AGENT_MODELS", "anthropic/claude-haiku-5.5,openai/gpt-6-luna").split(
-        ","
-    )
+    # (model on OpenRouter, patch the source schemas on the client side). See section 3.
+    AGENTS = [
+        ("anthropic/claude-haiku-5.5", False),
+        ("openai/gpt-6-luna", False),
+        ("openai/gpt-6-luna", True),
+    ]
     REPEATS = int(os.environ.get("AGENT_REPEATS", "2"))
     BUDGET_USD = float(os.environ.get("AGENT_BUDGET_USD", "3.0"))
     HERE = mo.notebook_dir()
@@ -90,11 +96,11 @@ def _(mo, os):
     OUT.mkdir(exist_ok=True)
     return (
         BASE_URL,
+        AGENTS,
         BUDGET_USD,
         DATASET_SAMPLE,
         HERE,
         MCP_URL,
-        MODELS,
         OUT,
         RECORDS_PER_LAYER,
         RECORD_LAYERS,
@@ -133,6 +139,7 @@ def _(
     httpx,
     pl,
     random,
+    re,
 ):
     http = httpx.Client(timeout=120)
     datasets = []
@@ -163,7 +170,10 @@ def _(
             _ids = {
                 str(v)
                 for k, v in _props.items()
-                if "ID" in k.upper() and v not in (None, "", "NOT AVAILABLE", -999, "-999")
+                if re.search(r"(^ID|ID$)", k.upper())
+                and v is not None
+                and str(v) not in ("", "NOT AVAILABLE")
+                and not str(v).startswith("-")
             }
             sampled.append((f"hifld/{_slug}", str(_props[_id_col]), "|".join(sorted(_ids))))
 
@@ -275,16 +285,25 @@ def _(mo):
     render UI and can't help find anything. The agent must return a typed answer: the dataset
     ID, the record ID, whether it found the item, a short answer and a source link. The
     instructions say what the IDs look like but give no hint about which layer holds what.
+    Tool errors go back to the model, which may retry each tool up to three times.
 
-    Each item runs on two OpenRouter models, twice each, so the run-to-run variance is
-    visible. A budget guard stops starting new items once this run's spend passes
-    `AGENT_BUDGET_USD`.
+    **One thing we found while building this.** The server's `query_parquet` and
+    `read_geoparquet_rows` tools declare their `sources` argument as an object with no listed
+    properties, while `inspect_query_source` spells out the same object field by field. The
+    Anthropic model fills in the fields anyway; the OpenAI model sends `{}` every time, the
+    server rejects it, and the agent can never read a row. So we run three agents: the two
+    models as the server ships, and the OpenAI model once more with the typed `source` schema
+    from `inspect_query_source` copied onto the other two tools on our side. The third agent
+    is not the portal as shipped; it shows how much of the gap that one schema causes.
+
+    Each agent runs every item twice, so the run-to-run variance is visible. A budget guard
+    stops starting new items once this run's spend passes `AGENT_BUDGET_USD`.
     """)
     return
 
 
 @app.cell
-def _(Agent, BaseModel, Field, MCPToolset, MCP_URL):
+def _(Agent, BaseModel, Field, MCPToolset, MCP_URL, replace):
     class Answer(BaseModel):
         found: bool = Field(description="True only if you located the item in HIFLD Next data.")
         dataset_id: str | None = Field(
@@ -319,8 +338,27 @@ def _(Agent, BaseModel, Field, MCPToolset, MCP_URL):
         "tool results; never guess an ID. If you can't find it, set found to false."
     )
 
-    def make_agent(model: str) -> Agent[None, Answer]:
-        toolset = MCPToolset(MCP_URL).filtered(lambda _ctx, tool: tool.name in QUERY_TOOLS)
+    def type_sources(_ctx: object, tools: list) -> list:
+        # Copy inspect_query_source's typed `source` object onto the tools that leave it untyped.
+        typed = next(t for t in tools if t.name == "inspect_query_source")
+        source = typed.parameters_json_schema["properties"]["source"]
+        patched = []
+        for tool in tools:
+            schema = tool.parameters_json_schema
+            props = dict(schema["properties"])
+            if tool.name == "read_geoparquet_rows":
+                props["source"] = source
+            elif tool.name == "query_parquet":
+                props["sources"] = {"type": "array", "items": source}
+            patched.append(replace(tool, parameters_json_schema=schema | {"properties": props}))
+        return patched
+
+    def make_agent(model: str, patch: bool) -> Agent[None, Answer]:
+        toolset = MCPToolset(MCP_URL, max_retries=3).filtered(
+            lambda _ctx, tool: tool.name in QUERY_TOOLS
+        )
+        if patch:
+            toolset = toolset.prepared(type_sources)
         return Agent(
             f"openrouter:{model}",
             toolsets=[toolset],
@@ -334,13 +372,14 @@ def _(Agent, BaseModel, Field, MCPToolset, MCP_URL):
 
 @app.cell
 async def _(
+    AGENTS,
     BUDGET_USD,
-    MODELS,
     ModelMessagesTypeAdapter,
     OUT,
     REPEATS,
     UsageLimits,
     asyncio,
+    capture_run_messages,
     key,
     make_agent,
     pl,
@@ -349,9 +388,9 @@ async def _(
     spend = {"usd": 0.0}
     transcripts: dict[tuple[str, int, str], bytes] = {}
 
-    async def ask(agent, model: str, repeat: int, item: dict, gate: asyncio.Semaphore) -> dict:
+    async def ask(agent, label: str, repeat: int, item: dict, gate: asyncio.Semaphore) -> dict:
         row = {
-            "model": model,
+            "model": label,
             "repeat": repeat,
             "item_id": item["item_id"],
             "error": None,
@@ -360,20 +399,24 @@ async def _(
             if spend["usd"] >= BUDGET_USD:
                 return row | {"error": "skipped: budget reached"}
             start = time.monotonic()
-            try:
-                result = await asyncio.wait_for(
-                    agent.run(item["question"], usage_limits=UsageLimits(request_limit=25)),
-                    timeout=300,
-                )
-            except Exception as exc:  # a failed run is a measured outcome, not a crash
-                return row | {
-                    "error": f"{type(exc).__name__}: {exc}"[:300],
-                    "seconds": time.monotonic() - start,
-                }
+            with capture_run_messages() as messages:
+                try:
+                    result = await asyncio.wait_for(
+                        agent.run(item["question"], usage_limits=UsageLimits(request_limit=25)),
+                        timeout=300,
+                    )
+                except Exception as exc:  # a failed run is a measured outcome, not a crash
+                    transcripts[(label, repeat, item["item_id"])] = (
+                        ModelMessagesTypeAdapter.dump_json(messages, indent=1)
+                    )
+                    return row | {
+                        "error": f"{type(exc).__name__}: {exc}"[:300],
+                        "seconds": time.monotonic() - start,
+                    }
             usage = result.usage
             cost = float(usage.cost or 0)
             spend["usd"] += cost
-            transcripts[(model, repeat, item["item_id"])] = ModelMessagesTypeAdapter.dump_json(
+            transcripts[(label, repeat, item["item_id"])] = ModelMessagesTypeAdapter.dump_json(
                 result.all_messages(), indent=1
             )
             return (
@@ -390,14 +433,15 @@ async def _(
             )
 
     _runs = []
-    for _model in MODELS:
-        _agent = make_agent(_model)
+    for _model, _patch in AGENTS:
+        _agent = make_agent(_model, _patch)
+        _label = _model + (" + typed sources" if _patch else "")
         async with _agent:
             for _repeat in range(1, REPEATS + 1):
-                _gate = asyncio.Semaphore(8)
+                _gate = asyncio.Semaphore(10)
                 _runs += await asyncio.gather(
                     *(
-                        ask(_agent, _model, _repeat, _item, _gate)
+                        ask(_agent, _label, _repeat, _item, _gate)
                         for _item in key.iter_rows(named=True)
                     )
                 )
@@ -644,9 +688,7 @@ def _(
             + _first.filter(pl.col("traces") & (pl.col("kind") == "record"))
             .head(1)["item_id"]
             .to_list()
-            + _first.filter(pl.col("miss").is_not_null() & (pl.col("miss") != "error"))
-            .head(2)["item_id"]
-            .to_list()
+            + _first.filter(pl.col("miss").is_not_null()).head(2)["item_id"].to_list()
         )
         for _item in _picks:
             _blob = transcripts.get((_model, 1, _item))
