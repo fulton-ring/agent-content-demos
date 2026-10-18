@@ -20,7 +20,7 @@ hazard, scored against FEMA's published county values on training states, and wa
 | Coastal flooding | No: levels roughly right, ranking not | 75.0% | 0.279 | 0.662 |
 | Hurricane | Not attempted: FEMA's input is not public | | | |
 
-- **The agents** ran 126 experiments for $7.61 of model calls. They found what mattered for
+- **The agents** ran 126 experiments for $7.55 of model calls (plus $0.06 lost to an early harness bug). They found what mattered for
   drought (the Thornthwaite heat index per year) and wildfire (the shape of the regression),
   and could not crack coastal flooding or the NEX heat index. A person stepped in 13 times;
   two of those leaked a little held-out information. The rebuild notebook lists every one.
@@ -81,7 +81,9 @@ The first run takes most of a day, almost all of it climate downloads:
 - **LOCA2**: range reads from UCSD's server, at about 1.5-2.5 hours per 30-year period on 4
   workers (five periods). It runs last and prints nothing until a period is done. Each worker
   uses about 1 GB; set `FRI_LOCA2_WORKERS` for more or fewer. If it is interrupted, rerun
-  `./run.sh`: finished three-year pieces are kept.
+  `./run.sh`: finished three-year pieces are kept. Every notebook needs the LOCA2 step, so the
+  first run cannot skip it; to check the other numbers sooner, run `uv run python notebooks/<name>.py`
+  for tracts, coastal and charleston once the NEX and FWI downloads finish.
 
 With the inputs cached, `run.sh` took 17 minutes from a fresh clone, and reproduced every file
 in `results/` exactly.
@@ -113,6 +115,8 @@ All public, downloaded at run time:
 - **Buildings**: USACE National Structure Inventory (Charleston pilot; only tract totals are
   written).
 - **Boundaries**: Census 2020 cartographic boundaries.
+- LOCA2 county weights use 0.25-degree boxes around each 1/16-degree cell, not exact cell
+  footprints (see the rebuild notebook).
 
 ## What it doesn't show
 

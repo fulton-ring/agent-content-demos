@@ -131,7 +131,10 @@ def loca2_histogram(scenario: str, period: str) -> tuple[np.ndarray, np.ndarray]
 
 
 def loca2_county_weights() -> AreaWeights:
-    """County x cell intersection areas (km^2) for the cells in `loca2_histogram`."""
+    """County x cell overlap areas (km^2) for the cells in `loca2_histogram`.
+
+    Each cell is drawn as a 0.25-degree box around its centre, not its exact 1/16-degree footprint.
+    """
     _, weights, fips = data.loca2_cells()
     return weights, fips
 
