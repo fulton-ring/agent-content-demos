@@ -10,7 +10,9 @@ import os
 import re
 import time
 import zipfile
+from collections.abc import Generator
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
+from contextlib import contextmanager
 from pathlib import Path
 
 import aiohttp
@@ -385,13 +387,17 @@ NO_DATA_ROW = len(EDGES) - 1
 PIECE_DAYS = 3 * 365  # each finished piece is saved, so an interruption loses only pieces in flight
 
 
-def loca2_open(run: str, span: str) -> h5py.File:
+@contextmanager
+def loca2_open(run: str, span: str) -> Generator[h5py.File]:
+    """One LOCA2 file over HTTP. Closing the remote file too frees its read-ahead buffer;
+    h5py alone leaves it open, and a worker then grows past 4 GB over a three-year piece."""
     url = LOCA2.format(run=run, span=span)
     # trust_env makes fsspec's aiohttp session use HTTPS_PROXY when one is set.
     remote = fsspec.open(
         url, block_size=64 << 20, cache_type="readahead", client_kwargs={"trust_env": True}
     )
-    return h5py.File(remote.open())
+    with remote as handle, h5py.File(handle) as nc:
+        yield nc
 
 
 def loca2_cells() -> tuple[np.ndarray, sparse.csr_matrix, pd.Index]:
