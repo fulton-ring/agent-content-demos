@@ -28,7 +28,7 @@ climate projection comes near 2.**
     +15%.
   - STORM's four high-resolution GCMs, SSP5-8.5 2050: median 1.25.
   - ARA's own white paper, through FEMA's Eq. 11: 1.06-1.23 by region.
-- **Read as 1 + ratio, the level matches** (91-100% same rating bin on covered counties). The
+- **Read as 1 + ratio, the level matches** (92-100% same rating bin on covered counties). The
   pattern between counties agrees only weakly, and how well depends on which states are scored.
 
 ## Our own hurricane layer
@@ -46,7 +46,7 @@ spans both catalogues and every published Knutson percentile.
 | Late century, higher (RCP 8.5, 2100) | 2.09 | 1.15 | 98.6% | $45.5B → $22.4B |
 
 - **16-18% of counties drop one rating bin**, none drop two, and the county ranking of
-  projected loss matches FEMA's almost exactly (Spearman 0.996).
+  projected loss matches FEMA's almost exactly (Spearman 0.990-0.996).
 - **The places people check stay at the top:** Miami-Dade ranks 2nd nationally, Palm Beach
   4th, Broward 6th, Charleston 7th and Horry 11th, all still Very High.
 - **STORM puts about half the observed number of hurricanes on the US coast**, measured against

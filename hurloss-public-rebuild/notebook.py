@@ -887,7 +887,7 @@ def _(mo):
     - **Coverage costs as much as the formula.** In 2,500 and 5,000 years, our catalogues put
       Cat 1 wind on far fewer counties than ARA's 500,000 simulated years reach.
     - **Read as $1 + r$, the level matches and the pattern doesn't.** On covered counties the
-      Knutson and ARA routes land within a few percent of FEMA's values and 91-100% share a
+      Knutson and ARA routes land within a few percent of FEMA's values and 92-100% share a
       rating bin, but the constant 2 is still as close in three scenarios. $1 + r$ fits the level
       better than $2r$. That fits FEMA's "projected" intensity having included the historical
       one, but it isn't proof.
