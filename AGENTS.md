@@ -41,6 +41,18 @@ Rules for every coding agent that works in this repo. Read this file first, then
   - Sample outputs and screenshots.
 - Before saying `Ready for review`, run it from a clean checkout following only the README. Confirm the numbers you report come from that run, not from a hard-coded table.
 
+## Spikes are read by people
+
+A founder has to read a spike and explain it in an article. These rules win over Clean code, Architecture and Power of Ten below, which are for tooling such as `tools/board-dispatcher`.
+
+- The spike is one [marimo](https://marimo.io) notebook, `notebook.py`, read top to bottom: the question, the data, each step with a sentence on why, the result, and what didn't work.
+- Keep the logic in the notebook's cells, where the reader sees it next to its output. Move code to a module only when two notebooks share it or a test needs it.
+- Write a function only when the notebook calls it more than once. A step that runs once is a cell, not a function.
+- `run.sh` runs the notebook as a script (`uv run notebook.py`), so the published numbers come from the code the reader sees.
+- Budget: about 1,000 lines of Python and a README under 150 lines. The README says what it shows, how to run it and the headline numbers, and points to the notebook for the rest.
+- New scope found during the work or in review goes to a sub-issue, not into this PR.
+- Before `Ready for review`, ask: could a founder follow the notebook in 15 minutes? If not, cut or split it.
+
 ## Code style and tooling
 
 ### Use what exists
@@ -52,7 +64,7 @@ Rules for every coding agent that works in this repo. Read this file first, then
 ### Python
 
 - Use `uv` for environments and dependencies, with a `pyproject.toml` per project.
-- Use [marimo](https://marimo.io) notebooks for exploration, analysis and walkthroughs, not Jupyter. Keep logic in modules the notebook imports.
+- Use [marimo](https://marimo.io) notebooks for exploration, analysis and walkthroughs, not Jupyter. For spikes, see "Spikes are read by people".
 - Lint and format with `ruff` (`ruff check` and `ruff format`).
 - Type-check with `ty`.
 - Put type hints on every function.
@@ -74,6 +86,8 @@ Rules for every coding agent that works in this repo. Read this file first, then
 - Use typed inputs and outputs for every model call, so results are validated against a schema.
 
 ### Clean code
+
+For tooling. Spikes follow "Spikes are read by people" first.
 
 - Small functions that do one thing.
 - Names that say what things are.
