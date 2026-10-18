@@ -12,14 +12,13 @@ def _():
     import types
 
     import marimo as mo
-    import numpy as np
     import pandas as pd
 
     from fri_rebuild import data, scoring
 
     out = data.PROJECT_DIR / "results" / "rebuild"
     out.mkdir(parents=True, exist_ok=True)
-    return data, json, mo, np, out, pd, scoring, sys, time, types
+    return data, json, mo, out, pd, scoring, sys, time, types
 
 
 @app.cell
@@ -324,7 +323,6 @@ def _(data, hazards, json, out, pd):
         .fillna({"crashed": 0})
     )
     loop.to_csv(out / "swarm_summary.csv")
-    _guard_bug = record.loc[record["harness"] == "swarm-guard-bug", "cost_usd"].sum()
     loop.round(3)
     return loop, record
 

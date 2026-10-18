@@ -431,7 +431,8 @@ def loca2_histogram_path(scenario: str, period: str) -> Path:
 
 
 def loca2_period(scenario: str, period: str, cells: np.ndarray) -> None:
-    """Build one period's histograms from pieces of about three years, on 4 processes."""
+    """Build one period's histograms from pieces of about three years, read in parallel by
+    $FRI_LOCA2_WORKERS processes (default 4; each needs about 1.3 GB of memory)."""
     if loca2_histogram_path(scenario, period).exists():
         return
     first, last = PERIODS[period]
@@ -450,7 +451,7 @@ def loca2_period(scenario: str, period: str, cells: np.ndarray) -> None:
                 (span, (int(a), int(b))) for a, b in zip(bounds[:-1], bounds[1:], strict=True)
             ]
     names = [f"{scenario}_{period}_{i}.npy" for i in range(len(pieces))]
-    with ProcessPoolExecutor(4) as pool:
+    with ProcessPoolExecutor(int(os.environ.get("FRI_LOCA2_WORKERS", "4"))) as pool:
         futures = [
             pool.submit(loca2_piece, scenario, span, days, cells, name)
             for (span, days), name in zip(pieces, names, strict=True)
