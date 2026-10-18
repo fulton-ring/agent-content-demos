@@ -1,20 +1,9 @@
-"""Hosted OCR models on Modal: granite-docling through Docling's VLM pipeline, and olmOCR 2 on vLLM.
+"""The OCR models on Modal, which notebook.py runs inside an ephemeral app run.
 
-Two steps, so GPU time is spent only on reading pages:
-
-    modal run ocr_modal.py::download    # CPU only: fetch both models' weights into a Modal Volume, once
-
-Then extract_ocr.py uses the GPU classes below inside an ephemeral app run. Modal starts a
-container on demand, loads the weights from the Volume (no download), and scales back to zero
-when idle.
-
-- GraniteServer serves ibm-granite/granite-docling-258M with vLLM's OpenAI-compatible API,
-  behind an API key made for each run. Docling runs locally with its VLM pipeline pointed at
-  it (Docling's own GRANITEDOCLING_VLLM_API settings), so the page comes back as a
-  DoclingDocument: text items and tables, each with its box. Docling only renders pages and
-  parses the model's DocTags locally; the model runs on Modal's GPU.
-- OlmOCR runs allenai/olmOCR-2-7B-1025-FP8 with olmOCR's own prompt and image size, and
-  returns the page as Markdown (with HTML tables). It gives no positions.
+`download` fetches both models' weights into a Modal Volume on a small CPU container, so the L4 GPU containers
+only read pages. GraniteServer serves granite-docling with vLLM's OpenAI-compatible API behind a key made for each
+run, for Docling's VLM pipeline to call. OlmOCR runs olmOCR 2 with its own prompt and image size, and returns
+each page as Markdown. This is a module because Modal imports it inside the containers.
 """
 
 import io
@@ -43,13 +32,17 @@ OLMOCR_PROMPT = (
 )
 OLMOCR_IMAGE_DIM = 1288  # longest side, in pixels
 
-download_image = (modal.Image.debian_slim(python_version="3.11")
-                  .pip_install("huggingface_hub==0.35.3", "hf_transfer==0.1.9")
-                  .env({"HF_HUB_CACHE": HF_CACHE, "HF_HUB_ENABLE_HF_TRANSFER": "1"}))
+download_image = (
+    modal.Image.debian_slim(python_version="3.11")
+    .pip_install("huggingface_hub==0.35.3", "hf_transfer==0.1.9")
+    .env({"HF_HUB_CACHE": HF_CACHE, "HF_HUB_ENABLE_HF_TRANSFER": "1"})
+)
 
-vllm_image = (modal.Image.debian_slim(python_version="3.12")
-              .pip_install("vllm==0.11.0", "transformers==4.57.1", "pillow==12.0.0")  # vLLM 0.11 predates Transformers 5
-              .env({"HF_HUB_CACHE": HF_CACHE, "HF_HUB_OFFLINE": "1"}))
+vllm_image = (
+    modal.Image.debian_slim(python_version="3.12")
+    .pip_install("vllm==0.11.0", "transformers==4.57.1", "pillow==12.0.0")  # vLLM 0.11 predates Transformers 5
+    .env({"HF_HUB_CACHE": HF_CACHE, "HF_HUB_OFFLINE": "1"})
+)
 
 
 @app.function(image=download_image, volumes={"/weights": weights}, cpu=2, memory=4096, timeout=3600)
@@ -64,28 +57,47 @@ def download():
     weights.commit()
 
 
-# Ephemeral runs of this app share the server's web URL, so run one at a time (run.sh does).
+# Ephemeral runs of this app share the server's web URL, so run one at a time (notebook.py does).
 # The key the granite-docling server checks. Made fresh when this module is imported locally and handed to the
 # container through a Secret, so the server is only usable from this run.
 API_KEY = os.environ.get("VLLM_API_KEY") or secrets.token_urlsafe(32)
 GRANITE_PORT = 8000
 
 
-@app.cls(image=vllm_image, gpu="L4", volumes={"/weights": weights}, timeout=3600, scaledown_window=120,
-         secrets=[modal.Secret.from_dict({"VLLM_API_KEY": API_KEY})])
+@app.cls(
+    image=vllm_image,
+    gpu="L4",
+    volumes={"/weights": weights},
+    timeout=3600,
+    scaledown_window=120,
+    secrets=[modal.Secret.from_dict({"VLLM_API_KEY": API_KEY})],
+)
 @modal.concurrent(max_inputs=32)
 class GraniteServer:
     @modal.web_server(port=GRANITE_PORT, startup_timeout=900)
     def serve(self):
-        subprocess.Popen(["vllm", "serve", GRANITE, "--port", str(GRANITE_PORT), "--api-key", os.environ["VLLM_API_KEY"],
-                          "--max-model-len", "8192", "--limit-mm-per-prompt", '{"image": 1}'])
+        subprocess.Popen(
+            [
+                "vllm",
+                "serve",
+                GRANITE,
+                "--port",
+                str(GRANITE_PORT),
+                "--api-key",
+                os.environ["VLLM_API_KEY"],
+                "--max-model-len",
+                "8192",
+                "--limit-mm-per-prompt",
+                '{"image": 1}',
+            ]
+        )
 
 
 @app.cls(image=vllm_image, gpu="L4", volumes={"/weights": weights}, timeout=1800, scaledown_window=120)
 class OlmOCR:
     @modal.enter()
     def load(self):
-        from vllm import LLM
+        from vllm import LLM  # ty: ignore[unresolved-import]  (installed only in the GPU image)
 
         self.llm = LLM(model=OLMOCR, max_model_len=16384, gpu_memory_utilization=0.9, limit_mm_per_prompt={"image": 1})
 
@@ -95,7 +107,7 @@ class OlmOCR:
         import base64
 
         from PIL import Image
-        from vllm import SamplingParams
+        from vllm import SamplingParams  # ty: ignore[unresolved-import]
 
         messages = []
         for png in pngs:
@@ -105,8 +117,17 @@ class OlmOCR:
             buf = io.BytesIO()
             img.save(buf, "PNG")
             url = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
-            messages.append([{"role": "user", "content": [{"type": "text", "text": OLMOCR_PROMPT},
-                                                          {"type": "image_url", "image_url": {"url": url}}]}])
+            messages.append(
+                [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": OLMOCR_PROMPT},
+                            {"type": "image_url", "image_url": {"url": url}},
+                        ],
+                    }
+                ]
+            )
         t0 = time.time()
         outs = self.llm.chat(messages, SamplingParams(temperature=0.0, max_tokens=8000))
         seconds = round((time.time() - t0) / max(1, len(pngs)), 1)

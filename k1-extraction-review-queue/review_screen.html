@@ -1,20 +1,4 @@
-"""Build output/index.html: the review screen shown in the demo.
-
-Left, the documents. Middle, every extracted value with its status; click one
-to see it highlighted on the page. The review queue tab lists everything that
-needs a person, with the box cropped from the page, the reason, and a field to
-correct it. Corrections stay in the browser and export to CSV.
-"""
-
-import json
-import sys
-from pathlib import Path
-
-HERE = Path(__file__).parent
-# The Tesseract pipeline writes to output/; the model pipeline to output/<model>/, given as the argument.
-OUT = Path(sys.argv[1]) if len(sys.argv) > 1 else HERE / "output"
-
-PAGE = r"""<!doctype html>
+<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -115,10 +99,7 @@ function docTitle(d) {
   return "Made-up " + kind;
 }
 const esc = t => String(t).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
-if (DATA.models) $("pipeline").textContent = `Read by ${DATA.models.join(" and ")} through OpenRouter. A value is accepted only when both models read the same thing.`;
-else if (DATA.pipeline && DATA.pipeline.endsWith("alone")) $("pipeline").textContent = `Read by ${DATA.model} through OpenRouter, with no second read.`;
-else if (DATA.model) $("pipeline").textContent = `Read by ${DATA.model} through OpenRouter, each value checked against a second read of its box (Docling, or Tesseract on scans).`;
-else $("pipeline").textContent = "Read by Tesseract OCR and rules, with no language model.";
+$("pipeline").textContent = DATA.description;
 const m = METRICS.all, h = METRICS.held_out_set;
 const pct = (a, b) => b ? (100 * a / b).toFixed(1) + "%" : "n/a";
 const all = DATA.documents.flatMap(d => d.fields);
@@ -245,18 +226,3 @@ render();
 </script>
 </body>
 </html>
-"""
-
-
-def main():
-    data = json.loads((OUT / "extracted.json").read_text())
-    # Each real K-1 first, then its scanned copies, then the made-up documents.
-    data["documents"].sort(key=lambda d: (d["file"][:2], "-scan" in d["file"], d["file"]))
-    metrics = json.loads((OUT / "metrics.json").read_text())
-    html = PAGE.replace("__DATA__", json.dumps(data)).replace("__METRICS__", json.dumps(metrics))
-    (OUT / "index.html").write_text(html)
-    print(f"wrote {OUT / 'index.html'}")
-
-
-if __name__ == "__main__":
-    main()
