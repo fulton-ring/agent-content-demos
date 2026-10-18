@@ -226,7 +226,9 @@ def _(damage, data, fips, gauge, out, pd, recipe, tracts):
         _scenario, _published = _column[5:-3], float(_key[_column])
         _row = {
             "FEMA county HM": _published,
-            "recipe factors (minor, moderate, major)": tuple(_factors[:, _i].round(2)),
+            "recipe factors (minor, moderate, major)": ", ".join(
+                f"{f:.2f}" for f in _factors[:, _i]
+            ),
             "FEMA county PAL ($M/yr)": float(_key["CFLD_EALT"]) * max(1.0, _published) / 1e6,
         }
         for _variant in ("curve", "step", "ground"):
@@ -236,11 +238,9 @@ def _(damage, data, fips, gauge, out, pd, recipe, tracts):
             _ratio = _hm[_covered] / _published
             _row |= {
                 f"{_variant}: county HM": _county,
-                f"{_variant}: tract HM min-max": (round(_hm.min(), 2), round(_hm.max(), 2)),
-                f"{_variant}: tract vs own county": (
-                    round(_hm.min() / _county, 2),
-                    round(_hm.max() / _county, 2),
-                ),
+                f"{_variant}: tract HM min-max": f"{_hm.min():.2f}-{_hm.max():.2f}",
+                f"{_variant}: tract vs own county": f"{_hm.min() / _county:.2f}"
+                f"-{_hm.max() / _county:.2f}",
                 f"{_variant}: tracts > 2x from FEMA": int(((_ratio > 2) | (_ratio < 0.5)).sum()),
                 f"{_variant}: sum of tract PAL ($M/yr)": _pal.sum() / 1e6,
                 f"{_variant}: PAL rank vs one county HM (Spearman)": _pal[_covered].corr(

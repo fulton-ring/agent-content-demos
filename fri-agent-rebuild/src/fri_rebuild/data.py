@@ -242,7 +242,7 @@ def nex_all(workers: int = 8) -> None:
                 if not done:
                     jobs[(variable, scenario, year)] = keep
     print(f"NEX-GDDP-CMIP6: {len(jobs)} files to fetch", flush=True)
-    keys = {(v, s): nex_newest_files(v, s) for v, s, _ in jobs}
+    keys = {(v, s): nex_newest_files(v, s) for v, s in {(v, s) for v, s, _ in jobs}}
     with ProcessPoolExecutor(workers) as pool:
         futures = [
             pool.submit(nex_year, v, s, y, keys[(v, s)][y], k) for (v, s, y), k in jobs.items()
