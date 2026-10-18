@@ -248,8 +248,8 @@ def _(BASE_URL, OUT, http, key, pl):
         return frame.group_by("kind").agg(
             n=pl.len(),
             **{
-                f"{col}@1": (pl.col(col) == 1).mean(),
-                f"{col}@5": (pl.col(col) <= 5).mean(),
+                f"{col}@1": (pl.col(col) == 1).fill_null(False).mean(),
+                f"{col}@5": (pl.col(col) <= 5).fill_null(False).mean(),
                 f"{col}_found": pl.col(col).is_not_null().mean(),
             },
         )
@@ -266,12 +266,20 @@ def _(BASE_URL, OUT, http, key, pl):
 
 @app.cell
 def _(catalog, pl):
-    # Misses by catalog search with the typed terms, by phrasing.
-    catalog.group_by("phrasing").agg(
-        n=pl.len(),
-        at_1=(pl.col("terms_rank") == 1).mean(),
-        found=pl.col("terms_rank").is_not_null().mean(),
-    ).sort("phrasing")
+    # Catalog search with the typed terms, by phrasing, and every item it didn't rank first.
+    _by_phrasing = (
+        catalog.group_by("phrasing")
+        .agg(
+            n=pl.len(),
+            at_1=(pl.col("terms_rank") == 1).fill_null(False).mean(),
+            found=pl.col("terms_rank").is_not_null().mean(),
+        )
+        .sort("phrasing")
+    )
+    _not_first = catalog.filter(pl.col("terms_rank").fill_null(0) != 1).select(
+        "item_id", "phrasing", "search_terms", "dataset_id", "terms_rank", "terms_top"
+    )
+    _by_phrasing, _not_first
     return
 
 
@@ -704,6 +712,15 @@ def _(
         "total_spend_usd": spend["usd"],
     }
     (OUT / "summary.json").write_text(json.dumps(_summary, indent=1, default=str))
+    with pl.Config(tbl_rows=40, tbl_cols=12, fmt_str_lengths=40):
+        for _name, _table in [
+            ("Catalog search recall", catalog_recall),
+            ("Agent recall", agent_recall),
+            ("Variance", variance),
+            ("Misses", miss_tally),
+            ("Cost", cost_table),
+        ]:
+            print(f"\n== {_name}\n{_table}")
     return
 
 
