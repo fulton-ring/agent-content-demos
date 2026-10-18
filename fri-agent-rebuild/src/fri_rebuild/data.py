@@ -438,7 +438,7 @@ def loca2_histogram_path(scenario: str, period: str) -> Path:
 
 def loca2_period(scenario: str, period: str, cells: np.ndarray) -> None:
     """Build one period's histograms from pieces of about three years, read in parallel by
-    $FRI_LOCA2_WORKERS processes (default 4; each needs about 1.3 GB of memory)."""
+    $FRI_LOCA2_WORKERS processes (default 4; each can use up to 4 GB of memory)."""
     if loca2_histogram_path(scenario, period).exists():
         return
     first, last = PERIODS[period]
