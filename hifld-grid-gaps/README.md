@@ -50,7 +50,7 @@ the newest Transmission Lines record is older still. Nothing has refreshed them 
 | Missing from the map | 138 | 8,181 | 19% |
 
 Most of the gap is age: 454 generators (30,854 MW) started after August 2023, the layer's source date; 190 of those
-are in Generating Units only as planned units. Of the battery generators operating by August 2023, 54 (548 MW) are
+are in Generating Units, but as planned units (one as cancelled), not operating ones. Of the battery generators operating by August 2023, 54 (548 MW) are
 not in Generating Units. Texas has the most unlisted battery capacity (7,056 MW), then Arizona and California
 (`output/storage_by_state.csv`). EIA's threshold is 1 MW of combined nameplate per plant, so home and most commercial
 batteries are in neither source by design; we don't count them.

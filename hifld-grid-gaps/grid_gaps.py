@@ -574,8 +574,8 @@ def _(connectivity, ends, hand_split):
     ({_km["share dead ends"]:.1%} of all ends) are also more than 1 km from a HIFLD power plant and touch no other
     line. In the hand-checked sample, **{_taps} of 50** ends were taps or joins onto another line. HIFLD Transmission
     Lines is not a network you can trace from substation to substation: it is drawn as segments that break wherever a
-    line branches, and for {_placeholder:.0%} of the far ends the substation named in `SUB_1`/`SUB_2` is a placeholder (`TAP...`,
-    `UNKNOWN...` or `NOT AVAILABLE`).
+    line branches, and for {_placeholder:.0%} of the far ends the substation named in `SUB_1`/`SUB_2` is a
+    placeholder (`TAP...`, `UNKNOWN...` or `NOT AVAILABLE`).
     """)
     return
 
