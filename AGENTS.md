@@ -45,13 +45,14 @@ Rules for every coding agent that works in this repo. Read this file first, then
 
 A founder has to read a spike and explain it in an article. These rules win over Clean code, Architecture and Power of Ten below, which are for tooling such as `tools/board-dispatcher`.
 
-- The spike is one [marimo](https://marimo.io) notebook, `notebook.py`, read top to bottom: the question, the data, each step with a sentence on why, the result, and what didn't work.
-- Keep the logic in the notebook's cells, where the reader sees it next to its output. Move code to a module only when two notebooks share it or a test needs it.
-- Write a function only when the notebook calls it more than once. A step that runs once is a cell, not a function.
-- `run.sh` runs the notebook as a script (`uv run notebook.py`), so the published numbers come from the code the reader sees.
-- Budget: about 1,000 lines of Python and a README under 150 lines. The README says what it shows, how to run it and the headline numbers, and points to the notebook for the rest.
+- Pick the smallest deliverable that shows the answer. Usually that's a [marimo](https://marimo.io) notebook. A spike with separate parts can have one notebook per part, each readable on its own. A spike whose point is something people use can be an app, with a notebook or the README explaining its numbers.
+- A notebook reads top to bottom: the question, the data, each step with a sentence on why, the result, and what didn't work.
+- Keep the logic where the reader sees it: in the notebook's cells, next to its output. Move code to a module only when two notebooks or an app share it, or a test needs it.
+- Write a function only when it's called more than once. A notebook step that runs once is a cell, not a function.
+- `run.sh` runs the notebooks as scripts (`uv run <notebook>.py`) or starts the app, so the published numbers come from the code the reader sees.
+- Budget: about 1,000 lines of Python and a README under 150 lines. The README says what it shows, how to run it and the headline numbers, and points to the notebooks or app for the rest.
 - New scope found during the work or in review goes to a sub-issue, not into this PR.
-- Before `Ready for review`, ask: could a founder follow the notebook in 15 minutes? If not, cut or split it.
+- Before `Ready for review`, ask: could a founder follow it in 15 minutes? If not, cut or split it.
 
 ## Code style and tooling
 
