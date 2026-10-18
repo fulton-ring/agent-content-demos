@@ -62,13 +62,15 @@ spans both catalogues and every published Knutson percentile.
 ./run.sh
 ```
 
-It needs [uv](https://docs.astral.sh/uv/) and about 2 GB of disk. `run.sh` runs the notebook as
+It needs [uv](https://docs.astral.sh/uv/) and about 3 GB of disk (1.4 GB of downloads and wind fields,
+1.6 GB for the Python environment). `run.sh` runs the notebook as
 a script (`uv run notebook.py`), so every table and figure in `results/` comes from the code in
 the notebook. To read it with its outputs, run `uv run marimo edit notebook.py`.
 
 - Every input is downloaded at run time into `~/.cache/hurloss-public-rebuild`, and wind fields
-  are cached there too. Nothing downloaded goes into the repo.
-- From an empty cache it takes about 1.5 hours on 4 cores, most of it CLIMADA wind fields.
+  are cached there too. Nothing downloaded goes into the repo. CLIMADA and Cartopy also put
+  about 20 MB of their own data in `~/climada` and `~/.local/share/cartopy`.
+- From an empty cache it takes 1.5 to 2.5 hours on 4 cores, most of it CLIMADA wind fields.
   With the cache warm it takes a few minutes.
 - Settings, all optional: `HURLOSS_CACHE` (cache folder), `HURLOSS_RESULTS` (output folder,
   default `results/`), `HURLOSS_WORKERS` (processes, default all cores).
