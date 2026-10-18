@@ -1775,7 +1775,8 @@ def _():
     - **GLM 5.3 Flash** can fail every attempt on the made-up 1099s, with Pydantic AI's `Exceeded maximum output
       retries`: its answer never fits the schema. When it does answer, it often reads only part of the page. The
       three-quarter page check above was added after it read 4 to 8 values on five summary pages and got past the
-      quarter line.
+      quarter line. And when it's asked which form a scan is, it often names the wrong one, mostly "Form 1065" for a
+      made-up 1120-S or 1041. It then reads the page with that form's boxes, and nothing in the review rules notices.
     - **Gemma 4 31B** shifts amounts into neighbouring boxes, misreads names and skips coded rows. It sometimes runs
       out of its 8,000 output tokens. Across runs, between a third and 43% of what it accepted was wrong.
 
