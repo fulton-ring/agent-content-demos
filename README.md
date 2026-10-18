@@ -1,6 +1,6 @@
 # Agent content demos
 
-Working demos and spikes behind Fulton Ring articles. Each project lives in its own folder, named after the proposal it answers, for example `k1-extraction-review-queue/`.
+Working demos and spikes behind [Fulton Ring articles](https://fultonring.com/blog/). Each project lives in its own folder, named after the proposal it answers, for example `k1-extraction-review-queue/`.
 
 Every project folder has:
 
