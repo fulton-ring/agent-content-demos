@@ -28,7 +28,7 @@ with app.setup:
     from docling.document_converter import DocumentConverter, PdfFormatOption
     from docling.pipeline.vlm_pipeline import VlmPipeline
     from PIL import Image, ImageFilter
-    from playwright.sync_api import sync_playwright
+    from playwright.async_api import async_playwright
     from pydantic import AnyUrl, BaseModel, Field, TypeAdapter, create_model
     from pydantic_ai import Agent, BinaryContent, capture_run_messages
     from pydantic_ai.messages import ModelResponse
@@ -1701,41 +1701,42 @@ def _(runs):
 
 
 @app.cell
-def _(review_screen):
+async def _(review_screen):
+    # The async API, because marimo runs the notebook inside an event loop.
     if os.environ.get("K1_SCREENSHOTS") == "1":
         _shots, _errors = HERE / "screenshots", []
         _shots.mkdir(exist_ok=True)
-        with sync_playwright() as _p:
-            _browser = _p.chromium.launch(executable_path=os.environ.get("CHROMIUM_PATH"))
-            _page = _browser.new_page(viewport={"width": 1440, "height": 900})
+        async with async_playwright() as _p:
+            _browser = await _p.chromium.launch(executable_path=os.environ.get("CHROMIUM_PATH"))
+            _page = await _browser.new_page(viewport={"width": 1440, "height": 900})
             _page.on("pageerror", lambda e: _errors.append(str(e)))
-            _page.goto(review_screen.resolve().as_uri())
-            _page.evaluate("localStorage.clear()")
-            _page.reload()
-            _page.wait_for_timeout(1500)
+            await _page.goto(review_screen.resolve().as_uri())
+            await _page.evaluate("localStorage.clear()")
+            await _page.reload()
+            await _page.wait_for_timeout(1500)
 
-            def _step(selector: str, wait: int = 900, shot: str = "") -> None:
-                _page.click(selector)
-                _page.wait_for_timeout(wait)
+            async def _step(selector: str, wait: int = 900, shot: str = "") -> None:
+                await _page.click(selector)
+                await _page.wait_for_timeout(wait)
                 if shot:
-                    _page.screenshot(path=_shots / shot)
+                    await _page.screenshot(path=_shots / shot)
 
             _doc, _box = ".docs a:has(small:text-matches('^{}'))", "tr.v:has(td:text-is('{}'))"
-            _step(_doc.format("02-enviva-2021-k1.pdf"), 700)
-            _step(_box.format("1"), shot="1-value-linked-to-box.png")  # every value points at its box
-            _step(_box.format("20 *"), shot="2-statement-sent-to-review.png")  # an amount on a statement goes to review
-            _step("#otherpage", 1200, "3-attached-statement.png")
-            _step(_doc.format("03-blackstone-2019-k1-scan1a.pdf"), 700)
-            _step(_box.format("16 B"), shot="4-scanned-copy.png")
-            _step("#t-queue", 1200)
-            _page.locator(".item", has=_page.locator(".stmt")).first.scroll_into_view_if_needed()
-            _page.wait_for_timeout(800)
-            _page.screenshot(path=_shots / "5-review-queue.png")
-            _page.check("#showkey")
-            _step("#t-values", 500)
-            _step(_doc.format("03-blackstone-2019-k1-scan2b.pdf"), 700)
-            _step(_box.format("6b"), shot="6-answer-key.png")  # every value against the hand-keyed answer key
-            _browser.close()
+            await _step(_doc.format("02-enviva-2021-k1.pdf"), 700)
+            await _step(_box.format("1"), shot="1-value-linked-to-box.png")  # every value points at its box
+            await _step(_box.format("20 *"), shot="2-statement-sent-to-review.png")  # a STMT amount goes to review
+            await _step("#otherpage", 1200, "3-attached-statement.png")
+            await _step(_doc.format("03-blackstone-2019-k1-scan1a.pdf"), 700)
+            await _step(_box.format("16 B"), shot="4-scanned-copy.png")
+            await _step("#t-queue", 1200)
+            await _page.locator(".item", has=_page.locator(".stmt")).first.scroll_into_view_if_needed()
+            await _page.wait_for_timeout(800)
+            await _page.screenshot(path=_shots / "5-review-queue.png")
+            await _page.check("#showkey")
+            await _step("#t-values", 500)
+            await _step(_doc.format("03-blackstone-2019-k1-scan2b.pdf"), 700)
+            await _step(_box.format("6b"), shot="6-answer-key.png")  # every value against the hand-keyed answer key
+            await _browser.close()
         if _errors:
             raise RuntimeError(f"the review screen raised errors: {_errors}")
         print(f"screenshots saved from {review_screen}")
