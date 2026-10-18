@@ -14,7 +14,6 @@ def _():
     import re
     import time
     from dataclasses import replace
-    from pathlib import Path
 
     import httpx
     import marimo as mo
@@ -22,7 +21,7 @@ def _():
     from pydantic import BaseModel, Field
     from pydantic_ai import Agent, capture_run_messages
     from pydantic_ai.mcp import MCPToolset
-    from pydantic_ai.messages import ModelMessagesTypeAdapter
+    from pydantic_ai.messages import ModelMessagesTypeAdapter, ModelResponse
     from pydantic_ai.usage import UsageLimits
 
     return (
@@ -31,7 +30,7 @@ def _():
         Field,
         MCPToolset,
         ModelMessagesTypeAdapter,
-        Path,
+        ModelResponse,
         UsageLimits,
         asyncio,
         capture_run_messages,
@@ -83,6 +82,7 @@ def _(mo, os):
         "colleges-and-universities": "IPEDSID",
         "prison-boundaries-1": "FACILITYID",
     }
+    ALT_ID_COLUMNS = ("OBJECTID", "source_ID", "STATE_ID", "FEDERAL_ID")
     # (model on OpenRouter, patch the source schemas on the client side). See section 3.
     AGENTS = [
         ("anthropic/claude-haiku-5.5", False),
@@ -97,6 +97,7 @@ def _(mo, os):
     return (
         BASE_URL,
         AGENTS,
+        ALT_ID_COLUMNS,
         BUDGET_USD,
         DATASET_SAMPLE,
         HERE,
@@ -121,8 +122,9 @@ def _(mo):
     schools" for *Truck Driving Schools*, "Overlook Hospital" for *OVERLOOK MEDICAL CENTER*).
 
     The committed `key.csv` holds the questions and the IDs. This cell re-draws the sample and
-    checks it still matches the key, then collects every ID-like value of each sampled record
-    (`OBJECTID`, `STATE_ID` and so on), since an agent may cite any of them.
+    checks it still matches the key. For each record it keeps the layer's own ID (for example
+    `PLANT_CODE` or `NIDID`) plus the generic IDs an agent might fairly cite instead
+    (`OBJECTID`, `source_ID`, `STATE_ID`, `FEDERAL_ID`).
     """)
     return
 
@@ -137,9 +139,9 @@ def _(
     SEED,
     csv,
     httpx,
+    ALT_ID_COLUMNS,
     pl,
     random,
-    re,
 ):
     http = httpx.Client(timeout=120)
     datasets = []
@@ -167,13 +169,11 @@ def _(
             _resp = http.get(_items_url, params={"f": "json", "limit": 1, "offset": _offset})
             _resp.raise_for_status()
             _props = _resp.json()["features"][0]["properties"]
+            # The layer's own ID column, plus the generic IDs an agent might fairly cite.
             _ids = {
-                str(v)
-                for k, v in _props.items()
-                if re.search(r"(^ID|ID$)", k.upper())
-                and v is not None
-                and str(v) not in ("", "NOT AVAILABLE")
-                and not str(v).startswith("-")
+                str(_props[c])
+                for c in (_id_col, *ALT_ID_COLUMNS)
+                if _props.get(c) not in (None, "", "NOT AVAILABLE")
             }
             sampled.append((f"hifld/{_slug}", str(_props[_id_col]), "|".join(sorted(_ids))))
 
@@ -383,6 +383,7 @@ async def _(
     AGENTS,
     BUDGET_USD,
     ModelMessagesTypeAdapter,
+    ModelResponse,
     OUT,
     REPEATS,
     UsageLimits,
@@ -417,9 +418,17 @@ async def _(
                     transcripts[(label, repeat, item["item_id"])] = (
                         ModelMessagesTypeAdapter.dump_json(messages, indent=1)
                     )
+                    # A failed run still cost money; OpenRouter reports it on each response.
+                    cost = sum(
+                        (m.provider_details or {}).get("cost", 0)
+                        for m in messages
+                        if isinstance(m, ModelResponse)
+                    )
+                    spend["usd"] += cost
                     return row | {
                         "error": f"{type(exc).__name__}: {exc}"[:300],
                         "seconds": time.monotonic() - start,
+                        "cost_usd": cost,
                     }
             usage = result.usage
             cost = float(usage.cost or 0)
@@ -446,7 +455,7 @@ async def _(
         _label = _model + (" + typed sources" if _patch else "")
         async with _agent:
             for _repeat in range(1, REPEATS + 1):
-                _gate = asyncio.Semaphore(10)
+                _gate = asyncio.Semaphore(6)
                 _runs += await asyncio.gather(
                     *(
                         ask(_agent, _label, _repeat, _item, _gate)
@@ -648,7 +657,8 @@ def _(mo):
 @app.cell
 def _(pl, scored, spend):
     cost_table = (
-        scored.filter(pl.col("error").is_null())
+        # Failed runs count toward cost and time; token counts come from completed runs only.
+        scored.filter(~pl.col("error").fill_null("").str.starts_with("skipped"))
         .group_by("model")
         .agg(
             queries=pl.len(),
