@@ -28,7 +28,7 @@ climate projection comes near 2.**
     +15%.
   - STORM's four high-resolution GCMs, SSP5-8.5 2050: median 1.25.
   - ARA's own white paper, through FEMA's Eq. 11: 1.06-1.23 by region.
-- **Read as 1 + ratio, the level matches** (92-100% same rating bin on covered counties). The
+- **Read as 1 + ratio, the level matches** (91-100% same rating bin on covered counties). The
   pattern between counties agrees only weakly, and how well depends on which states are scored.
 
 ## Our own hurricane layer
