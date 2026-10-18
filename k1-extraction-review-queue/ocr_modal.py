@@ -1,4 +1,4 @@
-"""The OCR models on Modal, which notebook.py runs inside an ephemeral app run.
+"""The OCR models on Modal, which 2_extraction.py runs inside an ephemeral app run.
 
 `download` fetches both models' weights into a Modal Volume on a small CPU container, so the L4 GPU containers
 only read pages. GraniteServer serves granite-docling with vLLM's OpenAI-compatible API behind a key made for each
@@ -57,7 +57,7 @@ def download():
     weights.commit()
 
 
-# Ephemeral runs of this app share the server's web URL, so run one at a time (notebook.py does).
+# Ephemeral runs of this app share the server's web URL, so run one at a time (2_extraction.py does).
 # The key the granite-docling server checks. Made fresh when this module is imported locally and handed to the
 # container through a Secret, so the server is only usable from this run.
 API_KEY = os.environ.get("VLLM_API_KEY") or secrets.token_urlsafe(32)

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One command: run notebook.py as a script, so every number comes from the code the reader sees.
+# One command: run the three notebooks as scripts, in order, so every number comes from the code the reader sees.
 #   ./run.sh                the whole comparison (needs OPENROUTER_API_KEY; the OCR models also need Modal credentials)
 #   ./run.sh --screenshots  also retake screenshots/ from Gemini 3.8 Flash's review screen
 set -euo pipefail
@@ -15,4 +15,6 @@ if [ "${1:-}" = "--screenshots" ]; then
   export K1_SCREENSHOTS=1
   [ -n "${CHROMIUM_PATH:-}" ] || uv run playwright install chromium
 fi
-uv run notebook.py
+uv run 1_documents.py
+uv run 2_extraction.py
+uv run 3_results.py

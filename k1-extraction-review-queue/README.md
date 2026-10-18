@@ -4,7 +4,11 @@ This demo reads Schedule K-1s and brokerage 1099s and links every extracted valu
 
 It compares five current vision-language models, three of them open-weight, and two OCR models run on Modal's GPUs. They all read the same documents and are scored against the same answer keys. Each model runs on its own, and Gemini 3.8 Flash and Qwen 3.8 27B also run as a pair that must agree. Docling reads the page layout and the supplemental statements. Pydantic AI turns each model's answer into typed values, each with a page, a box and a confidence.
 
-**Read [`notebook.py`](notebook.py)** for the whole story, top to bottom: the documents, each step and why, the review rules, the results, and what didn't work. Open it with `uv run marimo edit notebook.py`, or read it as plain Python.
+**Read the three notebooks in order** for the whole story, each top to bottom. Open one with `uv run marimo edit 1_documents.py`, or read them as plain Python:
+
+1. [`1_documents.py`](1_documents.py): the question, and the 30 documents and their answer keys.
+2. [`2_extraction.py`](2_extraction.py): Docling, what each model is asked for, the review rules, every model, the pair and the OCR models.
+3. [`3_results.py`](3_results.py): scoring, the results, the review screens, and what didn't work.
 
 ![A value on a real K-1, highlighted on the page it came from](screenshots/1-value-linked-to-box.png)
 
@@ -24,7 +28,7 @@ You need:
 
 For the screenshots, Playwright installs Chromium, or set `CHROMIUM_PATH` to one you have.
 
-`run.sh` runs the notebook as a script (`uv run notebook.py`), so the numbers come from the code you read. uv builds the environment on the first run; Docling brings a CPU build of PyTorch. The notebook downloads the real sample K-1s and the blank IRS forms and checks their hashes. It makes the scanned copies and the made-up documents, runs Docling, runs the five models side by side, pairs two of them, runs the OCR models, and scores everything. It writes:
+`run.sh` runs the three notebooks as scripts, in order, so the numbers come from the code you read. They hand their results on through files in `output/`. uv builds the environment on the first run; Docling brings a CPU build of PyTorch. The notebook downloads the real sample K-1s and the blank IRS forms and checks their hashes. It makes the scanned copies and the made-up documents, runs Docling, runs the five models side by side, pairs two of them, runs the OCR models, and scores everything. It writes:
 
 - `output/comparison.md`: every run, broken down by kind of document;
 - `output/<run>/index.html`: each run's review screen;
@@ -65,7 +69,7 @@ Every pipeline finished all 30 documents in this run. On the held-out set, Gemin
 
 ### How much the results vary between runs
 
-The open models' answers change from run to run at temperature 0, by a lot. Wrong but accepted, run by run. Runs 1 to 8 are from 2026-10-13 to 2026-10-17, from the code before it became this notebook. Run 9 is that code on 2026-10-18 without the OCR models, and runs 10 and 11 are this notebook on 2026-10-18, run 11 being the one above:
+The open models' answers change from run to run at temperature 0, by a lot. Wrong but accepted, run by run. Runs 1 to 8 are from 2026-10-13 to 2026-10-17, from the code before it became notebooks. Run 9 is that code on 2026-10-18 without the OCR models. Runs 10 and 11 are the notebook version on 2026-10-18, run 11 being the one above; it was then one notebook, since split into these three with the same code:
 
 | Pipeline | Wrong but accepted, runs 1 to 11 | Cost per document, range |
 |---|---|---|
@@ -78,7 +82,7 @@ The open models' answers change from run to run at temperature 0, by a lot. Wron
 | granite-docling + Gemini | –, 26, 14, 12, 20, 2, 19, 8, –, 7, 8 | $0.0124 to $0.0219 |
 | Gemini + Qwen 3.8 27B pair | 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 | $0.0099 to $0.0127 |
 
-\* Near-empty answers on the brokerage 1099s, before the three-quarter page check (see the notebook, section 4). In runs 9 to 11 that check sent all six of GLM's 4-value 1099 answers to review.
+\* Near-empty answers on the brokerage 1099s, before the three-quarter page check (see `2_extraction.py`, section 3). In runs 9 to 11 that check sent all six of GLM's 4-value 1099 answers to review.
 † GLM failed every retry on 5 (run 6) and 4 (run 8) of the 6 brokerage 1099s; those runs score the other documents.
 ‡ Mostly the wrong form. When Docling can't tell which form a scan is, the model is asked. In each of runs 9 to 11, GLM named the same 7 made-up 1120-S and 1041 scans as the wrong form, almost always "Form 1065", and read them with that form's boxes. That gave 66, 66 and 70 wrong accepted values. In run 11 it also named the Blackstone office scan "Form 1041", which added 44. The other vision models named every form right.
 
@@ -92,13 +96,14 @@ Run 1 to 3 costs leave out failed retries; later runs count every attempt. Gemma
 - **Some errors get through any page-level check**: a 1099 answer that skips only the DIV or only the INT section, values put in the wrong box, or a whole page read as the wrong form.
 - **A failed document isn't in the review queue.** In production it would go to a person whole.
 
-The notebook's last section covers what didn't work, including the first Tesseract pipelines.
+The last section of `3_results.py` covers what didn't work, including the first Tesseract pipelines.
 
 ## Files
 
-- `notebook.py`: the whole demo, as a marimo notebook
+- `1_documents.py`, `2_extraction.py`, `3_results.py`: the demo, as three marimo notebooks
+- `amounts.py`: reading a printed amount, which `2_extraction.py` and `3_results.py` both need
 - `ocr_modal.py`: the Modal app for the OCR models (a module, because Modal imports it inside its containers)
-- `review_screen.html`: the review screen's page, which the notebook fills with each run's results
+- `review_screen.html`: the review screen's page, which `3_results.py` fills with each run's results
 - `real_answer_key.json`: the real K-1s' Part III boxes and the partnership's name and EIN, keyed by hand from the issuers' PDFs
 - `screenshots/`: Gemini 3.8 Flash's review screen from the run above
 - `run.sh`, `pyproject.toml`, `uv.lock`: the one command and its pinned environment
