@@ -71,7 +71,7 @@ def _():
     | HIFLD Next | Power Plants, Generating Units, Transmission Lines | release `1704edb3`, layer v1.0.0 |
     | EIA-860 | Plant schedule (coordinates), Energy Storage schedule | 2025 annual, released September 2026 |
     | Overture Maps | `base/infrastructure`, `class = substation` (from OpenStreetMap) | release 2026-09-23.0 |
-    | USGS (Lucas et al. 2020) | once-per-century geoelectric field at 1,079 magnetotelluric sites | the paper's published CSV |
+    | USGS (Lucas et al. 2020) | 100-year geoelectric field at 1,079 survey sites | the paper's published CSV |
     | US Census | state boundaries, 1:20m | 2024 cartographic boundary file |
     """)
     return
@@ -110,7 +110,10 @@ def _(fetch):
             f"{_hifld}/transmission-lines-1/transmission-lines-1/v1.0.0/geoparquet/transmission-lines-1.parquet",
             "transmission-lines.parquet",
         ),
-        "EIA-860 2025": ("https://www.eia.gov/electricity/data/eia860/xls/eia8602025.zip", "eia8602025.zip"),
+        "EIA-860 2025": (
+            "https://www.eia.gov/electricity/data/eia860/xls/eia8602025.zip",
+            "eia8602025.zip",
+        ),
         "USGS 100-year geoelectric field (Lucas et al. 2020)": (
             "https://raw.githubusercontent.com/greglucas/GeoelectricHazardPaper2019/"
             "856374c4aa0a96f149915712d5b7cc3e017d1507/code/geoelectric_100year.csv",
@@ -161,7 +164,9 @@ def _(overture_path, paths):
         return frame.to_crs(ALBERS)
 
     states = gpd.read_file(f"zip://{paths['Census states 2024']}")
-    lower48 = to_albers(states[~states["STUSPS"].isin(["AK", "HI", "PR", "VI", "GU", "MP", "AS"])])[["STUSPS", "geometry"]]
+    lower48 = to_albers(states[~states["STUSPS"].isin(["AK", "HI", "PR", "VI", "GU", "MP", "AS"])])[
+        ["STUSPS", "geometry"]
+    ]
     plants = to_albers(gpd.read_parquet(paths["HIFLD Next Power Plants"]))
     units = gpd.read_file(paths["HIFLD Next Generating Units"])
     lines = to_albers(gpd.read_parquet(paths["HIFLD Next Transmission Lines"]))
@@ -246,7 +251,9 @@ def _(paths, plants, units):
     assert batteries["Latitude"].notna().all(), "every battery plant should have EIA coordinates"
 
     _unit_ids = set(units["ID"].astype(str).str.upper().str.strip())
-    batteries["unit_key"] = batteries["Plant Code"].astype(str) + "-" + batteries["Generator ID"].astype(str).str.upper()
+    batteries["unit_key"] = (
+        batteries["Plant Code"].astype(str) + "-" + batteries["Generator ID"].astype(str).str.upper()
+    )
     batteries["unit_listed"] = batteries["unit_key"].isin(_unit_ids)
     # A few HIFLD plant codes are not numbers (for example "NA919"), so compare codes as text.
     batteries["plant_code_listed"] = batteries["Plant Code"].astype(str).isin(set(plants["PLANT_CODE"].astype(str)))
@@ -261,11 +268,23 @@ def _(paths, plants, units):
     batteries["near_hifld_plant"] = batteries["m_to_hifld_plant"] <= 1000
 
     batteries["match"] = np.select(
-        [batteries["unit_listed"], batteries["plant_code_listed"], batteries["near_hifld_plant"]],
-        ["1 unit in Generating Units", "2 plant code in Power Plants", "3 HIFLD plant within 1 km"],
+        [
+            batteries["unit_listed"],
+            batteries["plant_code_listed"],
+            batteries["near_hifld_plant"],
+        ],
+        [
+            "1 unit in Generating Units",
+            "2 plant code in Power Plants",
+            "3 HIFLD plant within 1 km",
+        ],
         default="4 missing from the map",
     )
-    batteries["built"] = np.where(batteries["Operating Year"] >= 2024, "2024 or later", "2023 or earlier")
+    # Generating Units is dated 2023-09-01: a battery started after August 2023 can only be in it as a planned unit.
+    _started = batteries["Operating Year"] * 12 + batteries["Operating Month"]
+    batteries["built"] = np.where(_started >= 2023 * 12 + 9, "after Aug 2023", "by Aug 2023")
+    _unit_status = units.assign(key=units["ID"].astype(str).str.upper().str.strip()).set_index("key")["STATUS"]
+    batteries["status_in_units"] = batteries["unit_key"].map(_unit_status[~_unit_status.index.duplicated()])
     return (batteries,)
 
 
@@ -288,25 +307,31 @@ def _(batteries):
 
 @app.cell(hide_code=True)
 def _(batteries):
-    _old = batteries[batteries["built"] == "2023 or earlier"]
+    _old = batteries[batteries["built"] == "by Aug 2023"]
     _old_unlisted = _old[~_old["unit_listed"]]
-    _new = batteries[batteries["built"] == "2024 or later"]
+    _new = batteries[batteries["built"] == "after Aug 2023"]
+    _new_listed = _new[_new["unit_listed"]]
     mo.md(f"""
     EIA-860 2025 lists **{len(batteries):,} operable battery generators, {batteries["mw"].sum():,.0f} MW**.
     Generating Units lists **{batteries["unit_listed"].sum():,}** of them
     ({batteries.loc[batteries["unit_listed"], "mw"].sum() / batteries["mw"].sum():.0%} of the MW).
 
-    Most of the gap is age. **{len(_new):,} generators ({_new["mw"].sum():,.0f} MW)** came online in 2024 or 2025,
-    after the layer's September 2023 source date. Of the **{len(_old):,}** generators that were running by the end of
-    2023, **{len(_old_unlisted):,} ({_old_unlisted["mw"].sum():,.0f} MW)** are still not in Generating Units. Those
-    are the true omissions, the ones a refresh from the same source would not obviously fix.
+    Most of the gap is age. **{len(_new):,} generators ({_new["mw"].sum():,.0f} MW)** started operating after August
+    2023, the layer's source date. {len(_new_listed):,} of those are in Generating Units anyway, but as planned units
+    (status {", ".join(sorted(_new_listed["status_in_units"].dropna().unique()))}), not operating ones. Of the
+    **{len(_old):,}** generators operating by August 2023, **{len(_old_unlisted):,}
+    ({_old_unlisted["mw"].sum():,.0f} MW)** are not in Generating Units. Those are omissions that age does not explain.
     """)
     return
 
 
 @app.cell
 def _(batteries):
-    _bands = pd.cut(batteries["mw"], [0, 5, 20, 100, 10_000], labels=["<5 MW", "5-20 MW", "20-100 MW", "100+ MW"])
+    _bands = pd.cut(
+        batteries["mw"],
+        [0, 5, 20, 100, 10_000],
+        labels=["<5 MW", "5-20 MW", "20-100 MW", "100+ MW"],
+    )
     _flagged = batteries.assign(
         size_band=_bands,
         unlisted=~batteries["unit_listed"],
@@ -314,9 +339,14 @@ def _(batteries):
     )
     storage_by_size = (
         _flagged.groupby("size_band", observed=True)
-        .agg(generators=("mw", "size"), unlisted=("unlisted", "sum"), MW=("mw", "sum"), MW_unlisted=("unlisted_mw", "sum"))
-        .assign(share_unlisted=lambda t: (t["unlisted"] / t["generators"]).round(2))
+        .agg(
+            generators=("mw", "size"),
+            unlisted=("unlisted", "sum"),
+            MW=("mw", "sum"),
+            MW_unlisted=("unlisted_mw", "sum"),
+        )
         .round(0)
+        .assign(share_unlisted=lambda t: (t["unlisted"] / t["generators"]).round(2))
     )
     storage_by_state = (
         _flagged.assign(missing=_flagged["match"] == "4 missing from the map")
@@ -340,20 +370,28 @@ def _(batteries):
 @app.cell
 def _(batteries, lower48):
     _pts = gpd.GeoDataFrame(
-        batteries, geometry=gpd.points_from_xy(batteries["Longitude"], batteries["Latitude"]), crs=4326
+        batteries,
+        geometry=gpd.points_from_xy(batteries["Longitude"], batteries["Latitude"]),
+        crs=4326,
     ).to_crs(ALBERS)
     _pts = _pts[_pts.within(lower48.union_all())]
     _fig, _ax = plt.subplots(figsize=(11, 6.5))
     lower48.plot(ax=_ax, color="#f2f2f2", edgecolor="#bbbbbb", linewidth=0.5)
     for _label, _color in [("listed", "#9aa5b1"), ("unlisted", "#d1495b")]:
         _sel = _pts[_pts["unit_listed"] == (_label == "listed")]
-        _sel.plot(ax=_ax, markersize=_sel["mw"].clip(2, 400) / 3, color=_color, alpha=0.6, label=f"battery {_label}")
+        _sel.plot(
+            ax=_ax,
+            markersize=_sel["mw"].clip(2, 400) / 3,
+            color=_color,
+            alpha=0.6,
+            label=f"battery {_label}",
+        )
     _ax.set_axis_off()
     _ax.legend(loc="lower left", frameon=False)
     _ax.set_title("EIA-860 2025 battery generators: listed (grey) and not listed (red) in HIFLD Generating Units")
     _fig.tight_layout()
     _fig.savefig(OUT / "map_storage.png", dpi=110)
-    _fig
+    mo.as_html(_fig)
     return
 
 
@@ -406,7 +444,11 @@ def _(lines, lower48, plants, substations):
     ends["touches_other_line"] = ends.index.isin(_other.index)
     _attr = ends["sub_attr"].astype(str).str.upper()
     ends["attr_says"] = np.select(
-        [_attr.str.startswith("TAP"), _attr.str.startswith("UNKNOWN"), _attr == "NOT AVAILABLE"],
+        [
+            _attr.str.startswith("TAP"),
+            _attr.str.startswith("UNKNOWN"),
+            _attr == "NOT AVAILABLE",
+        ],
         ["TAP", "UNKNOWN", "NOT AVAILABLE"],
         default="named",
     )
@@ -433,7 +475,12 @@ def _(conus_line_count, ends):
         )
     connectivity = pd.DataFrame(_rows).set_index("threshold")
     connectivity.to_csv(OUT / "connectivity_thresholds.csv")
-    mo.vstack([mo.md(f"**{conus_line_count:,} lower-48 lines, {len(ends):,} line ends.**"), connectivity])
+    mo.vstack(
+        [
+            mo.md(f"**{conus_line_count:,} lower-48 lines, {len(ends):,} line ends.**"),
+            connectivity,
+        ]
+    )
     return (connectivity,)
 
 
@@ -441,10 +488,16 @@ def _(conus_line_count, ends):
 def _(ends):
     _far = ends[ends["m_to_substation"] > 1000]
     attr_split = pd.crosstab(
-        _far["attr_says"], _far["touches_other_line"].map({True: "touches another line", False: "touches none"})
+        _far["attr_says"],
+        _far["touches_other_line"].map({True: "touches another line", False: "touches none"}),
     )
     attr_split.to_csv(OUT / "connectivity_attributes.csv")
-    mo.vstack([mo.md("What the line's own `SUB_1`/`SUB_2` attribute says, for ends more than 1 km out:"), attr_split])
+    mo.vstack(
+        [
+            mo.md("What the line's own `SUB_1`/`SUB_2` attribute says, for ends more than 1 km out:"),
+            attr_split,
+        ]
+    )
     return (attr_split,)
 
 
@@ -460,7 +513,7 @@ def _(ends, lower48):
     _ax.set_title("HIFLD transmission line ends more than 1 km from any substation or power plant")
     _fig.tight_layout()
     _fig.savefig(OUT / "map_connectivity.png", dpi=110)
-    _fig
+    mo.as_html(_fig)
     return
 
 
@@ -505,8 +558,26 @@ def _(ends):
         hand_split["share"] = (hand_split["ends"] / len(hand_labels)).round(2)
     else:
         hand_split = pd.DataFrame()
-    hand_split
+    mo.vstack([hand_split, hand_labels[hand_labels["label"] != "tap or interconnection"]] if len(hand_labels) else [])
     return hand_labels, hand_split, sample_frame
+
+
+@app.cell(hide_code=True)
+def _(connectivity, ends, hand_split):
+    _km = connectivity.loc["1,000 m"]
+    _placeholder = (ends.loc[ends["m_to_substation"] > 1000, "attr_says"] != "named").mean()
+    _taps = int(hand_split.loc["tap or interconnection", "ends"]) if len(hand_split) else 0
+    mo.md(f"""
+    **What it shows.** {_km["ends farther than this from a substation"]:,} of {len(ends):,} line ends
+    ({_km["share of all ends"]:.0%}) are more than 1 km from any OpenStreetMap substation. That looks like a broken
+    map until you look at where they are: only **{_km["... and touching no other line"]:,}**
+    ({_km["share dead ends"]:.1%} of all ends) are also more than 1 km from a HIFLD power plant and touch no other
+    line. In the hand-checked sample, **{_taps} of 50** ends were taps or joins onto another line. HIFLD Transmission
+    Lines is not a network you can trace from substation to substation: it is drawn as segments that break wherever a
+    line branches, and for {_placeholder:.0%} of the far ends the substation named in `SUB_1`/`SUB_2` is a placeholder (`TAP...`,
+    `UNKNOWN...` or `NOT AVAILABLE`).
+    """)
+    return
 
 
 @app.cell(hide_code=True)
@@ -539,10 +610,13 @@ def _(paths, substations):
     _near = _near[~_near.index.duplicated()]
     rated = substations.assign(e100=_near["E 100-year"], m_to_site=_near["m_to_site"])
     rated["band"] = pd.cut(
-        rated["e100"], [0, 1, 3, 10, 1_000], labels=["<1 V/km", "1-3 V/km", "3-10 V/km", "10+ V/km"], right=False
+        rated["e100"],
+        [0, 1, 3, 10, 1_000],
+        labels=["<1 V/km", "1-3 V/km", "3-10 V/km", "10+ V/km"],
+        right=False,
     )
-    rated["band"] = rated["band"].cat.add_categories("no survey site within 100 km").fillna(
-        "no survey site within 100 km"
+    rated["band"] = (
+        rated["band"].cat.add_categories("no survey site within 100 km").fillna("no survey site within 100 km")
     )
     return rated, sites
 
@@ -553,7 +627,10 @@ def _(overture_in_box, rated):
     hazard_bands["share"] = (hazard_bands["substations"] / len(rated)).round(3)
     _high = rated[rated["band"].isin(["3-10 V/km", "10+ V/km"])]
     hazard_by_state = (
-        _high.groupby(["STUSPS", "band"], observed=True).size().unstack(fill_value=0).assign(total=lambda t: t.sum(axis=1))
+        _high.groupby(["STUSPS", "band"], observed=True)
+        .size()
+        .unstack(fill_value=0)
+        .assign(total=lambda t: t.sum(axis=1))
     )
     hazard_by_state = hazard_by_state.sort_values("total", ascending=False)
     hazard_bands.to_csv(OUT / "hazard_bands.csv")
@@ -574,6 +651,25 @@ def _(overture_in_box, rated):
     return hazard_bands, hazard_by_state, substation_counts
 
 
+@app.cell(hide_code=True)
+def _(hazard_bands, hazard_by_state, rated):
+    _high = int(hazard_bands.loc[["3-10 V/km", "10+ V/km"], "substations"].sum())
+    _rated = len(rated) - int(hazard_bands.loc["no survey site within 100 km", "substations"])
+    _top = ", ".join(f"{s} ({n:,})" for s, n in hazard_by_state["total"].head(5).items())
+    mo.md(f"""
+    **What it shows.** OpenStreetMap has **{len(rated):,}** substations in the lower 48, about
+    {len(rated) - 66_935:,} more than Microsoft's 66,935. HIFLD Next has none to compare. Of the {_rated:,} substations
+    near a USGS survey site, **{_high:,}** ({_high / _rated:.0%}) sit where the once-per-century geoelectric field is
+    3 V/km or more. The states with the most are {_top}.
+
+    The two totals are close but not built the same way. OSM counts any mapped `power=substation`, including small
+    distribution and industrial yards, and is only as complete as its volunteers. Microsoft's count comes from
+    "GridSFM-derived grid data", which its blog describes as realistic US transmission models; its substation list
+    is not published with the post, so we can't say which yards differ. Neither is a utility's asset list.
+    """)
+    return
+
+
 @app.cell
 def _(lower48, rated, sites):
     _fig, _ax = plt.subplots(figsize=(11, 6.5))
@@ -588,14 +684,20 @@ def _(lower48, rated, sites):
     _pts = rated.geometry.centroid
     for _band, _color in _colors.items():
         _sel = rated["band"] == _band
-        _ax.scatter(_pts[_sel].x, _pts[_sel].y, s=0.6, color=_color, label=f"{_band} ({_sel.sum():,})")
+        _ax.scatter(
+            _pts[_sel].x,
+            _pts[_sel].y,
+            s=0.6,
+            color=_color,
+            label=f"{_band} ({_sel.sum():,})",
+        )
     sites.plot(ax=_ax, markersize=2, color="black", marker="x", linewidth=0.4)
     _ax.set_axis_off()
     _ax.legend(loc="lower left", frameon=False, markerscale=10, fontsize=8)
     _ax.set_title("Substations (OpenStreetMap via Overture) by once-per-century geoelectric field, USGS 2020 sites (x)")
     _fig.tight_layout()
     _fig.savefig(OUT / "map_hazard.png", dpi=110)
-    _fig
+    mo.as_html(_fig)
     return
 
 
@@ -611,7 +713,7 @@ def _(
     provenance,
     rated,
 ):
-    _old = batteries[batteries["built"] == "2023 or earlier"]
+    _old = batteries[batteries["built"] == "by Aug 2023"]
     _high = rated["band"].isin(["3-10 V/km", "10+ V/km"])
     headline = {
         "run_at_utc": datetime.now(UTC).strftime("%Y-%m-%d %H:%M"),
@@ -622,9 +724,10 @@ def _(
             "unit_in_generating_units": int(batteries["unit_listed"].sum()),
             "mw_in_generating_units": round(batteries.loc[batteries["unit_listed"], "mw"].sum()),
             "by_match": batteries["match"].value_counts().sort_index().to_dict(),
-            "built_2024_or_later": int((batteries["built"] == "2024 or later").sum()),
-            "built_by_2023_not_in_units": int((~_old["unit_listed"]).sum()),
-            "mw_built_by_2023_not_in_units": round(_old.loc[~_old["unit_listed"], "mw"].sum()),
+            "started_after_aug_2023": int((batteries["built"] == "after Aug 2023").sum()),
+            "mw_started_after_aug_2023": round(batteries.loc[batteries["built"] == "after Aug 2023", "mw"].sum()),
+            "operating_by_aug_2023_not_in_units": int((~_old["unit_listed"]).sum()),
+            "mw_operating_by_aug_2023_not_in_units": round(_old.loc[~_old["unit_listed"], "mw"].sum()),
         },
         "connectivity": {
             "lower48_lines": conus_line_count,
