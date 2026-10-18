@@ -430,7 +430,7 @@ def _(coastal, nnls, np, out, pd, published, recipe, scoring):
 @app.cell
 def _(mo):
     mo.md(r"""
-    Keeping the floodplain share at today's losses changes little (about 5% mid-century, under
+    Keeping the floodplain share at today's losses changes little (2-5% mid-century, under
     1% late). Letting it grow with sea level raises mid-century projected losses by roughly a
     fifth to two thirds. **The late-century figures are not credible as estimates**: by 2100
     today's 100- and 500-year flood levels are reached up to 10 times a year, so their factors

@@ -69,7 +69,7 @@ The rest of the code is what the notebooks share:
 ./run.sh
 ```
 
-It needs [uv](https://docs.astral.sh/uv/) and about 30 GB of free disk. It downloads every
+It needs [uv](https://docs.astral.sh/uv/) and about 25 GB of free disk (the cache ends at 17 GB). It downloads every
 input into `~/.cache/fri-agent-rebuild` (set `FRI_CACHE` to move it; nothing downloaded goes
 into the repo), then runs each notebook as a script, so every number in `results/` comes from
 the code in the notebooks.
@@ -78,12 +78,13 @@ The first run takes most of a day, almost all of it climate downloads:
 
 - **NEX-GDDP-CMIP6**: 924 global yearly files of about 250 MB, each cut to the CONUS box.
   About two hours at 30 MB/s.
-- **LOCA2**: about 55 GB of range reads from UCSD's server, which is slow; 3-15 hours. It runs
-  last, prints nothing until a 30-year period is done, and needs about 2.5 GB of free disk
-  while it works. If it is interrupted, rerun `./run.sh`: finished three-year pieces are kept.
+- **LOCA2**: range reads from UCSD's server, at about 1.5-2.5 hours per 30-year period on 4
+  workers (five periods). It runs last and prints nothing until a period is done. Each worker
+  uses about 1 GB; set `FRI_LOCA2_WORKERS` for more or fewer. If it is interrupted, rerun
+  `./run.sh`: finished three-year pieces are kept.
 
-With the inputs cached, the notebooks take about half an hour, most of it rerunning every
-kept pipeline for the held-out table.
+With the inputs cached, `run.sh` took 17 minutes from a fresh clone, and reproduced every file
+in `results/` exactly.
 
 The agent loop is not part of `run.sh`, because it costs money and gives different results each
 run. To run it for one hazard (needs `OPENROUTER_API_KEY`):
