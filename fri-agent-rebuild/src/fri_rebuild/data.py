@@ -387,7 +387,11 @@ PIECE_DAYS = 3 * 365  # each finished piece is saved, so an interruption loses o
 
 def loca2_open(run: str, span: str) -> h5py.File:
     url = LOCA2.format(run=run, span=span)
-    return h5py.File(fsspec.open(url, block_size=64 << 20, cache_type="readahead").open())
+    # trust_env makes fsspec's aiohttp session use HTTPS_PROXY when one is set.
+    remote = fsspec.open(
+        url, block_size=64 << 20, cache_type="readahead", client_kwargs={"trust_env": True}
+    )
+    return h5py.File(remote.open())
 
 
 def loca2_cells() -> tuple[np.ndarray, sparse.csr_matrix, pd.Index]:
