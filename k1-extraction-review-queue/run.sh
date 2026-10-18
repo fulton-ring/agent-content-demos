@@ -11,6 +11,8 @@ command -v uv >/dev/null || { echo "uv is needed: https://docs.astral.sh/uv/gett
 [ -n "${OPENROUTER_API_KEY:-}" ] || { echo "OPENROUTER_API_KEY is needed"; exit 1; }
 
 export MODAL_IMAGE_BUILDER_VERSION=2025.06
+# Tesseract multithreading can stall for many minutes on a busy machine; one thread per call is fast enough.
+export OMP_THREAD_LIMIT=1
 if [ "${1:-}" = "--screenshots" ]; then
   export K1_SCREENSHOTS=1
   [ -n "${CHROMIUM_PATH:-}" ] || uv run playwright install chromium
