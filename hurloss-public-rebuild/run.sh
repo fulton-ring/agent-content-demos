@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# One command: download the public inputs, rebuild and score FEMA's HRCN values (the spike),
-# then build our own hurricane layer by county and tract and compare it with FEMA's.
+# One command: run the notebook as a script, so every table and figure in results/ comes from
+# the code a reader sees in notebook.py.
 set -euo pipefail
 cd "$(dirname "$0")"
-uv run hurloss-run
-uv run hurloss-layer
+uv run notebook.py

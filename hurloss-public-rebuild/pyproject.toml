@@ -21,14 +21,6 @@ dependencies = [
     "shapely>=2.2.0",
 ]
 
-[project.scripts]
-hurloss-run = "hurloss_rebuild.run:main"
-hurloss-layer = "hurloss_rebuild.layer_run:main"
-
-[build-system]
-requires = ["uv_build>=0.11.32,<0.12.0"]
-build-backend = "uv_build"
-
 [dependency-groups]
 dev = [
     "pandas-stubs>=3.0.5.260914",
@@ -39,6 +31,7 @@ dev = [
 ]
 
 [tool.uv]
+package = false
 # CLIMADA lists the GDAL Python bindings, which have no wheels and need system GDAL headers.
 # The parts we use (tracks, wind fields, climate scaling) read and write files without them.
 override-dependencies = ["gdal; sys_platform == 'never'"]
@@ -51,4 +44,7 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 
 [tool.ruff.lint.per-file-ignores]
 # A bare expression at the end of a marimo cell is what the cell displays.
-"notebooks/*" = ["B018"]
+"notebook.py" = ["B018"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
