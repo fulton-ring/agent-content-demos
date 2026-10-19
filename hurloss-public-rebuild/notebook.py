@@ -917,8 +917,8 @@ def _(
         return TCTracks(data=tracks)
 
     def coastal_rates(close_peak: np.ndarray, rate: float) -> dict[str, float]:
-        """Storms a year whose strongest fix within 0.5° of the grid reaches each category."""
-        return {
+        """Storms a year with a fix within 0.5° of the grid, and those reaching each category."""
+        return {"storms": float((close_peak > 0).sum() * rate)} | {
             f"cat{k + 1}": float((close_peak >= kt).sum() * rate)
             for k, kt in enumerate(_category_kt)
         }
@@ -995,7 +995,7 @@ def _(
     raft_correction = pd.DataFrame(_diagnostics)
     write(raft_correction, "raft_bias_correction.csv")
     raft_correction.pivot_table(
-        index=["correction", "period"], values=["cat1", "cat3"], aggfunc="median"
+        index=["correction", "period"], values=["storms", "cat1", "cat3"], aggfunc="median"
     )
     return raft_gcms, raft_intensity
 
@@ -1003,7 +1003,27 @@ def _(
 @app.cell
 def _(mo):
     mo.md(r"""
-    TODO-RAFT-CORRECTION
+    What the table shows (`storms` is storms a year with a fix within 0.5° of our grid; `catN`
+    those whose strongest fix there reaches Category N; per-GCM rows are in
+    `raft_bias_correction.csv`):
+
+    - **RAFT's tracks look right, and they agree with the paper.** Historical RAFT brings
+      4.3-5.3 storms a year near land against 4.1 observed. Late century, seven of eight GCMs bring
+      more (median +19%, from -1% for MRI-ESM2-0 to +32% for GFDL-CM4), as Balaguru et al.
+      find for the Gulf and lower East coasts.
+    - **Raw RAFT has no hurricanes near land**: its winds there span about 19-45 kt.
+    - **Mapping each storm's peak doesn't fix that.** It gives 0.1-0.8 Category 1+ storms a year
+      near land against 1.3 observed, because RAFT's peaks happen over the open ocean.
+    - **Mapping fixes near the grid does.** Historical RAFT then gives 1.5-1.9 Category 1+
+      storms a year near land (observed 1.3) and 0.26-0.43 Category 3+ (observed 0.29), so the
+      route uses it.
+    - **But then RAFT's intensity tail decides the answer.** The map stretches RAFT's 19-45 kt
+      onto observed 20-155 kt, so a few knots in RAFT's strongest coastal fixes become a
+      category. Despite more storms, six of eight GCMs end up with fewer Category 1+ storms near
+      land late century (CanESM5 1.88 to 1.06 a year), and two with more (GFDL-CM4 1.68 to 2.52,
+      IPSL-CM6A-LR 1.61 to 2.18).
+
+    Each GCM's county ratio, late century over historical, and the equal-weight ensemble:
     """)
     return
 
@@ -1019,6 +1039,18 @@ def _(fri, pd, raft_gcms, raft_intensity, write):
     write(_spread, "raft_gcm_ratios.csv", index=True)
     _spread
     return (raft_ratio,)
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    The GCMs disagree on the sign: median county ratios run from 0.04 (CanESM5, CMCC-CM2-SR5)
+    to 0.78 (GFDL-CM4), and the ensemble's is 0.34. After the floor at 1, RAFT says most
+    counties see no change by late century. That says more about RAFT's intensities near land,
+    which its authors warn against using without correction, than about the climate: RAFT
+    supports "more storms reach the coast" but can't say how strong they are.
+    """)
+    return
 
 
 @app.cell
@@ -1188,6 +1220,9 @@ def _(mo):
       rating bin, but the constant 2 is still as close in three scenarios. $1 + r$ fits the level
       better than $2r$. That fits FEMA's "projected" intensity having included the historical
       one, but it isn't proof.
+    - **RAFT, the only route from simulated late-century storms, does no better than no
+      change.** On held-out covered counties 69% keep FEMA's rating bin as documented and 78%
+      read as $1 + r$, against 95% for a constant 2, and its Spearman is about 0.
     - **Rank agreement is weak and depends on which states are scored** (Spearman, covered
       counties, $1 + r$):
     """)
@@ -1511,8 +1546,10 @@ def _(ours, pd, raft_ratio, storm_ratio, write):
 @app.cell
 def _(mo):
     mo.md(r"""
-    Both routes put the change far below FEMA's 2; they disagree on its size and where it
-    falls, which is why the range is published with the central value.
+    Both routes put the change far below FEMA's 2. STORM's mid-century multiplier sits above
+    our range in a third of counties; RAFT's late-century one is 1 in most counties and inside
+    our range in 88%. Neither agrees with ours on where the change falls (Spearman -0.18 and
+    0.06), which is why the range is published with the central value.
 
     ### Is it believable?
 
@@ -1825,11 +1862,15 @@ def _(mo):
       rate-limits repeated range reads (HTTP 429); downloads retry with backoff, and a rerun
       resumes from the cache.
     - **Not covered:** storm surge and rain (the FRI is wind only); terrain and buildings (they
-      live in NRI's EAL); climate-driven changes in tracks (Knutson is basin-wide); late-century
-      simulated tracks (RAFT, #24); Connecticut's v1.20 planning regions, which don't match the
-      2020 county codes; Alaska, Hawaii and the territories.
+      live in NRI's EAL); climate-driven changes in tracks in our layer (Knutson is basin-wide;
+      RAFT has them but not usable intensities); Connecticut's v1.20 planning regions, which
+      don't match the 2020 county codes; Alaska, Hawaii and the territories.
+    - **RAFT gave no usable late-century multiplier.** Its tracks agree with its paper (more
+      storms reach the coast), but its winds near land are so weak that any bias correction
+      decides the answer, and its eight GCMs disagree on the sign. RAFT holds genesis fixed, so
+      it says nothing about how many storms form. Wind runs for every second storm only.
     - **Looked at and not used:** HURSAT (satellite imagery with no wind field), ASCE 7 wind
-      maps (no scenario component), RAFT (13 GB with a bias correction; split off as #24).
+      maps (no scenario component).
     """)
     return
 
