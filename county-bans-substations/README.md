@@ -97,7 +97,9 @@ holding one."
 
 - No HIFLD Next substations layer: substations are derived from line endpoints (above). A substation
   with no HIFLD line ending at it is missed. Nodes whose name couldn't be resolved (2,148) are kept as
-  substations, so a few taps may be counted among them.
+  substations, so a few taps may be counted among them. About half of the 45,779 carry HIFLD placeholder
+  names (23,668 "UNKNOWN…", 6,569 "NOT AVAILABLE"). Counting only named substations, the 230 kV+ gap
+  holds (49.3% vs 40.4%, OR 1.44). That check was run in the Research manager's review, not in the notebook.
 - "Holds or borders" barely varies: almost every county borders a 115 kV+ substation, and 94% border a
   230 kV+ one. "Holds" is the measure that separates the groups.
 - Connecticut: Sabin codes its towns to the pre-2022 counties, which Census replaced with planning

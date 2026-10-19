@@ -522,7 +522,7 @@ def _(mo):
     mo.md(r"""
     ## 6b. Is it just bigger counties?
 
-    A larger county has more room for substations, and restricted counties tend to be large rural ones.
+    A larger county has more room for substations, and restricted counties are often rural ones.
     A logistic regression of "holds a substation of X kV and up" on restriction, log land area and a
     fixed effect per state asks whether the gap survives both. Same informative states as above.
     """)
