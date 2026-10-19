@@ -63,7 +63,7 @@ def _():
 @app.cell
 def _():
     def get(url: str, params: dict | None = None, tries: int = 4) -> requests.Response:
-        """GET with a fixed number of retries; FEMA's map server drops about one request in ten."""
+        """GET with a fixed number of retries; FEMA's map server drops many connections from some networks."""
         last = "no attempt"
         for attempt in range(tries):
             try:
@@ -79,7 +79,7 @@ def _():
                 if response.status_code == 200:
                     return response
                 last = f"HTTP {response.status_code}"
-            time.sleep(2**attempt)
+            time.sleep(min(2**attempt, 15))
         raise RuntimeError(f"{url} failed after {tries} tries: {last}")
 
     def arcgis(layer: str, params: dict, page: int = 1000, max_pages: int = 100) -> gpd.GeoDataFrame:
@@ -711,7 +711,7 @@ def _(arcgis, cached, get):
                 "returnGeometry": "false",
                 "f": "json",
             },
-            tries=6,
+            tries=12,
         ).json()
         if "features" not in reply:
             raise RuntimeError(f"NFHL error: {str(reply)[:300]}")
@@ -728,7 +728,7 @@ def _(arcgis, cached, get):
         for key, geometry in zip(points.index, points.geometry, strict=True):
             if str(key) not in known and geometry is not None:
                 known[str(key)] = flood_zone(geometry)
-        path.write_text(json.dumps(known, indent=1))
+                path.write_text(json.dumps(known, indent=1))  # saved as we go, so a rerun resumes here
         _located = points[points.geometry.notna()]
         _centres = gpd.GeoDataFrame(geometry=_located.geometry.representative_point(), index=_located.index, crs=4326)
         # Nearest tract within 1,000 ft, so piers and barges just off the tract shoreline still get a rating.
