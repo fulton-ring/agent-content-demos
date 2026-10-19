@@ -68,7 +68,10 @@ def _():
         for attempt in range(tries):
             try:
                 response = requests.get(
-                    url, params=params, timeout=180, headers={"User-Agent": "Mozilla/5.0 (nyc-supply-chain-risk spike)"}
+                    url,
+                    params=params,
+                    timeout=(20, 180),
+                    headers={"User-Agent": "Mozilla/5.0 (nyc-supply-chain-risk spike)"},
                 )
             except requests.RequestException as error:
                 last = repr(error)
@@ -172,8 +175,9 @@ def _():
     No single public dataset says which substation serves which part of Brooklyn. The links come from utility and
     grid-operator documents instead. Each source below has the exact passage we rely on. The notebook downloads
     every source and checks that the passage is in it (ignoring case, spaces and punctuation), so a reader can see
-    which links were verified on this run. Some servers (fema.gov, the PSC's document site) block automated
-    downloads from some networks; those come back as `unreachable`, not as verified.
+    which links were verified on this run. For the NYISO queue spreadsheet a passage `a ... b` means both parts sit
+    in the same row. fema.gov blocks automated downloads from some networks; a source that can't be downloaded
+    comes back as `unreachable`, not as verified.
     """)
     return
 
@@ -229,8 +233,9 @@ def _(documents, get):
     def normalise(text: str) -> str:
         return re.sub(r"[^a-z0-9]", "", text.lower())
 
-    def document_text(source: str) -> str | None:
-        """The document's text, normalised, or None if it can't be downloaded from here."""
+    def document_text(source: str) -> list[str] | None:
+        """The document's text, normalised: one entry per spreadsheet row, or one for a whole PDF or page.
+        None if it can't be downloaded from here."""
         path = DATA / f"doc-{source}"
         if not path.exists():
             try:
@@ -240,12 +245,12 @@ def _(documents, get):
                 return None
         raw = path.read_bytes()
         if raw.startswith(b"%PDF"):
-            return normalise(" ".join(page.extract_text() or "" for page in PdfReader(io.BytesIO(raw)).pages))
+            return [normalise(" ".join(page.extract_text() or "" for page in PdfReader(io.BytesIO(raw)).pages))]
         if raw.startswith(b"PK"):
             book = openpyxl.load_workbook(io.BytesIO(raw), read_only=True)
-            cells = (str(c) for sheet in book.worksheets for row in sheet.iter_rows(values_only=True) for c in row)
-            return normalise(" ".join(c for c in cells if c != "None"))
-        return normalise(re.sub(r"<[^>]+>", " ", raw.decode("utf-8", "replace")))
+            rows = (row for sheet in book.worksheets for row in sheet.iter_rows(values_only=True))
+            return [normalise(" ".join(str(c) for c in row if c is not None)) for row in rows]
+        return [normalise(re.sub(r"<[^>]+>", " ", raw.decode("utf-8", "replace")))]
 
     document_texts = {source: document_text(source) for source in documents}
     return document_texts, normalise
@@ -290,6 +295,8 @@ def _():
         ("Bensonhurst No. 1", "Sheepshead Bay", _psc, "3 B 10B Sheepshead Bay Bensonhurst No.1"),
         ("Bensonhurst No. 2", "Brighton Beach", _psc, "7 B 11B Brighton Beach Bensonhurst No.2"),
         ("Water St.", "Prospect Park", _psc, "40 B 12B Prospect Park Water St."),
+        # A Queens network whose load area takes in 4,788 Brooklyn lots along the border.
+        ("Glendale", "Maspeth", _psc, "24 Q 6Q Maspeth Glendale"),
         # Area substation to transmission substation.
         *(
             (
@@ -320,9 +327,14 @@ def _():
         ("Hudson (NJ)", "Farragut", "nyiso-bps", "B3402 HUDSON A 345 FARRAGUT 1 345"),
         ("Goethals", "Gowanus", "nyiso-bps", "25 GOWANUS N. 345 GOETHALS N.1 345"),
         # Plants.
-        ("NYPA 23rd St and 3rd Ave", "Gowanus", "nyiso-queue", "23rd St and 3rd Ave Gowanus Substation"),
-        ("Bayonne Energy Center", "Gowanus", "nyiso-queue", "Bayonne Energy Center Gowanus Substation 345kV"),
-        ("NYPA N First St and Grand Ave", "Greenwood", "nyiso-queue", "N First St and Grand Ave Vernon-Greenwood line"),
+        ("NYPA 23rd St and 3rd Ave", "Gowanus", "nyiso-queue", "23rd St and 3rd Ave ... Gowanus Substation"),
+        ("Bayonne Energy Center", "Gowanus", "nyiso-queue", "Bayonne Energy Center ... Gowanus Substation 345kV"),
+        (
+            "NYPA N First St and Grand Ave",
+            "Greenwood",
+            "nyiso-queue",
+            "N First St and Grand Ave ... Vernon-Greenwood line",
+        ),
         *(
             (
                 plant,
@@ -336,7 +348,9 @@ def _():
         ("Brooklyn Navy Yard Cogen", "Farragut", None, "inferred: nearest 345/138 kV substation, about 700 m away"),
     ]
     documented_links = pd.DataFrame(_rows, columns=["supplier", "consumer", "source", "passage"])
-    documented_links["status"] = documented_links["source"].map(lambda s: "documented" if isinstance(s, str) else "inferred")
+    documented_links["status"] = documented_links["source"].map(
+        lambda s: "documented" if isinstance(s, str) else "inferred"
+    )
     documented_links
     return (documented_links,)
 
@@ -365,8 +379,18 @@ def _():
                 )
                 for n in (1, 2)
             ),
-            ("Gowanus barges", "deactivation notice for 14 July 2026", "nyiso-gold-book-2026", "Gowanus 2-1 through 2-8"),
-            ("Narrows barges", "deactivation notice for 14 July 2026", "nyiso-gold-book-2026", "Narrows 1-1 through 2-8"),
+            (
+                "Gowanus barges",
+                "deactivation notice for 14 July 2026",
+                "nyiso-gold-book-2026",
+                "Gowanus 2-1 through 2-8",
+            ),
+            (
+                "Narrows barges",
+                "deactivation notice for 14 July 2026",
+                "nyiso-gold-book-2026",
+                "Narrows 1-1 through 2-8",
+            ),
         ],
         columns=["node", "stressor", "source", "passage"],
     )
@@ -378,10 +402,12 @@ def _(document_texts, documented_links, documents, fema_steps, normalise, stress
     def check(source: str | float, passage: str) -> str:
         if not isinstance(source, str):
             return "no source"
-        text = document_texts[source]
-        if text is None:
+        lines = document_texts[source]
+        if lines is None:
             return "unreachable"
-        return "verified" if normalise(passage) in text else "passage not found"
+        # A passage written "a ... b" needs every part in the same spreadsheet row (or the same document).
+        parts = [normalise(part) for part in passage.split(" ... ")]
+        return "verified" if any(all(part in line for part in parts) for line in lines) else "passage not found"
 
     _checks = pd.concat(
         [
@@ -390,7 +416,9 @@ def _(document_texts, documented_links, documents, fema_steps, normalise, stress
             stressors.assign(what=stressors["node"] + ": " + stressors["stressor"]),
         ]
     )[["what", "source", "passage"]]
-    source_check = _checks.assign(result=[check(s, p) for s, p in zip(_checks["source"], _checks["passage"])])
+    source_check = _checks.assign(
+        result=[check(s, p) for s, p in zip(_checks["source"], _checks["passage"], strict=True)]
+    )
     source_check = source_check.assign(
         document=source_check["source"].map(lambda s: documents[s][0] if isinstance(s, str) else ""),
         url=source_check["source"].map(lambda s: documents[s][1] if isinstance(s, str) else ""),
@@ -485,15 +513,17 @@ def _():
     ## 5. Which network or feeder serves each lot
 
     Con Edison's [hosting capacity map](https://www.coned.com/en/business-partners/hosting-capacity) (the utility's
-    entry in DOE's U.S. Atlas of Electric Distribution System Hosting Capacity Maps) publishes two layers we can
+    entry in DOE's U.S. Atlas of Electric Distribution System Hosting Capacity Maps) publishes three layers we can
     use without a login:
 
-    - the boundary of each underground **network**, which serves most of Brooklyn;
-    - every overhead **feeder segment** outside the networks, each tagged with its area substation.
+    - each **network's load area**, a polygon named for the network, which together cover nearly all of Brooklyn;
+    - the **network-supplied area**, the part actually fed by the underground network grid (unnamed polygons);
+    - every overhead **feeder segment**, each tagged with its area substation.
 
-    A lot inside a network boundary is served by that network. A lot outside every network is matched to the
-    nearest overhead segment within 500 feet. We match all 277k Brooklyn tax lots (MapPLUTO points from NYC Open
-    Data) to measure coverage, then the same rule serves the user's parcels.
+    A lot in both a load area and a network-supplied area is served by that network. Any other lot is matched to
+    the nearest feeder segment within 500 feet. A lot near no segment falls back to its load area's network, which
+    we mark as inferred. We match all 276k Brooklyn tax lots (MapPLUTO points from NYC Open Data) to measure
+    coverage, then the same rule serves the user's parcels.
     """)
     return
 
@@ -505,18 +535,23 @@ def _(arcgis, cached):
         "coned-networks.parquet",
         lambda: arcgis(f"{_coned}/CECONY_NetworkLCSD_Prod/FeatureServer/0", {"outFields": "NETWORK,BOROUGH"}),
     )
+    network_areas = cached(
+        "coned-network-supplied-areas.parquet",
+        lambda: arcgis(f"{_coned}/CECONY_NwkSuppliedArea_Prod/FeatureServer/0", {"outFields": "OBJECTID"}),
+    )
+    _brooklyn_box = {
+        "outFields": "FEEDER_ID,SUBSTATION",
+        "geometry": "-74.05,40.56,-73.83,40.74",
+        "geometryType": "esriGeometryEnvelope",
+        "inSR": 4326,
+        "spatialRel": "esriSpatialRelIntersects",
+    }
+    # Layer 0 holds three-phase overhead segments, layer 1 one- and two-phase ones.
     feeders = cached(
         "coned-overhead-segments-brooklyn.parquet",
-        lambda: arcgis(
-            f"{_coned}/CECONY_NodalHCV_Prod/FeatureServer/0",
-            {
-                "outFields": "FEEDER_ID,SUBSTATION",
-                "geometry": "-74.05,40.56,-73.83,40.74",
-                "geometryType": "esriGeometryEnvelope",
-                "inSR": 4326,
-                "spatialRel": "esriSpatialRelIntersects",
-            },
-            page=2000,
+        lambda: pd.concat(
+            [arcgis(f"{_coned}/CECONY_NodalHCV_Prod/FeatureServer/{n}", _brooklyn_box, page=2000) for n in (0, 1)],
+            ignore_index=True,
         ),
     )
     # The 2012 PSC table and the map spell names differently; these are the only differences.
@@ -527,7 +562,7 @@ def _(arcgis, cached):
         .str.replace(r"No\.(\d)", r"No. \1", regex=True)
         .replace({"Plymouth": "Plymouth St."})
     )
-    return feeders, networks
+    return feeders, network_areas, networks
 
 
 @app.cell
@@ -558,23 +593,25 @@ def _(cached, get):
 
 
 @app.cell
-def _(feeders, networks):
+def _(feeders, network_areas, networks):
     def serve(points: gpd.GeoDataFrame) -> pd.DataFrame:
-        """For each point: the network it is inside, else the area substation of the nearest overhead segment."""
+        """For each point: its network if it is inside a network-supplied area, else the area substation of the
+        nearest overhead segment within 500 ft, else the load area it sits in (an inference), else nothing."""
         _pts = points.to_crs(NY_FEET)
-        inside = gpd.sjoin(_pts, networks.to_crs(NY_FEET)[["network", "geometry"]], predicate="within", how="left")
-        inside = inside[~inside.index.duplicated()]
-        outside = _pts[inside["network"].isna()]
+        area = gpd.sjoin(_pts, networks.to_crs(NY_FEET)[["network", "geometry"]], predicate="within", how="left")
+        area = area[~area.index.duplicated()]["network"]
+        supplied = gpd.sjoin(_pts, network_areas.to_crs(NY_FEET)[["geometry"]], predicate="within", how="inner")
+        on_network = _pts.index.isin(supplied.index) & area.notna()
         near = gpd.sjoin_nearest(
-            outside, feeders.to_crs(NY_FEET)[["area_substation", "geometry"]], how="left", max_distance=500
+            _pts[~on_network], feeders.to_crs(NY_FEET)[["area_substation", "geometry"]], how="left", max_distance=500
         )
-        near = near[~near.index.duplicated()]
-        served = pd.DataFrame({"network": inside["network"]}, index=points.index)
-        served["area_substation"] = near["area_substation"]
-        served["served_by"] = served["network"].fillna(served["area_substation"])
-        served["match"] = "network boundary"
-        served.loc[served["network"].isna() & served["area_substation"].notna(), "match"] = "overhead feeder"
-        served.loc[served["served_by"].isna(), "match"] = "not matched"
+        near = near[~near.index.duplicated()]["area_substation"].reindex(points.index)
+        served = pd.DataFrame(index=points.index)
+        served["served_by"] = area.where(on_network).fillna(near).fillna(area)
+        served["match"] = "not matched"
+        served.loc[area.notna(), "match"] = "load area only (inferred)"
+        served.loc[near.notna(), "match"] = "overhead feeder"
+        served.loc[on_network, "match"] = "network boundary"
         return served
 
     return (serve,)
@@ -610,12 +647,17 @@ def _(documented_links, feeders, networks):
     # Overhead feeders name their area substation directly; a substation that appears only here has no supplier.
     for _sub in sorted(set(feeders["area_substation"].dropna())):
         graph.add_node(_sub)
-    documented_graph = graph.edge_subgraph([(u, v) for u, v, d in graph.edges(data=True) if d["status"] == "documented"])
+    documented_graph = graph.edge_subgraph(
+        [(u, v) for u, v, d in graph.edges(data=True) if d["status"] == "documented"]
+    )
+    # The radial graph drops the 345 kV ties, leaving each lot's direct supply chain.
+    radial_graph = graph.copy()
+    radial_graph.remove_edges_from([(u, v) for u, v, d in graph.edges(data=True) if d["source"] == "nyiso-bps"])
     mo.md(
         f"The graph has **{graph.number_of_nodes()} nodes and {graph.number_of_edges()} links**. "
         f"Brooklyn networks on Con Edison's map with no area substation in the 2012 table: {_unlinked or 'none'}."
     )
-    return documented_graph, graph
+    return documented_graph, graph, radial_graph
 
 
 @app.cell(hide_code=True)
@@ -650,13 +692,19 @@ def _(arcgis, cached, get):
     flood_rank = {"VE": 4, "V": 4, "AE": 3, "A": 3, "AO": 3, "AH": 3, "X 0.2%": 2, "X": 1, "none": 0}
 
     def flood_zone(geometry: shapely.Geometry) -> str:
-        """Worst NFHL flood zone touching the geometry's bounding box."""
-        xmin, ymin, xmax, ymax = geometry.bounds
+        """Worst NFHL flood zone touching the geometry: a site's footprint, or a parcel's point."""
+        if geometry.geom_type == "Point":
+            shape, kind = f"{geometry.x},{geometry.y}", "esriGeometryPoint"
+        else:
+            # Outer rings only, simplified to about 5 m so the query fits in a URL.
+            parts = getattr(geometry.simplify(0.00005), "geoms", [geometry.simplify(0.00005)])
+            rings = [[list(xy) for xy in part.exterior.coords] for part in parts if part.geom_type == "Polygon"]
+            shape, kind = json.dumps({"rings": rings, "spatialReference": {"wkid": 4326}}), "esriGeometryPolygon"
         reply = get(
             "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/28/query",
             {
-                "geometry": f"{xmin},{ymin},{xmax},{ymax}",
-                "geometryType": "esriGeometryEnvelope",
+                "geometry": shape,
+                "geometryType": kind,
                 "inSR": 4326,
                 "spatialRel": "esriSpatialRelIntersects",
                 "outFields": "FLD_ZONE,ZONE_SUBTY",
@@ -677,13 +725,14 @@ def _(arcgis, cached, get):
         """Flood zone and NRI ratings for each geometry; flood zones are cached in DATA/name."""
         path = DATA / name
         known = json.loads(path.read_text()) if path.exists() else {}
-        for key, geometry in zip(points.index, points.geometry):
+        for key, geometry in zip(points.index, points.geometry, strict=True):
             if str(key) not in known and geometry is not None:
                 known[str(key)] = flood_zone(geometry)
         path.write_text(json.dumps(known, indent=1))
         _located = points[points.geometry.notna()]
         _centres = gpd.GeoDataFrame(geometry=_located.geometry.representative_point(), index=_located.index, crs=4326)
-        tract = gpd.sjoin(_centres, nri_tracts, predicate="within", how="left")
+        # Nearest tract within 1,000 ft, so piers and barges just off the tract shoreline still get a rating.
+        tract = gpd.sjoin_nearest(_centres.to_crs(NY_FEET), nri_tracts.to_crs(NY_FEET), how="left", max_distance=1000)
         tract = tract[~tract.index.duplicated()].reindex(points.index)
         return pd.DataFrame(
             {
@@ -717,29 +766,34 @@ def _():
     ## 8. Concentration (FEMA Phase 2)
 
     The guide says to find "the seven or fewer sources that are likely to generate 70 to 80 percent of total
-    flows". Counting tax lots (not load, which isn't public by lot) behind each facility:
+    flows". Counting tax lots (not load, which isn't public by lot) behind each facility. The 345 kV ties are left
+    out here: Farragut and Gowanus back each other up, so with the ties every facility would sit behind nearly every
+    lot.
     """)
     return
 
 
 @app.cell
-def _(facility_nodes, graph, lot_service):
+def _(facility_nodes, graph, lot_service, radial_graph):
+    _kind = dict(zip(facility_nodes["node"], facility_nodes["kind"], strict=True))
     _served = lot_service.loc[lot_service["served_by"].notna(), "served_by"]
     _per_first = _served.value_counts()
     _counts: dict[str, int] = {}
     for _first, _n in _per_first.items():
-        _upstream = nx.ancestors(graph, _first) if _first in graph else set()
+        _upstream = nx.ancestors(radial_graph, _first) if _first in radial_graph else set()
         for _node in _upstream | {_first}:
             _counts[_node] = _counts.get(_node, 0) + int(_n)
     concentration = (
         pd.Series(_counts, name="lots").rename_axis("node").reset_index().sort_values("lots", ascending=False)
     )
     concentration["share_of_brooklyn_lots"] = (concentration["lots"] / len(lot_service)).round(3)
-    _area = concentration[
-        concentration["node"].isin(facility_nodes.loc[facility_nodes["kind"] == "area substation", "node"])
-    ]
-    _cumulative = _area["lots"].cumsum() / len(lot_service)
-    area_substations_for_80 = int((_cumulative < 0.8).sum() + 1)
+    # For the 80% test, count each lot once, under the area substation that serves it directly (Greenwood also
+    # feeds Bensonhurst over 138 kV, so the totals above count Bensonhurst's lots twice).
+    _direct = {
+        f: f if _kind.get(f) == "area substation" else next(iter(graph.predecessors(f)), f) for f in _per_first.index
+    }
+    direct_lots = _served.map(_direct).value_counts()
+    area_substations_for_80 = int((direct_lots.cumsum() / len(lot_service) < 0.8).sum() + 1)
     concentration.to_csv(OUT / "concentration.csv", index=False)
     mo.vstack(
         [
@@ -747,10 +801,12 @@ def _(facility_nodes, graph, lot_service):
                 f"**{area_substations_for_80} area substations serve 80% of Brooklyn's {len(lot_service):,} lots.** "
                 "Top facilities by lots behind them:"
             ),
+            direct_lots.rename("lots served directly"),
+            mo.md("Lots with each facility anywhere upstream (345 kV ties left out):"),
             concentration.head(12),
         ]
     )
-    return area_substations_for_80, concentration
+    return area_substations_for_80, concentration, direct_lots
 
 
 @app.cell(hide_code=True)
@@ -803,8 +859,9 @@ def _():
     Set `PARCELS` to a CSV with columns `name` and either `bbl` (NYC's borough-block-lot number) or `lat` and `lon`,
     or to a GeoJSON file of points or polygons with a `name` property. Each parcel is placed (BBL looked up in
     PLUTO, otherwise its own coordinates), matched to a network or feeder, and its upstream facilities are listed with
-    their hazards. The ranking puts the worst flood zone first, then NRI coastal flooding, then the NRI overall
-    score, with documented stressors shown alongside.
+    their hazards. The ranking puts the parcel's direct supply chain first and the 345 kV ties after it (the ties
+    are meshed, so losing one is less likely to cut the parcel off). Within each group it puts the worst flood zone
+    first, then NRI coastal flooding, then the NRI overall score, with documented stressors shown alongside.
     """)
     return
 
@@ -824,7 +881,7 @@ def _(lots):
             bbl, lat, lon = row.get("bbl"), row.get("lat"), row.get("lon")
             if isinstance(bbl, str) and bbl in by_bbl.index:
                 geometry.append(by_bbl[bbl])
-            elif pd.notna(lat) and pd.notna(lon):
+            elif isinstance(lat, float | int) and isinstance(lon, float | int) and pd.notna(lat) and pd.notna(lon):
                 geometry.append(shapely.Point(float(lon), float(lat)))
             else:
                 geometry.append(None)
@@ -836,7 +893,7 @@ def _(lots):
 
 
 @app.cell
-def _(documented_graph, flood_rank, graph, hazards, node_hazards, parcels, serve, stressors):
+def _(documented_graph, flood_rank, graph, hazards, node_hazards, parcels, radial_graph, serve, stressors):
     _placed = parcels[parcels.geometry.notna()]
     _service = serve(_placed).reindex(parcels.index)
     _service["match"] = _service["match"].fillna("not placed (BBL not in PLUTO and no coordinates)")
@@ -848,9 +905,12 @@ def _(documented_graph, flood_rank, graph, hazards, node_hazards, parcels, serve
         if not isinstance(_first, str) or _first not in graph:
             continue
         _tier = nx.shortest_path_length(graph.reverse(copy=False), _first)
+        _direct = nx.ancestors(radial_graph, _first) | {_first}
         for _node, _hops in _tier.items():
             _on_docs = _node == _first or (
-                _node in documented_graph and _first in documented_graph and nx.has_path(documented_graph, _node, _first)
+                _node in documented_graph
+                and _first in documented_graph
+                and nx.has_path(documented_graph, _node, _first)
             )
             _known = _node in node_hazards.index
             _rows.append(
@@ -859,9 +919,24 @@ def _(documented_graph, flood_rank, graph, hazards, node_hazards, parcels, serve
                     "upstream": _node,
                     "kind": node_hazards.loc[_node, "kind"] if _known else "network",
                     "hops": _hops + 1,
+                    "path": "direct supply" if _node in _direct else "345 kV tie",
                     "chain_documented": _on_docs,
-                    **(node_hazards.loc[_node, ["flood_zone", "nri_overall", "nri_coastal_flood", "nri_hurricane",
-                                                "nri_heat_wave", "nri_score", "stressors"]].to_dict() if _known else {}),
+                    **(
+                        node_hazards.loc[
+                            _node,
+                            [
+                                "flood_zone",
+                                "nri_overall",
+                                "nri_coastal_flood",
+                                "nri_hurricane",
+                                "nri_heat_wave",
+                                "nri_score",
+                                "stressors",
+                            ],
+                        ].to_dict()
+                        if _known
+                        else {}
+                    ),
                     "stressor_sources": _sources.get(_node, ""),
                 }
             )
@@ -869,14 +944,17 @@ def _(documented_graph, flood_rank, graph, hazards, node_hazards, parcels, serve
     upstream = pd.DataFrame(_rows)
     upstream["flood_rank"] = upstream["flood_zone"].map(lambda z: flood_rank.get(z, -1))
     upstream["coastal_rank"] = upstream["nri_coastal_flood"].map(lambda r: _ratings.index(r) if r in _ratings else -1)
+    upstream["tie"] = upstream["path"] == "345 kV tie"
     upstream = upstream.sort_values(
-        ["parcel", "flood_rank", "coastal_rank", "nri_score"], ascending=[True, False, False, False]
+        ["parcel", "tie", "flood_rank", "coastal_rank", "nri_score"], ascending=[True, True, False, False, False]
     )
     upstream["rank"] = upstream.groupby("parcel").cumcount() + 1
-    upstream = upstream.drop(columns=["flood_rank", "coastal_rank"])
+    upstream = upstream.drop(columns=["tie", "flood_rank", "coastal_rank"])
     upstream.to_csv(OUT / "upstream_risks.csv", index=False)
-    parcel_status = parcels[["name", "bbl"]].join(_service[["served_by", "match"]]).join(
-        _parcel_hazards.reset_index(drop=True)[["flood_zone", "nri_overall"]]
+    parcel_status = (
+        parcels[["name", "bbl"]]
+        .join(_service[["served_by", "match"]])
+        .join(_parcel_hazards.reset_index(drop=True)[["flood_zone", "nri_overall"]])
     )
     parcel_status.to_csv(OUT / "parcels.csv", index=False)
     mo.vstack([parcel_status, upstream])
@@ -884,10 +962,10 @@ def _(documented_graph, flood_rank, graph, hazards, node_hazards, parcels, serve
 
 
 @app.cell
-def _(facility_nodes, graph, networks, parcel_status, parcels):
+def _(facility_nodes, graph, networks, node_hazards, parcels):
     _fig, _ax = plt.subplots(figsize=(10, 10))
     _bk = networks[networks["BOROUGH"] == "Brooklyn"]
-    _bk.plot(ax=_ax, column="network", cmap="tab20", alpha=0.25, edgecolor="grey", linewidth=0.5)
+    _bk.plot(ax=_ax, color="lightsteelblue", alpha=0.35, edgecolor="grey", linewidth=0.5)
     for _net in _bk.itertuples():
         _p = _net.geometry.representative_point()
         _ax.annotate(_net.network, (_p.x, _p.y), fontsize=7, ha="center", color="dimgrey")
@@ -907,11 +985,17 @@ def _(facility_nodes, graph, networks, parcel_status, parcels):
         _pts = _centre[_located["kind"] == _kind]
         _ax.scatter(_pts.x, _pts.y, marker=_marker, color=_colour, s=60, label=_kind, zorder=3)
     _placed = parcels[parcels.geometry.notna()]
-    _ax.scatter(_placed.geometry.x, _placed.geometry.y, marker="*", color="crimson", s=160, label="sample parcel", zorder=4)
+    _ax.scatter(
+        _placed.geometry.x, _placed.geometry.y, marker="*", color="crimson", s=160, label="sample parcel", zorder=4
+    )
     _ax.set_xlim(-74.1, -73.82)
     _ax.set_ylim(40.56, 40.75)
-    _ax.legend(loc="lower right")
-    _ax.set_title("Brooklyn power dependencies: networks (shaded), documented links (black), inferred (red dashed)")
+    _wet = _centre[node_hazards.reindex(_centre.index)["flood_zone"].isin(["AE", "A", "AO", "AH", "VE", "V"])]
+    _ax.scatter(
+        _wet.x, _wet.y, s=260, facecolors="none", edgecolors="red", linewidths=1.5, label="in FEMA 1% flood zone"
+    )
+    _ax.legend(loc="upper left", bbox_to_anchor=(1.0, 1.0))
+    _ax.set_title("Brooklyn power dependencies: Con Edison networks (shaded), documented links (black), inferred (red)")
     _ax.set_axis_off()
     _fig.savefig(OUT / "map.png", dpi=130, bbox_inches="tight")
     _fig
@@ -932,6 +1016,7 @@ def _():
 def _(
     area_substations_for_80,
     coverage,
+    direct_lots,
     documented_links,
     facility_nodes,
     graph,
@@ -942,8 +1027,10 @@ def _(
     upstream,
 ):
     _links = documented_links["status"].value_counts()
-    _kind = dict(zip(facility_nodes["node"], facility_nodes["kind"]))
-    _types = documented_links["supplier"].map(_kind) + " -> " + documented_links["consumer"].map(_kind).fillna("network")
+    _kind = dict(zip(facility_nodes["node"], facility_nodes["kind"], strict=True))
+    _types = (
+        documented_links["supplier"].map(_kind) + " -> " + documented_links["consumer"].map(_kind).fillna("network")
+    )
     summary = {
         "run_date": datetime.now(UTC).strftime("%Y-%m-%d"),
         "overture_release": overture_release,
@@ -958,6 +1045,7 @@ def _(
         "brooklyn_lots": int(lot_match.sum()),
         "lots_by_match": {k: int(v) for k, v in lot_match.items()},
         "area_substations_for_80pct_of_lots": area_substations_for_80,
+        "lots_by_direct_area_substation": {k: int(v) for k, v in direct_lots.items()},
         "coverage": coverage.to_dict(orient="records"),
         "parcels": parcel_status["match"].value_counts().to_dict(),
         "upstream_rows": len(upstream),
