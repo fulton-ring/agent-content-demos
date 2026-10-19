@@ -24,7 +24,7 @@ URL and download time of every file.
 
 | Source | What we use | Version |
 |---|---|---|
-| [HIFLD Next](https://hifld.publicenvirodata.org) | Power Plants, Generating Units, Transmission Lines (GeoParquet/GeoPackage) | release `1704edb3`, v1.0.0, downloaded 2026-10-18 |
+| [HIFLD Next](https://hifld.publicenvirodata.org) | Power Plants, Generating Units, Transmission Lines (GeoParquet/GeoPackage) | layer v1.0.0 (release `1704edb3`; the URL is not hash-pinned), downloaded 2026-10-18 |
 | [EIA-860](https://www.eia.gov/electricity/data/eia860/) | Plant and Energy Storage schedules | 2025 annual (final), released September 2026 |
 | [Overture Maps](https://docs.overturemaps.org/) | `base/infrastructure`, `class = substation` (OpenStreetMap data, ODbL) | release 2026-09-23.0 |
 | USGS, [Lucas et al. 2020](https://doi.org/10.1029/2019SW002329) | 100-year geoelectric field at 1,079 magnetotelluric sites | the paper's CSV at [commit `856374c`](https://github.com/greglucas/GeoelectricHazardPaper2019/blob/856374c4aa0a96f149915712d5b7cc3e017d1507/code/geoelectric_100year.csv) |
@@ -86,6 +86,8 @@ substation are almost all taps, so a raw count of floating ends would mostly be 
 
 - **Overpass failed.** Pulling OSM substations from the Overpass API reset or timed out on three servers. Overture's
   GeoParquet on S3 worked and is versioned, so it's the reproducible choice.
+- **EIA-860 is fetched from an unversioned URL** (`eia8602025.zip`). EIA revises annual files in place, so a later
+  run may shift the storage numbers slightly; `output/provenance.csv` records the download date.
 - **Connectivity is tested against OSM, not HIFLD.** A line end at a substation OSM hasn't mapped counts as floating.
   The 4 unclear ends include one at a named HIFLD substation with no clear yard on imagery.
 - **The hazard rating is by nearest survey site within 100 km**, not the paper's mapped cells, and the unsurveyed
