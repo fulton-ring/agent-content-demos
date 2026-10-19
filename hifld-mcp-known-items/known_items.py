@@ -576,8 +576,7 @@ def _(mo):
     ### Variance
 
     The same question can pass on one run and fail on the next. Below: for each model, how
-    many items got the same verdict (trace or no trace) on both runs, and the overall share
-    of items that traced on every run of every model.
+    many items got the same verdict (trace or no trace) on both runs.
     """)
     return
 

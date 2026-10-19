@@ -13,8 +13,8 @@ see.
 ## Run it
 
 ```bash
-export OPENROUTER_API_KEY=...   # the agent's model calls; about $1 a full run
-./run.sh                        # runs the notebook as a script, about 30 minutes
+export OPENROUTER_API_KEY=...   # the agent's model calls; about $2.25 a full run
+./run.sh                        # runs the notebook as a script, 30-40 minutes
 ```
 
 To read it with its tables, run `uv run marimo edit known_items.py` instead. `run.sh` writes
@@ -49,8 +49,8 @@ From one clean run on 2026-10-18 (`./run.sh` from a fresh clone, 28 minutes, $2.
 OpenRouter). Every number is in `outputs/summary.json`.
 
 **The headline.** An agent on the MCP server (Claude Haiku 5.5) returned 97.5% of the 40
-datasets and 93% of the 42 facilities on both runs, and 95% of all its answers (156 of 164)
-cited a dataset ID and record ID that check out against the key. The same test with an OpenAI
+datasets and at least 93% of the 42 facilities on both runs, and 95% of all its answers (156 of 164)
+cited IDs that check out against the key (the dataset ID, plus the record ID for facilities). The same test with an OpenAI
 model (GPT-6 Luna) found **none** of the 42 facilities, because of one defect in the server's
 tool schema (below). Catalog search alone put the right dataset first for only half the items.
 
@@ -78,6 +78,11 @@ doesn't find *Truck Driving Schools*, and a full sentence finds nothing.
 "Traces" means the cited dataset ID is the key dataset and the cited record ID is the record's
 own ID (`PLANT_CODE`, `NIDID`, `IPEDSID`…) or one of its generic IDs. Variance: Haiku gave the
 same verdict on both runs for 80 of 82 items; the patched Luna for 80 of 82.
+
+Record recall counts an ID match in any layer; the trace column also requires the key's layer
+(Rasmussen's campus-layer answer counts for recall, not for tracing). A second clean run in the
+Research manager's review (2026-10-19, $2.24) reproduced catalog search exactly and gave Haiku
+95-98% and the patched Luna 88-98% record recall, so quote ranges, not single numbers.
 
 **The schema defect.** `query_parquet` and `read_geoparquet_rows` declare their `sources` /
 `source` argument as an object with no properties. Haiku fills in the fields anyway; Luna sends
