@@ -15,8 +15,8 @@ Everything is in one marimo notebook, [`supply_chain_risk.py`](supply_chain_risk
 PARCELS=my_parcels.csv ./run.sh    # your own parcels: CSV with name and bbl, or name, lat and lon; or a GeoJSON
 ```
 
-To read it as a notebook: `uv run marimo edit supply_chain_risk.py`. The first run took 10 minutes from a clean
-checkout, most of it retrying FEMA's flood map server, which drops about half its connections. If it still gives up, run
+To read it as a notebook: `uv run marimo edit supply_chain_risk.py`. The first run from a clean checkout took 5.6
+minutes (12.7 minutes on an earlier try), most of it retrying FEMA's flood map server, which drops about half its connections. If it still gives up, run
 it again: every answer is cached in `data/` as it arrives. Later runs take about 35 seconds.
 
 ## The data

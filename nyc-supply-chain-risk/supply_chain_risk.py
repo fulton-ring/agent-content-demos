@@ -784,7 +784,10 @@ def _(facility_nodes, graph, lot_service, radial_graph):
         for _node in _upstream | {_first}:
             _counts[_node] = _counts.get(_node, 0) + int(_n)
     concentration = (
-        pd.Series(_counts, name="lots").rename_axis("node").reset_index().sort_values("lots", ascending=False)
+        pd.Series(_counts, name="lots")
+        .rename_axis("node")
+        .reset_index()
+        .sort_values(["lots", "node"], ascending=[False, True])
     )
     concentration["share_of_brooklyn_lots"] = (concentration["lots"] / len(lot_service)).round(3)
     # For the 80% test, count each lot once, under the area substation that serves it directly (Greenwood also
