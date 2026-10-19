@@ -45,7 +45,7 @@ spans both catalogues and every published Knutson percentile.
 | Mid-century, lower (RCP 4.5, 2050) | 1.99 | 1.04 | 2.1% | $40.6B → $20.8B |
 | Mid-century, higher (RCP 8.5, 2050) | 2.00 | 1.05 | 2.3% | $41.0B → $21.0B |
 | Late century, lower (RCP 4.5, 2100) | 1.96 | 1.06 | 2.9% | $40.5B → $21.1B |
-| Late century, higher (RCP 8.5, 2100) | 2.09 | 1.15 | 98.6% | $45.5B → $22.4B |
+| Late century, higher (RCP 8.5, 2100) | 2.09 | 1.14 | 98.6% | $45.5B → $22.4B |
 
 - **16-18% of counties drop one rating bin**, none drop two, and the county ranking of
   projected loss matches FEMA's almost exactly (Spearman 0.990-0.996).

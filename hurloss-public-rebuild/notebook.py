@@ -101,7 +101,7 @@ def _(mo):
     **Short answer: no.** Public inputs rebuild today's hurricane hazard well. They don't
     rebuild FEMA's multipliers, because FEMA's multipliers are about 2.0 almost everywhere and
     no published climate projection comes near 2. Our own layer, on FEMA's documented formula,
-    gives 1.04 to 1.15.
+    gives 1.04 to 1.14.
 
     FEMA's method (FRI technical document, Dec 2024, Sec. 7.2-7.3), which `fri.py` implements:
 
@@ -1493,7 +1493,7 @@ def _(bounds, fri, key, nri, ours, pd, write):
 @app.cell
 def _(mo):
     mo.md(r"""
-    In the 1,333 covered counties our central multipliers are 1.04, 1.05, 1.06 and 1.15 (mid
+    In the 1,333 covered counties our central multipliers are 1.04, 1.05, 1.06 and 1.14 (mid
     lower, mid higher, late lower, late higher). FEMA's value lies outside our whole range in
     97-98% of them, except late century under higher warming, which reaches FEMA's level only
     at the top Knutson percentile. National projected loss halves, 16-18% of counties drop one
