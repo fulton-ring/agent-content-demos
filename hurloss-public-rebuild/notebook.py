@@ -19,6 +19,7 @@ def _():
     import matplotlib
 
     matplotlib.use("Agg")
+    import aiohttp
     import fsspec
     import matplotlib.pyplot as plt
     import numpy as np
@@ -58,6 +59,7 @@ def _():
         Retry,
         TCTracks,
         TropCyclone,
+        aiohttp,
         cKDTree,
         cache,
         estimate_pressure,
@@ -788,6 +790,7 @@ def _(mo):
 @app.cell
 def _(
     TCTracks,
+    aiohttp,
     cKDTree,
     cached,
     estimate_pressure,
@@ -802,6 +805,7 @@ def _(
     pd,
     point_county,
     set_category,
+    time,
     wind_events,
     write,
     xr,
@@ -835,10 +839,22 @@ def _(
                 f"corrVMPI_11vars_alltcs_cutoff15_CMIP6_{period}_{gcm}.mat/content"
             )
             names = ["lat", "lon", "vs0_syn", "jday_syn", "year_syn"]
-            # trust_env lets aiohttp use a configured HTTPS proxy, as requests does.
-            remote = fsspec.open(url, "rb", block_size=1 << 20, client_kwargs={"trust_env": True})
-            with remote as handle:
-                raw = loadmat(handle, variable_names=names)
+            raw = {}
+            for attempt in range(6):
+                # trust_env lets aiohttp use a configured HTTPS proxy, as requests does.
+                remote = fsspec.open(
+                    url, "rb", block_size=1 << 20, client_kwargs={"trust_env": True}
+                )
+                try:
+                    with remote as handle:
+                        raw = loadmat(handle, variable_names=names)
+                    break
+                except aiohttp.ClientResponseError as error:
+                    # Zenodo rate-limits with HTTP 429; anything else, or a sixth 429, fails.
+                    if error.status != 429 or attempt == 5:
+                        raise
+                    log.info("Zenodo rate limit on RAFT %s %s; waiting", period, gcm)
+                    time.sleep(60 * (attempt + 1))
             assert all(n in raw for n in names), f"RAFT {period} {gcm} lacks a variable"
             arrays = {n: raw[n].astype(np.float32) for n in names[:4]}
             arrays["year_syn"] = raw["year_syn"].ravel().astype(np.int32)
@@ -1449,39 +1465,46 @@ def _(mo):
     rating bin and none drop two, but the county ranking barely moves: FEMA's doubling changed
     levels, not order.
 
-    **Cross-check.** STORM's own 2050 SSP5-8.5 GCM storms are an independent route, from
-    climate-model tracks rather than an assessment:
+    **Cross-check.** Two routes are independent of Knutson, from climate-model storms rather
+    than an assessment: STORM's 2050 SSP5-8.5 GCM storms against mid-century higher, and RAFT's
+    late-century storms against late century higher:
     """)
     return
 
 
 @app.cell
-def _(ours, pd, storm_ratio, write):
-    _both = pd.DataFrame(
-        {
-            "storm_hm": storm_ratio.clip(lower=1.0),
-            "our_hm": ours["MID_HIGHER_HM"],
-            "low": ours["MID_HIGHER_HM_LOW"],
-            "high": ours["MID_HIGHER_HM_HIGH"],
-        }
-    ).dropna()
-    storm_check = pd.DataFrame(
-        [
+def _(ours, pd, raft_ratio, storm_ratio, write):
+    _rows = []
+    for _route, _ratio, _s in (
+        ("storm_ssp585", storm_ratio, "MID_HIGHER"),
+        ("raft_ssp585", raft_ratio, "LATE_HIGHER"),
+    ):
+        _both = pd.DataFrame(
             {
+                "route_hm": _ratio.clip(lower=1.0),
+                "our_hm": ours[f"{_s}_HM"],
+                "low": ours[f"{_s}_HM_LOW"],
+                "high": ours[f"{_s}_HM_HIGH"],
+            }
+        ).dropna()
+        _rows.append(
+            {
+                "route": _route,
+                "scenario": _s,
                 "counties": len(_both),
-                "storm_hm_median": _both["storm_hm"].median(),
+                "route_hm_median": _both["route_hm"].median(),
                 "our_hm_median": _both["our_hm"].median(),
-                "storm_within_knutson_range": _both["storm_hm"]
+                "route_within_knutson_range": _both["route_hm"]
                 .between(_both["low"], _both["high"])
                 .mean(),
-                "storm_above_range": (_both["storm_hm"] > _both["high"]).mean(),
-                "spearman": _both["storm_hm"].corr(_both["our_hm"], method="spearman"),
-                "median_storm_over_ours": (_both["storm_hm"] / _both["our_hm"]).median(),
+                "route_above_range": (_both["route_hm"] > _both["high"]).mean(),
+                "spearman": _both["route_hm"].corr(_both["our_hm"], method="spearman"),
+                "median_route_over_ours": (_both["route_hm"] / _both["our_hm"]).median(),
             }
-        ]
-    )
-    write(storm_check, "layer/storm_check.csv")
-    storm_check
+        )
+    track_check = pd.DataFrame(_rows)
+    write(track_check, "layer/simulated_tracks_check.csv")
+    track_check
     return
 
 
