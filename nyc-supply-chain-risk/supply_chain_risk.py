@@ -136,7 +136,7 @@ def _():
             (
                 "1 Research and Mapping",
                 "Identify ultimate destinations of goods.",
-                "the parcels a user adds (demand nodes), and all 277k Brooklyn tax lots for coverage",
+                "the parcels a user adds (demand nodes), and all 276k Brooklyn tax lots for coverage",
             ),
             (
                 "1 Research and Mapping",
@@ -831,6 +831,7 @@ def _(facility_nodes, networks, nri_tracts, osm_power):
     _in_bk = osm_power[osm_power.geometry.representative_point().within(_brooklyn)]
     _coned = _in_bk[_in_bk["operator"].fillna("").str.contains("Consolidated Edison")]
     _volts = _coned["voltage"].fillna("")
+    # The "Con Edison 2024 report" counts were transcribed by hand from ju-reliability-2024, not checked by code.
     coverage = pd.DataFrame(
         [
             ("Area substations", 6, 7, int(_volts.str.startswith("138000;27000").sum())),

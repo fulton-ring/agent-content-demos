@@ -15,9 +15,9 @@ Everything is in one marimo notebook, [`supply_chain_risk.py`](supply_chain_risk
 PARCELS=my_parcels.csv ./run.sh    # your own parcels: CSV with name and bbl, or name, lat and lon; or a GeoJSON
 ```
 
-To read it as a notebook: `uv run marimo edit supply_chain_risk.py`. The first run from a clean checkout took 5.6
-minutes (12.7 minutes on an earlier try), most of it retrying FEMA's flood map server, which drops about half its connections. If it still gives up, run
-it again: every answer is cached in `data/` as it arrives. Later runs take about 35 seconds.
+To read it as a notebook: `uv run marimo edit supply_chain_risk.py`. A run from a clean checkout takes 3 to 13
+minutes (3.2 in review, 5.6 and 12.7 earlier), most of it retrying FEMA's flood map server, which drops about half
+its connections. If it still gives up, run it again: every answer is cached in `data/` as it arrives. Later runs take about 35 seconds.
 
 ## The data
 
@@ -64,7 +64,7 @@ are within 500 ft of an overhead feeder, 7,489 (2.7%) fall back to their load ar
 nothing.
 
 **Coverage against Con Edison's counts.** Con Edison's 2024 report lists 6 Brooklyn area substations, 11
-network/load areas and 15 4 kV unit substations. The 2012 table names 7 area substations (Brownsville No. 1 and 2 share
+network/load areas and 15 4 kV unit substations (transcribed by hand; the notebook doesn't check them). The 2012 table names 7 area substations (Brownsville No. 1 and 2 share
 a site, as do Bensonhurst No. 1 and 2). The public map has 5 area substation sites, 12 network areas (Richmond Hill
 is counted under Queens in the report), and 5 of the 15 unit substations.
 
@@ -74,8 +74,9 @@ Greenwood (fed from Gowanus) is upstream of 60% of lots and Farragut of 39%. **F
 1% annual chance flood zone and inside the area Sandy flooded.**
 
 **Sample parcel.** For Brookdale University Hospital the list has 11 upstream facilities. Its top risk is Farragut,
-the only 138 kV source for its area substation and in an AE zone. Next comes its area substation, Brownsville No. 1,
-which is outside the flood zone and documented to hit its capacity limit by summer 2028. The 345 kV ties come after
+the only 138 kV source for its area substation and in an AE zone. Second is Brooklyn Navy Yard Cogen (AE, but its link to
+Farragut is inferred, and the ranking sorts by flood zone, not by how well a link is documented). Third is its area
+substation, Brownsville No. 1, which is outside the flood zone and documented to hit its capacity limit by summer 2028. The 345 kV ties come after
 the direct chain. We hand-checked all 11 rows against the source passage, the facility's location, FEMA's zone at the
 site's centre and NYC's Sandy inundation map ([`hand_check.csv`](hand_check.csv)): **8 correct, 1 wrong, 2 not
 checkable.** The wrong one is East 13th Street, a 345 kV tie to Farragut. It isn't on OpenStreetMap, so it gets no
