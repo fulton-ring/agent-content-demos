@@ -922,6 +922,37 @@ def _(
 
 
 @app.cell
+def _(mo):
+    mo.md(r"""
+    ## 11. What didn't work, and what this doesn't show
+
+    - **pysheds.** The first HAND build used pysheds' `fill_depressions`, `resolve_flats` and
+      `compute_hand`. Its filled flats sat a fraction of a millimetre below their spill points,
+      so resolving the flats left pits. Cells draining into a pit got no HAND: 34% of the area
+      and 13% of the town's buildings. WhiteboxTools' standalone binary is blocked from
+      downloading here, but its `whitebox-workflows` wheel installs from PyPI and assigns HAND
+      to every cell in town.
+    - **OWP's own bucket** (`noaa-nws-owp-fim`) is Requester Pays and refuses anonymous reads.
+      The CIROH mirror has the same files.
+    - **NHDPlus HR service.** The NHDPlus HR map service timed out on most queries, so we use the
+      NHD HR HU8 file, which has the same flowline geometry without the value-added
+      attributes.
+    - **The 30 m match.** Four of the town's observed places have no structure or crossing
+      within 30 m. They are survey points in streets and yards, so no building- or
+      crossing-level ranking can score them.
+    - **Locations.** Storm report coordinates are rounded to 0.01°, about 1 km, which is why the
+      named places are geocoded from addresses instead. The SR 62 closure point is where SR 62
+      meets the county line, not a reported spot.
+    - **The answer key** shows only where flooding was seen. A building that ranks high and
+      didn't flood can't be told apart from one nobody surveyed, so this measures how many
+      observed places rank near the top, not precision.
+    - **No hydraulics.** No rainfall, discharge or drainage-structure data goes in. HAND ranks
+      places by height above a creek. It doesn't say whether the water reaches them.
+    """)
+    return
+
+
+@app.cell
 def _(
     METHODS,
     crossings,
