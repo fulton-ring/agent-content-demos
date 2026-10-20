@@ -19,16 +19,23 @@ def _():
     import matplotlib
 
     matplotlib.use("Agg")
+    import aiohttp
+    import fsspec
     import matplotlib.pyplot as plt
     import numpy as np
     import pandas as pd
     import pathos.pools
     import requests
+    import xarray as xr
     from climada.hazard import Centroids, TCTracks, TropCyclone
+    from climada.hazard.tc_tracks import _estimate_pressure as estimate_pressure
+    from climada.hazard.tc_tracks import set_category
     from matplotlib.colors import LogNorm, Normalize
     from remotezip import RemoteZip
     from requests.adapters import HTTPAdapter
     from scipy import sparse
+    from scipy.io import loadmat
+    from scipy.spatial import cKDTree
     from urllib3.util.retry import Retry
 
     import fri
@@ -52,9 +59,14 @@ def _():
         Retry,
         TCTracks,
         TropCyclone,
+        aiohttp,
+        cKDTree,
         cache,
+        estimate_pressure,
         fri,
+        fsspec,
         gpd,
+        loadmat,
         log,
         mo,
         np,
@@ -64,9 +76,11 @@ def _():
         replace,
         requests,
         results,
+        set_category,
         sparse,
         time,
         workers,
+        xr,
         zipfile,
     )
 
@@ -87,7 +101,7 @@ def _(mo):
     **Short answer: no.** Public inputs rebuild today's hurricane hazard well. They don't
     rebuild FEMA's multipliers, because FEMA's multipliers are about 2.0 almost everywhere and
     no published climate projection comes near 2. Our own layer, on FEMA's documented formula,
-    gives 1.04 to 1.15.
+    gives 1.04 to 1.14.
 
     FEMA's method (FRI technical document, Dec 2024, Sec. 7.2-7.3), which `fri.py` implements:
 
@@ -701,7 +715,7 @@ def _(fri, history, key, nri, pd, point_county, storm_present, write):
 @app.cell
 def _(mo):
     mo.md(r"""
-    ## 5. Four public routes to a climate signal
+    ## 5. Five public routes to a climate signal
 
     Each route gives a county ratio of projected to today's intensity (Eq. 11), before the
     floor at 1:
@@ -722,6 +736,322 @@ def _(mo):
     - **ARA Figure 1.** ARA's method on our observed-track catalogue: each storm's rate scaled
       by ARA's 2050 / reference ratio for its region and category. Our stand-in for "landfall"
       is the point where the storm's wind peaks. Mid-century higher only.
+    - **RAFT SSP5-8.5.** Eight CMIP6 GCMs' simulated storms, 2066-2100 over 1980-2014, after a
+      bias correction. The only route built from simulated late-century storms; late century,
+      higher warming only.
+    """)
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    ### The RAFT route, late century
+
+    RAFT (Balaguru et al. 2023, *Science Advances*,
+    [doi:10.1126/sciadv.adf0259](https://doi.org/10.1126/sciadv.adf0259)) gives 50,000
+    synthetic North Atlantic storms per climate for eight CMIP6 GCMs, 1980-2014 and 2066-2100
+    under SSP5-8.5, every 6 hours ([Zenodo 7465149](https://doi.org/10.5281/zenodo.7465149),
+    CC-BY-4.0). It is the only public catalogue of simulated storms that reaches late century.
+    Three things about it shape the route:
+
+    - **Genesis is held fixed** in both periods (the paper's Methods and text S1); a GCM's
+      historical and future sets even start from the same seeds. So RAFT carries changes in
+      where storms go and how strong they get, not in how many form, and every storm in either
+      period gets the same annual rate.
+    - **Its winds are far too weak.** The record warns that lifetime peak intensity is
+      underestimated. Near the US it is worse: no historical RAFT storm in any GCM has hurricane
+      wind within 2° of our grid, so every category near the coast comes from the bias
+      correction.
+    - **The files are 13 GB**, but they are uncompressed MATLAB v5, so `scipy.io.loadmat` over
+      an `fsspec` HTTP file reads just the five variables we need with range requests: about
+      200 of each file's 816 MB, one file at a time, kept as compressed float32.
+
+    **Bias correction.** For each GCM, quantile-map its historical RAFT winds at fixes within
+    2° of the grid onto IBTrACS's 6-hourly US-agency winds at the same kind of fixes, 1980-2014.
+    The same map corrects that GCM's historical and future storms, fix by fix. Above RAFT's
+    historical maximum, the map continues at its top-1% slope, capped at the observed North
+    Atlantic record. Quantile-mapping each storm's lifetime peak, the obvious alternative, is
+    shown below for comparison: it fixes peaks over the open ocean but leaves almost no
+    hurricanes near the coast.
+
+    Tracks become CLIMADA tracks with central pressure estimated from wind, as CLIMADA fills
+    gaps in IBTrACS, and get Holland wind on the same grid. Only storms with a corrected fix of
+    at least 51 kt (80% of Category 1) within 2° of the grid can put Category 1 wind on it, so
+    only those get wind fields, and only every second storm: 25,000 per climate, the same seeds
+    in both periods, which keeps it to about 45 minutes of reads and 90 minutes of wind. The
+    route is each GCM's late-century over historical county intensity, averaged with equal
+    weight over the GCMs that have hurricane wind in a county. Each GCM covers 983 to 1,570
+    counties and the ensemble 2,154, so many county values rest on only one or two GCMs. It
+    covers late century, higher warming (SSP5-8.5 stands in for RCP 8.5) only.
+    """)
+    return
+
+
+@app.cell
+def _(
+    TCTracks,
+    aiohttp,
+    cKDTree,
+    cached,
+    estimate_pressure,
+    fri,
+    fsspec,
+    grid_lat,
+    grid_lon,
+    loadmat,
+    log,
+    np,
+    observed_tracks,
+    pd,
+    point_county,
+    set_category,
+    time,
+    wind_events,
+    write,
+    xr,
+):
+    raft_gcms = (
+        "CanESM5",
+        "CMCC-CM2-SR5",
+        "EC-Earth3",
+        "GFDLCM4",
+        "IPSL-CM6A-LR",
+        "MIROC6",
+        "MPI-ESM1-2-LR",
+        "MRI-ESM2-0",
+    )
+    _grid = cKDTree(np.column_stack([grid_lat, grid_lon]))
+    _category_kt = (64, 83, 96, 113, 137)
+
+    def degrees_to_grid(lat: np.ndarray, lon: np.ndarray) -> np.ndarray:
+        """Distance in degrees from each fix to the nearest grid point; inf where there's none."""
+        distance = np.full(lat.shape, np.inf)
+        valid = np.isfinite(lat) & np.isfinite(lon)
+        distance[valid] = _grid.query(np.column_stack([lat[valid], lon[valid]]))[0]
+        return distance
+
+    def raft_arrays(period: str, gcm: str) -> dict[str, np.ndarray]:
+        """Storm x 6-hour arrays from one RAFT file, read with HTTP range requests and cached."""
+        target = cached("raft", f"{period}_{gcm}.npz")
+        if not target.exists():
+            url = (
+                "https://zenodo.org/api/records/7465149/files/intensity_model_output_"
+                f"corrVMPI_11vars_alltcs_cutoff15_CMIP6_{period}_{gcm}.mat/content"
+            )
+            names = ["lat", "lon", "vs0_syn", "jday_syn", "year_syn"]
+            raw = {}
+            for attempt in range(6):
+                # trust_env lets aiohttp use a configured HTTPS proxy, as requests does.
+                remote = fsspec.open(
+                    url, "rb", block_size=1 << 20, client_kwargs={"trust_env": True}
+                )
+                try:
+                    with remote as handle:
+                        raw = loadmat(handle, variable_names=names)
+                    break
+                except aiohttp.ClientResponseError as error:
+                    # Zenodo rate-limits with HTTP 429; anything else, or a sixth 429, fails.
+                    if error.status != 429 or attempt == 5:
+                        raise
+                    log.info("Zenodo rate limit on RAFT %s %s; waiting", period, gcm)
+                    time.sleep(60 * (attempt + 1))
+            assert all(n in raw for n in names), f"RAFT {period} {gcm} lacks a variable"
+            arrays = {n: raw[n].astype(np.float32) for n in names[:4]}
+            arrays["year_syn"] = raw["year_syn"].ravel().astype(np.int32)
+            np.savez_compressed(target.with_suffix(".partial.npz"), **arrays)
+            target.with_suffix(".partial.npz").rename(target)
+            log.info("RAFT %s %s: read with range requests", period, gcm)
+        with np.load(target) as data:
+            arrays = {name: data[name] for name in data.files}
+        assert arrays["vs0_syn"].shape == (50_000, 120), f"unexpected RAFT shape in {target}"
+        return arrays
+
+    def bias_correct(wind: np.ndarray, raft_near: np.ndarray) -> np.ndarray:
+        """Quantile-map RAFT winds (kt) onto observed winds near the grid, fix by fix."""
+        raft_q = np.quantile(raft_near, _levels)
+        assert np.all(np.diff(raft_q) > 0), "RAFT quantiles are not strictly increasing"
+        slope = (_observed_q[-1] - _observed_q[-11]) / (raft_q[-1] - raft_q[-11])
+        mapped = np.interp(wind, raft_q, _observed_q)
+        above = wind > raft_q[-1]
+        mapped[above] = _observed_q[-1] + slope * (wind[above] - raft_q[-1])
+        return np.where(wind > 0, np.minimum(mapped, _record), 0.0)
+
+    def raft_tracks(arrays: dict[str, np.ndarray], wind: np.ndarray, keep: np.ndarray) -> TCTracks:
+        """CLIMADA tracks for the kept storms, with central pressure estimated from wind."""
+        tracks = []
+        for storm in np.flatnonzero(keep):
+            steps = (wind[storm] > 0) & np.isfinite(arrays["lat"][storm])
+            lat = arrays["lat"][storm, steps].astype(float)
+            lon = arrays["lon"][storm, steps].astype(float)
+            vmax = wind[storm, steps]
+            days = arrays["jday_syn"][storm, steps].astype(float) - 1
+            start = np.datetime64(f"{arrays['year_syn'][storm]}-01-01T00:00")
+            time = start + np.round(days * 1440).astype("timedelta64[m]")
+            tracks.append(
+                xr.Dataset(
+                    {
+                        "time_step": ("time", np.full(lat.size, 6.0)),
+                        "max_sustained_wind": ("time", vmax),
+                        "central_pressure": (
+                            "time",
+                            estimate_pressure(np.full(lat.size, np.nan), lat, lon, vmax),
+                        ),
+                        "radius_max_wind": ("time", np.full(lat.size, np.nan)),
+                        "environmental_pressure": ("time", np.full(lat.size, 1010.0)),
+                        "basin": ("time", np.full(lat.size, "NA", dtype="<U2")),
+                    },
+                    coords={"time": time, "lat": ("time", lat), "lon": ("time", lon)},
+                    attrs={
+                        "max_sustained_wind_unit": "kn",
+                        "central_pressure_unit": "mb",
+                        "name": f"raft_{storm}",
+                        "sid": f"raft_{storm}",
+                        "orig_event_flag": True,
+                        "data_provider": "RAFT",
+                        "id_no": int(storm),
+                        "category": int(set_category(vmax)),
+                    },
+                )
+            )
+        assert tracks, "no RAFT storm comes near the grid"
+        return TCTracks(data=tracks)
+
+    def coastal_rates(close_peak: np.ndarray, rate: float) -> dict[str, float]:
+        """Storms a year with a fix within 0.5° of the grid, and those reaching each category."""
+        return {"storms": float((close_peak > 0).sum() * rate)} | {
+            f"cat{k + 1}": float((close_peak >= kt).sum() * rate)
+            for k, kt in enumerate(_category_kt)
+        }
+
+    # Observed 6-hourly fixes, 1980-2014: the target of the bias correction.
+    _observed = [t for t in observed_tracks().data if 1980 <= int(t.time.dt.year[0]) <= 2014]
+    _record = max(float(t.max_sustained_wind.max()) for t in _observed)
+    _levels = np.linspace(0.0, 1.0, 1001)
+    _near_winds, _observed_peaks = [], []
+    for _t in _observed:
+        _synoptic = (_t.time.dt.hour.to_numpy() % 6 == 0) & (_t.max_sustained_wind.to_numpy() > 0)
+        _wind = _t.max_sustained_wind.to_numpy()[_synoptic]
+        _distance = degrees_to_grid(_t.lat.to_numpy()[_synoptic], _t.lon.to_numpy()[_synoptic])
+        _near_winds.append(_wind[_distance <= 2])
+        _observed_peaks.append(_wind[_distance <= 0.5].max(initial=0.0))
+    _observed_q = np.quantile(np.concatenate(_near_winds), _levels)
+    _observed_lmi = np.sort([float(t.max_sustained_wind.max()) for t in _observed])
+    # RAFT's 50,000 storms per climate stand for the observed number of storms a year.
+    raft_rate = len(_observed) / 35 / 50_000
+    _diagnostics = [
+        {"gcm": "IBTrACS", "period": "1980-2014", "correction": "observed"}
+        | coastal_rates(np.array(_observed_peaks), 1 / 35)
+    ]
+
+    raft_intensity = {}
+    for _gcm in raft_gcms:
+        _hist = raft_arrays("hist", _gcm)
+        _hist_distance = degrees_to_grid(_hist["lat"], _hist["lon"])
+        _hist_wind = _hist["vs0_syn"].astype(float)
+        _raft_near = _hist_wind[(_hist_distance <= 2) & (_hist_wind > 0)]
+        _hist_lmi = np.sort(_hist_wind.max(axis=1))
+        for _period, _years in (("hist", (1980, 2014)), ("futu", (2066, 2100))):
+            _arrays = _hist if _period == "hist" else raft_arrays(_period, _gcm)
+            _distance = (
+                _hist_distance
+                if _period == "hist"
+                else degrees_to_grid(_arrays["lat"], _arrays["lon"])
+            )
+            _raw = _arrays["vs0_syn"].astype(float)
+            _wind = bias_correct(_raw, _raft_near)
+            # Comparison only: map each storm's lifetime peak instead, scaling its whole track.
+            _lmi = _raw.max(axis=1)
+            _position = np.clip(np.searchsorted(_hist_lmi, _lmi) / _hist_lmi.size, 0.0, 1.0)
+            _lmi_scale = np.quantile(_observed_lmi, _position) / np.where(_lmi > 0, _lmi, 1.0)
+            _close = _distance <= 0.5
+            for _name, _w in (("raw", _raw), ("peak", _raw * _lmi_scale[:, None]), ("fix", _wind)):
+                _diagnostics.append(
+                    {"gcm": _gcm, "period": _period, "correction": _name}
+                    | coastal_rates(np.where(_close, _w, 0.0).max(axis=1), raft_rate)
+                )
+            _keep = ((_distance <= 2) & (_wind >= 51.0)).any(axis=1)
+            _keep[1::2] = False  # every second storm, the same seeds in both periods
+
+            def _hourly(
+                pool: object,
+                arrays: dict[str, np.ndarray] = _arrays,
+                wind: np.ndarray = _wind,
+                keep: np.ndarray = _keep,
+            ) -> TCTracks:
+                tracks = raft_tracks(arrays, wind, keep)
+                tracks.equal_timestep(time_step_h=1.0, pool=pool)
+                return tracks
+
+            _events = wind_events(
+                _hourly,
+                grid_lat,
+                grid_lon,
+                f"raft_{_period}_{_gcm}_fixqm_half_grid0.25",
+                _years,
+                raft_rate,
+            )
+            raft_intensity[(_gcm, _period)] = fri.county_intensity(_events, point_county)
+            _diagnostics[-1]["storms_with_wind"] = int(_keep.sum())
+    raft_correction = pd.DataFrame(_diagnostics)
+    write(raft_correction, "raft_bias_correction.csv")
+    raft_correction.pivot_table(
+        index=["correction", "period"], values=["storms", "cat1", "cat3"], aggfunc="median"
+    )
+    return raft_gcms, raft_intensity
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    What the table shows (`storms` is storms a year with a fix within 0.5° of our grid; `catN`
+    those whose strongest fix there reaches Category N; per-GCM rows are in
+    `raft_bias_correction.csv`):
+
+    - **RAFT's tracks look right, and they agree with the paper.** Historical RAFT brings
+      4.3-5.3 storms a year near land against 4.1 observed. Late century, seven of eight GCMs bring
+      more (median +19%, from -1% for MRI-ESM2-0 to +32% for GFDL-CM4), as Balaguru et al.
+      find for the Gulf and lower East coasts.
+    - **Raw RAFT has no hurricanes near land**: its winds there span about 19-45 kt.
+    - **Mapping each storm's peak doesn't fix that.** It gives 0.1-0.8 Category 1+ storms a year
+      near land against 1.3 observed, because RAFT's peaks happen over the open ocean.
+    - **Mapping fixes near the grid does.** Historical RAFT then gives 1.5-1.9 Category 1+
+      storms a year near land (observed 1.3) and 0.26-0.43 Category 3+ (observed 0.29), so the
+      route uses it.
+    - **But then RAFT's intensity tail decides the answer.** The map stretches RAFT's 19-45 kt
+      onto observed 20-155 kt, so a few knots in RAFT's strongest coastal fixes become a
+      category. Despite more storms, six of eight GCMs end up with fewer Category 1+ storms near
+      land late century (CanESM5 1.88 to 1.06 a year), and two with more (GFDL-CM4 1.68 to 2.52,
+      IPSL-CM6A-LR 1.61 to 2.18).
+
+    Each GCM's county ratio, late century over historical, and the equal-weight ensemble:
+    """)
+    return
+
+
+@app.cell
+def _(fri, pd, raft_gcms, raft_intensity, write):
+    _ratios = {
+        g: fri.ratio(raft_intensity[(g, "futu")], raft_intensity[(g, "hist")]) for g in raft_gcms
+    }
+    raft_ratio = pd.DataFrame(_ratios).mean(axis=1)
+    _ratios["ensemble"] = raft_ratio
+    _spread = pd.DataFrame(_ratios).describe().T
+    write(_spread, "raft_gcm_ratios.csv", index=True)
+    _spread
+    return (raft_ratio,)
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    Every GCM's median county ratio is below 1, from 0.04 (CanESM5, CMCC-CM2-SR5)
+    to 0.78 (GFDL-CM4), and the ensemble's is 0.34, even where Category 1+ storms near land rise
+    (GFDL-CM4, +50%). The county ratios fall further than the coastal counts, likely because
+    wind footprints shrink as Category 3-4 storms become rarer. After the floor at 1, RAFT says most
+    counties see no change by late century. That says more about RAFT's intensities near land,
+    which its authors warn against using without correction, than about the climate: RAFT
+    supports "more storms reach the coast" but can't say how strong they are.
     """)
     return
 
@@ -735,6 +1065,7 @@ def _(
     np,
     pd,
     point_county,
+    raft_ratio,
     replace,
     shapes,
     sparse,
@@ -787,6 +1118,7 @@ def _(
         "knutson_frequency": pd.DataFrame(_frequency_only),
         "knutson_intensity": pd.DataFrame(_intensity),
         "storm_ssp585": pd.DataFrame({"MID_HIGHER": storm_ratio}),
+        "raft_ssp585": pd.DataFrame({"LATE_HIGHER": raft_ratio}),
         "ara_figure_1": pd.DataFrame(
             {"MID_HIGHER": fri.ratio(fri.county_intensity(_ara, point_county), _today)}
         ),
@@ -891,6 +1223,9 @@ def _(mo):
       rating bin, but the constant 2 is still as close in three scenarios. $1 + r$ fits the level
       better than $2r$. That fits FEMA's "projected" intensity having included the historical
       one, but it isn't proof.
+    - **RAFT, the only route from simulated late-century storms, does no better than no
+      change.** On held-out covered counties 69% keep FEMA's rating bin as documented and 78%
+      read as $1 + r$, against 95% for a constant 2, and its Spearman is about 0.
     - **Rank agreement is weak and depends on which states are scored** (Spearman, covered
       counties, $1 + r$):
     """)
@@ -1161,54 +1496,63 @@ def _(bounds, fri, key, nri, ours, pd, write):
 @app.cell
 def _(mo):
     mo.md(r"""
-    In the 1,333 covered counties our central multipliers are 1.04, 1.05, 1.06 and 1.15 (mid
+    In the 1,333 covered counties our central multipliers are 1.04, 1.05, 1.06 and 1.14 (mid
     lower, mid higher, late lower, late higher). FEMA's value lies outside our whole range in
     97-98% of them, except late century under higher warming, which reaches FEMA's level only
     at the top Knutson percentile. National projected loss halves, 16-18% of counties drop one
     rating bin and none drop two, but the county ranking barely moves: FEMA's doubling changed
     levels, not order.
 
-    **Cross-check.** STORM's own 2050 SSP5-8.5 GCM storms are an independent route, from
-    climate-model tracks rather than an assessment:
+    **Cross-check.** Two routes are independent of Knutson, from climate-model storms rather
+    than an assessment: STORM's 2050 SSP5-8.5 GCM storms against mid-century higher, and RAFT's
+    late-century storms against late century higher:
     """)
     return
 
 
 @app.cell
-def _(ours, pd, storm_ratio, write):
-    _both = pd.DataFrame(
-        {
-            "storm_hm": storm_ratio.clip(lower=1.0),
-            "our_hm": ours["MID_HIGHER_HM"],
-            "low": ours["MID_HIGHER_HM_LOW"],
-            "high": ours["MID_HIGHER_HM_HIGH"],
-        }
-    ).dropna()
-    storm_check = pd.DataFrame(
-        [
+def _(ours, pd, raft_ratio, storm_ratio, write):
+    _rows = []
+    for _route, _ratio, _s in (
+        ("storm_ssp585", storm_ratio, "MID_HIGHER"),
+        ("raft_ssp585", raft_ratio, "LATE_HIGHER"),
+    ):
+        _both = pd.DataFrame(
             {
+                "route_hm": _ratio.clip(lower=1.0),
+                "our_hm": ours[f"{_s}_HM"],
+                "low": ours[f"{_s}_HM_LOW"],
+                "high": ours[f"{_s}_HM_HIGH"],
+            }
+        ).dropna()
+        _rows.append(
+            {
+                "route": _route,
+                "scenario": _s,
                 "counties": len(_both),
-                "storm_hm_median": _both["storm_hm"].median(),
+                "route_hm_median": _both["route_hm"].median(),
                 "our_hm_median": _both["our_hm"].median(),
-                "storm_within_knutson_range": _both["storm_hm"]
+                "route_within_knutson_range": _both["route_hm"]
                 .between(_both["low"], _both["high"])
                 .mean(),
-                "storm_above_range": (_both["storm_hm"] > _both["high"]).mean(),
-                "spearman": _both["storm_hm"].corr(_both["our_hm"], method="spearman"),
-                "median_storm_over_ours": (_both["storm_hm"] / _both["our_hm"]).median(),
+                "route_above_range": (_both["route_hm"] > _both["high"]).mean(),
+                "spearman": _both["route_hm"].corr(_both["our_hm"], method="spearman"),
+                "median_route_over_ours": (_both["route_hm"] / _both["our_hm"]).median(),
             }
-        ]
-    )
-    write(storm_check, "layer/storm_check.csv")
-    storm_check
+        )
+    track_check = pd.DataFrame(_rows)
+    write(track_check, "layer/simulated_tracks_check.csv")
+    track_check
     return
 
 
 @app.cell
 def _(mo):
     mo.md(r"""
-    Both routes put the change far below FEMA's 2; they disagree on its size and where it
-    falls, which is why the range is published with the central value.
+    Both routes put the change far below FEMA's 2. STORM's mid-century multiplier sits above
+    our range in a third of counties; RAFT's late-century one is 1 in most counties and inside
+    our range in 88%. Neither agrees with ours on where the change falls (Spearman -0.18 and
+    0.06), which is why the range is published with the central value.
 
     ### Is it believable?
 
@@ -1521,11 +1865,16 @@ def _(mo):
       rate-limits repeated range reads (HTTP 429); downloads retry with backoff, and a rerun
       resumes from the cache.
     - **Not covered:** storm surge and rain (the FRI is wind only); terrain and buildings (they
-      live in NRI's EAL); climate-driven changes in tracks (Knutson is basin-wide); late-century
-      simulated tracks (RAFT, #24); Connecticut's v1.20 planning regions, which don't match the
-      2020 county codes; Alaska, Hawaii and the territories.
+      live in NRI's EAL); climate-driven changes in tracks in our layer (Knutson is basin-wide;
+      RAFT has them but not usable intensities); Connecticut's v1.20 planning regions, which
+      don't match the 2020 county codes; Alaska, Hawaii and the territories.
+    - **RAFT gave no usable late-century multiplier.** Its tracks agree with its paper (more
+      storms reach the coast), but its winds near land are so weak that any bias correction
+      decides the answer, and its eight GCMs disagree on whether Category 1+ storms near land rise
+      or fall. RAFT holds genesis fixed, so
+      it says nothing about how many storms form. Wind runs for every second storm only.
     - **Looked at and not used:** HURSAT (satellite imagery with no wind field), ASCE 7 wind
-      maps (no scenario component), RAFT (13 GB with a bias correction; split off as #24).
+      maps (no scenario component).
     """)
     return
 
