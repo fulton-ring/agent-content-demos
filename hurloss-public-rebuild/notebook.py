@@ -779,10 +779,11 @@ def _(mo):
     gaps in IBTrACS, and get Holland wind on the same grid. Only storms with a corrected fix of
     at least 51 kt (80% of Category 1) within 2° of the grid can put Category 1 wind on it, so
     only those get wind fields, and only every second storm: 25,000 per climate, the same seeds
-    in both periods, which keeps the run to about two hours. The route is each GCM's
-    late-century over historical county intensity, averaged with equal weight over the GCMs
-    that have hurricane wind in a county. It covers late century, higher warming (SSP5-8.5
-    stands in for RCP 8.5) only.
+    in both periods, which keeps it to about 45 minutes of reads and 90 minutes of wind. The
+    route is each GCM's late-century over historical county intensity, averaged with equal
+    weight over the GCMs that have hurricane wind in a county. Each GCM covers 983 to 1,570
+    counties and the ensemble 2,154, so many county values rest on only one or two GCMs. It
+    covers late century, higher warming (SSP5-8.5 stands in for RCP 8.5) only.
     """)
     return
 
@@ -1044,8 +1045,10 @@ def _(fri, pd, raft_gcms, raft_intensity, write):
 @app.cell
 def _(mo):
     mo.md(r"""
-    The GCMs disagree on the sign: median county ratios run from 0.04 (CanESM5, CMCC-CM2-SR5)
-    to 0.78 (GFDL-CM4), and the ensemble's is 0.34. After the floor at 1, RAFT says most
+    Every GCM's median county ratio is below 1, from 0.04 (CanESM5, CMCC-CM2-SR5)
+    to 0.78 (GFDL-CM4), and the ensemble's is 0.34, even where Category 1+ storms near land rise
+    (GFDL-CM4, +50%). The county ratios fall further than the coastal counts, likely because
+    wind footprints shrink as Category 3-4 storms become rarer. After the floor at 1, RAFT says most
     counties see no change by late century. That says more about RAFT's intensities near land,
     which its authors warn against using without correction, than about the climate: RAFT
     supports "more storms reach the coast" but can't say how strong they are.
@@ -1867,7 +1870,8 @@ def _(mo):
       don't match the 2020 county codes; Alaska, Hawaii and the territories.
     - **RAFT gave no usable late-century multiplier.** Its tracks agree with its paper (more
       storms reach the coast), but its winds near land are so weak that any bias correction
-      decides the answer, and its eight GCMs disagree on the sign. RAFT holds genesis fixed, so
+      decides the answer, and its eight GCMs disagree on whether Category 1+ storms near land rise
+      or fall. RAFT holds genesis fixed, so
       it says nothing about how many storms form. Wind runs for every second storm only.
     - **Looked at and not used:** HURSAT (satellite imagery with no wind field), ASCE 7 wind
       maps (no scenario component).

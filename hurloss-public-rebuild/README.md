@@ -29,7 +29,8 @@ climate projection comes near 2.**
   - STORM's four high-resolution GCMs, SSP5-8.5 2050: median 1.25.
   - ARA's own white paper, through FEMA's Eq. 11: 1.06-1.23 by region.
   - RAFT's simulated storms from eight CMIP6 GCMs, SSP5-8.5 2066-2100, bias-corrected: median
-    county ratio 0.34, with the GCMs disagreeing on the sign (below).
+    county ratio 0.34 (a multiplier of 1.00 after FEMA's floor; we read it as an artefact of
+    RAFT's weak winds near land, not a projection). Below.
 - **Read as 1 + ratio, the level matches** (91-100% same rating bin on covered counties). The
   pattern between counties agrees only weakly, and how well depends on which states are scored.
 
@@ -71,15 +72,16 @@ averaged with equal weight and scored for `LATE_HIGHER` like the others.
 | Storms a year near land, historical | RAFT 4.3-5.3, observed 4.1 |
 | Category 1+ near land, historical | raw RAFT 0; peak-mapped 0.1-0.8; fix-mapped 1.5-1.9; observed 1.3 |
 | Storms near land, late century | up in 7 of 8 GCMs, median +19% (as the paper finds) |
-| Category 1+ near land, late century | down in 6 of 8 GCMs, up in GFDL-CM4 and IPSL-CM6A-LR |
+| Category 1+ near land, late century | down in 5 of 8 GCMs, flat in MIROC6, up in GFDL-CM4 and IPSL-CM6A-LR |
 | Median county ratio per GCM | 0.04 (CanESM5) to 0.78 (GFDL-CM4); ensemble 0.34 |
-| Held-out same rating bin, covered | 69% as documented, 78% as $1 + r$; a constant 2 gets 95% |
+| Held-out same rating bin, covered | 69% as documented, 78% as $1 + r$ (322 counties RAFT covers); a constant 2 gets 95% (433) |
 | Download | 3.2 GB read with range requests out of 13 GB; 0.5 GB kept, plus 0.2 GB of wind |
 | Run time, 4 cores | about 45 min of range reads and 90 min of wind fields |
 
 **RAFT can't give a late-century multiplier.** Its tracks agree with its paper, but near land
 its winds span only about 19-45 kt, so the bias correction stretches a few knots into a whole
-category, and the GCMs disagree on the sign. RAFT holds genesis fixed, so it carries no change
+category. The GCMs disagree on whether Category 1+ storms near land rise or fall, yet every
+GCM's median county ratio is below 1. RAFT holds genesis fixed, so it carries no change
 in how many storms form. Wind fields run for every second storm (25,000 per climate, the same
 seeds in both periods).
 
