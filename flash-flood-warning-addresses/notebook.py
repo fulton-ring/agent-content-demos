@@ -488,9 +488,9 @@ def _(
         log.info("conditioning %s cells", _raw.size)
         _grid = Grid.from_raster(str(_burn_path))
         _dem = _grid.read_raster(str(_burn_path))
+        _mask = Raster(_stream_mask.astype("float32"), viewfinder=_dem.viewfinder)  # nonzero = channel
         _filled = _grid.resolve_flats(_grid.fill_depressions(_grid.fill_pits(_dem)))
         _fdir = _grid.flowdir(_filled)
-        _mask = Raster(_stream_mask, viewfinder=_dem.viewfinder)
         _idx = np.asarray(_grid.compute_hand(_fdir, _dem, _mask, return_index=True)).astype("int64")
         _valid = (_idx >= 0) & (_raw > -9000)
         _hand = np.full(_raw.shape, np.nan, dtype="float32")
