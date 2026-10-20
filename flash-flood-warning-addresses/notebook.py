@@ -184,8 +184,8 @@ def _(mo):
     ## 2. The answer key
 
     The NWS Louisville flood survey KMZ has one point per surveyed flood location. The points
-    carry times and an event id but no depths. We keep the points tagged `Lanesville2026`.
-    One of them sits in Corydon, 13 km west, so we drop it and keep the 11 that are in
+    carry times and an event id but no depths. Thirteen points are tagged `Lanesville2026`.
+    One of them sits in Corydon, 13 km west, so we drop it and keep the 12 that are in
     Lanesville.
 
     We add the named places from local storm reports and news, geocoded to Indiana address
@@ -223,8 +223,8 @@ def _(Point, arcgis, cache, fetch, gpd, pd, re, zipfile):
     _addr = "https://gisdata.in.gov/server/rest/services/Hosted/Address_Points_of_Indiana_2025/FeatureServer/0"
     _named = []
     for _label, _where in [
-        ("Methodist church", "add_number=2575 AND st_name LIKE '%JOHNS CHURCH%' AND county_fips='18061'"),
-        ("School track and ball field", "add_number=2725 AND st_name LIKE '%CRESTVIEW%' AND county_fips='18061'"),
+        ("Methodist church", "add_number=2575 AND UPPER(st_name) LIKE '%JOHNS CHURCH%' AND county_fips='18061'"),
+        ("School track and ball field", "add_number=2725 AND UPPER(st_name) LIKE '%CRESTVIEW%' AND county_fips='18061'"),
     ]:
         _hit = arcgis(
             _addr, {"where": _where, "outFields": "geofulladdress,latitude,longitude", "returnGeometry": "false"}
