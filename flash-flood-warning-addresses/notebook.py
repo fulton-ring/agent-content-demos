@@ -827,6 +827,7 @@ def _(
     observed,
     pd,
     ranks,
+    roads,
     stream_distance,
     town,
 ):
@@ -841,6 +842,7 @@ def _(
         places[f"town rank, {_label}"] = ranks[(_scope, _m)]
     _near = [candidates[candidates.in_town & (candidates.distance(p) <= 30)] for p in _obs.geometry]
     places["best 1 m HAND within 30 m (m)"] = [n.hand_1m.min() if len(n) else np.nan for n in _near]
+    places["to nearest road (m)"] = [float(roads.distance(p).min()) for p in _obs.geometry]
     places["to nearest stream (m)"] = [float(stream_distance[r, c]) for r, c in _rc]
     places["depression depth (m)"] = [float(np.nanmax(depression[r - 3 : r + 4, c - 3 : c + 4])) for r, c in _rc]
 
