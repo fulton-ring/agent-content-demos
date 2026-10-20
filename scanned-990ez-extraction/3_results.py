@@ -214,6 +214,9 @@ def _(rows):
                 "fields below 0.9 confidence": sum(r[f"{_model}_conf"] < 0.9 for r in rows),
             }
         )
+    _p, _k, _z = len(wrong_accepted) / len(accepted), len(accepted), 1.96
+    _centre = (_p + _z**2 / (2 * _k)) / (1 + _z**2 / _k)
+    _half = _z * (_p * (1 - _p) / _k + _z**2 / (4 * _k**2)) ** 0.5 / (1 + _z**2 / _k)
     headline = {
         "fields": n,
         "pages": len(pages),
@@ -223,6 +226,7 @@ def _(rows):
         "wrong but accepted": f"{len(wrong_accepted)} ({len(wrong_accepted) / n:.2%} of all fields, "
         f"{len(wrong_accepted) / len(accepted):.2%} of accepted)",
         "error after review": f"{len(wrong_accepted) / n:.2%}",
+        "wrong-but-accepted rate, 95% Wilson interval": f"{_centre - _half:.2%} to {_centre + _half:.2%}",
     }
     mo.vstack([mo.ui.table([headline], selection=None), mo.ui.table(comparison, selection=None)])
     return comparison, headline, review, wrong_accepted
