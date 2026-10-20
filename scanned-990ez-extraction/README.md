@@ -27,7 +27,7 @@ Three marimo notebooks, each top to bottom. Open one with `uv run marimo edit 1_
 ./run.sh
 ```
 
-You need [uv](https://docs.astral.sh/uv/) and `OPENROUTER_API_KEY`. `run.sh` runs the three notebooks as scripts, in order, so the numbers come from the code you read. They hand results on through `output/` (set `EZ_OUTPUT_DIR` to write elsewhere). A run takes about 15 minutes and costs about $2.10 in model calls; the notebook stops if spending passes $10. Model answers are saved under `output/answers/` and reused on a re-run; delete that folder to call the models again. It writes `output/results.json` and the crops in `screenshots/`.
+You need [uv](https://docs.astral.sh/uv/) and `OPENROUTER_API_KEY`. `run.sh` runs the three notebooks as scripts, in order, so the numbers come from the code you read. They hand results on through `output/` (set `EZ_OUTPUT_DIR` to write elsewhere). A run took 9 minutes and cost $2.07 in model calls; the notebook stops if spending passes $10. Model answers are saved under `output/answers/` and reused on a re-run; delete that folder to call the models again. It writes `output/results.json` and the crops in `screenshots/`.
 
 ## The data
 
@@ -37,7 +37,7 @@ All public, fetched at run time, none committed.
 - **Sample.** 220 paper returns drawn with a fixed seed. Page 1 only: the EIN, the tax year and the 20 Part I amounts SOI also has, 22 fields a page.
 - **Scans.** The file name comes from ProPublica's [Nonprofit Explorer API](https://projects.propublica.org/nonprofits/api), matched on EIN and tax period; the PDF comes from `apps.irs.gov/pub/epostcard/cor/`. Each file's sha256 is logged.
 - **Models.** Gemini 3.8 Flash and Qwen 3.8 27B (open weights) through OpenRouter, typed with Pydantic AI, the pair that let nothing wrong through in [`k1-extraction-review-queue/`](../k1-extraction-review-queue/).
-- **`adjudications.json`** (committed): the 68 fields where both models disagreed with SOI, or all three readings differed, each checked on the scan with the value there, a kind and a note.
+- **`adjudications.json`** (committed): the 69 fields where both models disagreed with SOI, or all three readings differed, each checked on the scan with the value there, a kind and a note.
 
 ## Results
 
@@ -47,27 +47,29 @@ From a clean run of `./run.sh` in a fresh clone on 2026-10-20.
 
 | | Gemini 3.8 Flash alone | Qwen 3.8 27B alone | The pair, review on disagreement |
 |---|---|---|---|
-| Wrong values | 38 (0.93%) | 60 (1.47%) | 10 accepted wrong (0.25%) |
-| Same, scored against SOI as published | 2.33% | 2.75% | |
-| Fields sent to review | | | 77 (1.9%) |
-| Pages with a field in review | | | 37 of 185 (20%) |
+| Wrong values | 27 (0.66%) | 72 (1.77%) | 9 accepted wrong (0.22%) |
+| Same, scored against SOI as published | 2.04% | 3.10% | |
+| Fields sent to review | | | 78 (1.9%) |
+| Pages with a field in review | | | 43 of 185 (23%) |
 
-**Disagreement versus confidence, at the same review budget (77 fields).** Disagreement between the two models caught 28 of Gemini's 38 errors and 50 of Qwen's 60. Sending each model's 77 lowest-confidence fields instead caught **0** of Gemini's errors and 10 of Qwen's. Both models put 0.9 or 0.95 on almost everything.
+**Disagreement versus confidence, at the same review budget (78 fields).** Disagreement between the two models caught 18 of Gemini's 27 errors and 63 of Qwen's 72. Sending each model's 78 lowest-confidence fields instead caught **0** of Gemini's errors and 8 of Qwen's. Both models put 0.9 or 0.95 on almost everything.
 
-**What got through: 10 wrong values in 3,993 accepted.** Eight are corrections an IRS clerk wrote by hand (six EINs, two tax years): both models read the typed value and agreed. One is a value both models put on line 17 when it belongs on line 16. One is a handwritten digit that reads as 5 but that the arithmetic says is 3. All ten crops are in `screenshots/`.
+**What got through: 9 wrong values in 3,992 accepted** (0.23%; 95% interval 0.12% to 0.43%). Seven are corrections an IRS clerk wrote by hand (five EINs, two tax years): both models read the typed value and agreed. One is a value both models put on line 17 when it belongs on line 16. One is a handwritten digit that reads as 5 but that the arithmetic says is 3. All nine crops are in `screenshots/`.
 
-**The answer key.** SOI differs from what is on the scan on **57 of 4,070 fields (1.4%)**, more often than Gemini does. Of the 68 fields checked: 43 are SOI edits (recomputed totals, fixed signs, amounts moved between lines, lines filled in that the filer left empty), 13 are SOI typos, 9 are IRS clerk corrections that SOI keyed correctly, 1 is a misread both models share, and 2 are ambiguous. Line 21 (net assets at year end) is the worst: SOI differs from the scan on 24 of 185. Scored against SOI as published, the models look 2.5 times worse than they are.
+**The answer key.** SOI differs from what is on the scan on **57 of 4,070 fields (1.4%)**, more often than Gemini does. Of the 69 fields checked: 43 are SOI edits (recomputed totals, fixed signs, amounts moved between lines, lines filled in that the filer left empty), 13 are SOI typos, 9 are IRS clerk corrections that SOI keyed correctly, 2 are model misreads, and 2 are ambiguous. Line 21 (net assets at year end) is the worst: SOI differs from the scan on 24 of 185. Scored against SOI as published, Gemini looks three times worse than it is.
 
-**Cost and time per page.** Model calls cost **$0.011 a page** for both readings. Each model took about 7 to 8 seconds a page. Review is an assumption, not a measurement: at 30 seconds a reviewed field and $40 an hour, review adds $0.14 a page, so the **all-in cost is about $0.15 a page**, or about $150 per 1,000 pages. Review is 92% of it.
+**Cost and time per page.** Model calls cost **$0.011 a page** for both readings. Gemini took 7.6 seconds a page and Qwen 8.2. Review is an assumption, not a measurement: at 30 seconds a reviewed field and $40 an hour, review adds $0.14 a page, so the **all-in cost is $0.15 a page**, or about $150 per 1,000 pages. Review is 93% of it.
 
-`3_results.py` breaks error down by field.
+`3_results.py` breaks error down by field. The EIN, the tax year and the totals (lines 9, 17, 18 and 21) carry most of the errors.
+
+**Run to run.** An earlier run the same day, with the same code, had Gemini wrong on 38 fields (0.93%), Qwen on 60, 77 sent to review and 10 wrong accepted (the same IRS-mark EINs plus one more). The method's numbers hold; the exact counts move by a few.
 
 ## What it doesn't show
 
 - **One form, one page, one year of the extract.** Page 1 of the 990-EZ is a typed grid of numbers with an answer key. Free-text records, tables that run across pages and handwriting-heavy forms will do worse.
 - **Reviewers are assumed perfect.** The error after review counts only wrong values accepted without review. How often a person gets a reviewed field right isn't measured (see the reading research on reviewers accepting wrong suggestions), and neither is review time.
 - **The answer key was checked by the agent that built this, not by a person.** Each decision is in `adjudications.json` with a note, for anyone to re-check. Fields where one model matched SOI were not checked; there SOI is taken as right.
-- **185 pages is a small sample.** Ten wrong values in 3,993 accepted puts the true rate between about 0.14% and 0.46% (95% Wilson interval), and the errors cluster on a few pages.
+- **185 pages is a small sample.** Nine wrong values in 3,992 accepted puts the true rate between about 0.12% and 0.43% (95% Wilson interval), and the errors cluster on a few pages.
 - **One run.** The open model's answers vary from run to run at temperature 0 (see the K-1 spike), so the numbers will move a little on a re-run.
 
 ## Files
