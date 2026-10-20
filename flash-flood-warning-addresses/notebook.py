@@ -809,9 +809,9 @@ def _(mo):
       ponding (pluvial flooding, which NOAA says HAND doesn't represent);
     - **far from a mapped stream**: more than 100 m from any kept NHD stream, so HAND measures
       height above a creek the water didn't come from;
-    - **high above drainage**: within reach of a stream but more than 2 m above it, so either
-      the water rose that far or it arrived some other way, such as street runoff or a blocked
-      culvert.
+    - **high above drainage**: within 100 m of a stream and not in a depression, but too high
+      above the stream to rank in the top 100. Either the water rose that far, or it arrived
+      some other way, such as street runoff or a blocked culvert.
     """)
 
 
