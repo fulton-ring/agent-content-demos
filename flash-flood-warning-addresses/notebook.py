@@ -13,6 +13,7 @@ def _():
     import re
     import time
     import zipfile
+    from collections.abc import Callable
     from pathlib import Path
 
     import geopandas as gpd
@@ -25,8 +26,8 @@ def _():
     import pandas as pd
     import rasterio
     import requests
-    from pysheds.grid import Grid
-    from pysheds.sview import Raster
+    import whitebox_workflows as wbw
+    from affine import Affine
     from rasterio.coords import disjoint_bounds
     from rasterio.features import geometry_mask, rasterize
     from rasterio.merge import merge
@@ -46,8 +47,9 @@ def _():
     results.mkdir(parents=True, exist_ok=True)
     UTM = "EPSG:26916"  # NAD83 / UTM 16N, the CRS of the 1 m DEM; all distances are in metres
     return (
-        Grid,
-        Raster,
+        Affine,
+        Callable,
+        Path,
         disjoint_bounds,
         LineString,
         Point,
@@ -79,6 +81,7 @@ def _():
         time,
         transform_bounds,
         unary_union,
+        wbw,
         zipfile,
     )
 
@@ -113,8 +116,8 @@ def _(mo):
 
 
 @app.cell
-def _(log, requests, time):
-    def fetch(url: str, path, params: dict | None = None) -> None:
+def _(Path, log, requests, time):
+    def fetch(url: str, path: Path, params: dict | None = None) -> None:
         """Download url to path once, with up to 4 attempts and backoff."""
         if path.exists():
             return
@@ -298,7 +301,7 @@ def _(Polygon, arcgis, cache, fetch, gpd, json, pd, warning):
         [gpd.read_file(cache / f"roads_{f}.zip").to_crs("EPSG:4326") for f in ["18061", "18043", "21111"]]
     )
 
-    def _count(layer: str, area) -> int:
+    def _count(layer: str, area: Polygon) -> int:
         _geom = json.dumps({"rings": [list(area.exterior.coords)], "spatialReference": {"wkid": 4326}})
         _body = arcgis(
             layer,
@@ -433,23 +436,26 @@ def _(mo):
     The 3DEP 1 m DEM here comes from Indiana's 2017 statewide QL2 lidar. It's a bare-earth
     model: buildings and bridge decks are removed, but road fill over culverts stays.
 
-    We read the four tiles over the study area straight from USGS's cloud-optimized GeoTIFFs and
-    burn the NHD streams 3 m into the DEM. Burning lets water route through road fill that
-    hides a culvert. Then pysheds fills depressions, resolves flats, computes D8 flow directions
-    and finds, for every cell, the stream cell it drains to. HAND is the cell's elevation minus
-    that stream cell's, both taken from the unburned DEM. This step takes about 6 minutes, and
-    the result is cached.
+    We read the four tiles over the study area straight from USGS's cloud-optimized GeoTIFFs.
+    WhiteboxTools (the `whitebox-workflows` wheel) then conditions the DEM in three steps:
 
-    We looked at WhiteboxTools' `ElevationAboveStream` first, but its binary download is
-    blocked here. pysheds is pure Python and has `compute_hand`.
+    1. `burn_streams_at_roads` cuts the NHD streams through road embankments, standing in for
+       the culverts the DEM can't see;
+    2. `breach_depressions_least_cost` lets every cell drain;
+    3. `elevation_above_stream` traces each cell's downslope path to the first stream cell and
+       reports how far above that cell it sits. That is HAND.
+
+    The same library gives the third ranking, `elevation_above_stream_euclidean`: height above
+    the nearest stream cell in a straight line, with no flow routing. It also gives
+    `depth_in_sink`, how far a cell sits below the depression-filled surface. The rasters are
+    cached, and the step takes about a minute.
     """)
+    return
 
 
 @app.cell
 def _(
     AREA,
-    Grid,
-    Raster,
     UTM,
     cache,
     log,
@@ -457,11 +463,13 @@ def _(
     np,
     rasterio,
     rasterize,
+    roads,
     streams,
     transform_bounds,
+    wbw,
 ):
-    _dem_path, _hand_path = cache / "dem_1m.tif", cache / "hand_1m.tif"
-    if not _hand_path.exists():
+    _dem_path, _out = cache / "dem_1m.tif", {n: cache / f"{n}.tif" for n in ["hand", "above_creek", "sink"]}
+    if not all(p.exists() for p in _out.values()):
         _base = (
             "/vsicurl/https://prd-tnm.s3.amazonaws.com/StagedProducts/Elevation/1m/Projects/"
             "IN_Indiana_Statewide_LiDAR_2017_B17/TIFF/USGS_1M_16_{0}_IN_Indiana_Statewide_LiDAR_2017_B17.tif"
@@ -480,45 +488,52 @@ def _(
             "width": _arr.shape[2],
             "compress": "deflate",
             "tiled": True,
-            "BIGTIFF": "YES",
         }
         with rasterio.open(_dem_path, "w", **_prof) as _d:
             _d.write(_arr.astype("float32"))
-        _raw = _arr[0].astype("float64")
-        _stream_mask = rasterize(streams.geometry, out_shape=_raw.shape, transform=_tr, all_touched=True).astype(bool)
-        _burned = np.where(_stream_mask & (_raw > -9000), _raw - 3.0, _raw)
-        _burn_path = cache / "dem_burned.tif"
-        with rasterio.open(_burn_path, "w", **_prof) as _d:
-            _d.write(_burned.astype("float32"), 1)
-        log.info("conditioning %s cells", _raw.size)
-        _grid = Grid.from_raster(str(_burn_path))
-        _dem = _grid.read_raster(str(_burn_path))
-        _mask = Raster(_stream_mask.astype("float32"), viewfinder=_dem.viewfinder)  # nonzero = channel
-        _filled = _grid.resolve_flats(_grid.fill_depressions(_grid.fill_pits(_dem)))
-        _fdir = _grid.flowdir(_filled)
-        _idx = np.asarray(_grid.compute_hand(_fdir, _dem, _mask, return_index=True)).astype("int64")
-        _valid = (_idx >= 0) & (_raw > -9000)
-        _hand = np.full(_raw.shape, np.nan, dtype="float32")
-        _hand[_valid] = (_raw[_valid] - _raw.ravel()[_idx[_valid]]).astype("float32")
-        _depression = (np.asarray(_filled) - _burned).astype("float32")  # depth of closed depressions
-        _prof.update(count=2, nodata=np.nan)
-        with rasterio.open(_hand_path, "w", **_prof) as _d:
-            _d.write(_hand, 1)
-            _d.write(np.where(_stream_mask, 0, _depression).astype("float32"), 2)
+        _mask = rasterize(streams.geometry, out_shape=_arr.shape[1:], transform=_tr, all_touched=True)
+        with rasterio.open(cache / "streams.tif", "w", **{**_prof, "nodata": 0}) as _d:
+            _d.write(_mask.astype("float32"), 1)
+        for _name, _gdf in [("streams", streams), ("roads", roads)]:
+            _flat = _gdf[["geometry"]].explode(ignore_index=True)
+            _flat["geometry"] = _flat.geometry.force_2d()
+            _flat["FID"] = range(len(_flat))
+            _flat.to_file(cache / f"{_name}.shp")
+        log.info("conditioning the 1 m DEM with WhiteboxTools")
+        _wbe = wbw.WbEnvironment()
+        _wbe.verbose = False
+        _h = _wbe.hydrology
+        _raw = _wbe.read_raster(str(_dem_path))
+        _stream_raster = _wbe.read_raster(str(cache / "streams.tif"))
+        _culverts = _h.burn_streams_at_roads(
+            dem=_raw,
+            streams=_wbe.read_vector(str(cache / "streams.shp")),
+            roads=_wbe.read_vector(str(cache / "roads.shp")),
+            road_width=30.0,
+        )
+        _drained = _h.breach_depressions_least_cost(dem=_culverts, max_dist=100, fill_deps=True)
+        _wbe.write_raster(_h.elevation_above_stream(dem=_drained, streams=_stream_raster), str(_out["hand"]))
+        _wbe.write_raster(
+            _h.elevation_above_stream_euclidean(dem=_raw, streams=_stream_raster), str(_out["above_creek"])
+        )
+        _wbe.write_raster(_h.depth_in_sink(dem=_raw, zero_background=True), str(_out["sink"]))
     with rasterio.open(_dem_path) as _d:
         dem = _d.read(1, masked=True).filled(np.nan)
         dem_transform = _d.transform
-    with rasterio.open(_hand_path) as _d:
-        hand = _d.read(1)
-        depression = _d.read(2)
-    print(f"DEM {dem.shape[1]} x {dem.shape[0]} cells; median HAND {np.nanmedian(hand):.1f} m")
-    return dem, dem_transform, depression, hand
+    _layers = {}
+    for _name, _path in _out.items():
+        with rasterio.open(_path) as _d:
+            assert _d.shape == dem.shape and _d.transform == dem_transform, f"{_name} is off the DEM grid"
+            _layers[_name] = _d.read(1, masked=True).astype("float32").filled(np.nan)
+    hand, above_creek, depression = _layers["hand"], _layers["above_creek"], _layers["sink"]
+    print(f"DEM {dem.shape[1]} x {dem.shape[0]} cells; HAND missing for {np.isnan(hand).mean():.1%} of cells")
+    return above_creek, dem, dem_transform, depression, hand
 
 
 @app.cell
 def _(mo):
     mo.md(r"""
-    ## 6. NOAA's 10 m HAND and plain height above the creek
+    ## 6. NOAA's 10 m HAND
 
     OWP's HAND rasters sit in a Requester Pays bucket that anonymous users can't read. CIROH
     mirrors them publicly. We use release 4.9.9.0 (April 2026), HUC8 05140104. It's built per
@@ -527,8 +542,6 @@ def _(mo):
     checked that against CIROH's 2024 float32 copy, which reads 5.28 m where 4.9.9.0 reads 4292,
     and divide by 1000.
 
-    The third ranking needs no flow routing at all. It's a building's lowest ground elevation
-    minus the elevation of the nearest stream cell in a straight line.
     """)
 
 
@@ -549,9 +562,7 @@ def _(AREA, Window, disjoint_bounds, from_bounds, np, rasterio, re, requests, tr
             _w = _w.intersection(Window(0, 0, _s.width, _s.height))
             _a = _s.read(1, window=_w, masked=True).astype("float32").filled(np.nan)
             if _s.dtypes[0] == "int16":
-                _a /= (
-                    1000  # 4.x releases store HAND as int16 millimetres; the 2024 float copy gives the same values in m
-                )
+                _a /= 1000  # 4.x releases store HAND as int16 millimetres
             if np.isfinite(_a).any():
                 owp_layers.append((_a, _s.window_transform(_w), _s.crs))
     print(f"{len(_keys)} OWP branches listed; {len(owp_layers)} cover the study area")
@@ -559,12 +570,10 @@ def _(AREA, Window, disjoint_bounds, from_bounds, np, rasterio, re, requests, tr
 
 
 @app.cell
-def _(dem, ndimage, np, rasterize, dem_transform, streams):
+def _(dem, dem_transform, ndimage, rasterize, streams):
     _stream = rasterize(streams.geometry, out_shape=dem.shape, transform=dem_transform, all_touched=True).astype(bool)
-    _dist, (_ri, _ci) = ndimage.distance_transform_edt(~_stream, return_indices=True)
-    above_creek = (dem - dem[_ri, _ci]).astype("float32")
-    stream_distance = _dist.astype("float32")
-    return above_creek, stream_distance
+    stream_distance = ndimage.distance_transform_edt(~_stream).astype("float32")
+    return (stream_distance,)
 
 
 @app.cell
@@ -663,6 +672,8 @@ def _(mo):
 
 @app.cell
 def _(
+    Affine,
+    Callable,
     above_creek,
     crossings,
     dem_transform,
@@ -676,7 +687,7 @@ def _(
     structures,
     town,
 ):
-    def zonal(arr, transform, geoms, stat) -> np.ndarray:
+    def zonal(arr: np.ndarray, transform: Affine, geoms: list, stat: Callable[[np.ndarray], float]) -> np.ndarray:
         """stat (np.min or np.max) of the finite cells each geometry touches; NaN if none."""
         out = np.full(len(geoms), np.nan)
         for i, g in enumerate(geoms):
@@ -686,7 +697,7 @@ def _(
             if r1 <= r0 or c1 <= c0:
                 continue
             sub = arr[r0:r1, c0:c1]
-            m = geometry_mask([g], sub.shape, transform * transform.translation(c0, r0), invert=True, all_touched=True)
+            m = geometry_mask([g], sub.shape, transform * Affine.translation(c0, r0), invert=True, all_touched=True)
             v = sub[m]
             v = v[np.isfinite(v)]
             if v.size:
@@ -759,7 +770,7 @@ def _(METHODS, UTM, candidates, gpd, math, np, observed, pd, town):
         ("Lanesville area (7 x 6.7 km)", candidates, np.ones(len(_obs), bool)),
         ("Lanesville town", candidates[candidates.in_town], _obs.within(_town_utm).to_numpy()),
     ]:
-        _near = [_cands.index[_cands.distance(p) <= 30] if i else [] for p, i in zip(_obs.geometry, _in)]
+        _near = [_cands.index[_cands.distance(p) <= 30] if i else [] for p, i in zip(_obs.geometry, _in, strict=True)]
         _n = len(_cands)
         _base = {"scope": _scope, "candidates": _n, "places": int(_in.sum())}
         for _m, _label in METHODS.items():
@@ -903,6 +914,8 @@ def _(
     for _ax in (_a0, _a1):
         _ax.set_xticks([])
         _ax.set_yticks([])
+        _ax.set_xlabel("")
+        _ax.set_ylabel("")
     _fig.tight_layout()
     _fig.savefig(results / "map.png", dpi=130)
     _fig
@@ -931,6 +944,10 @@ def _(
 ):
     _town_utm = gpd.GeoSeries([town], crs="EPSG:4326").to_crs(crossings.crs).iloc[0]
     _tx = crossings[crossings.intersects(_town_utm)]
+    _sites = []  # several survey points mark the same spot; count spots at least 30 m apart
+    for _p in observed.to_crs(crossings.crs).geometry:
+        if all(_p.distance(q) > 30 for q in _sites):
+            _sites.append(_p)
     scores.to_csv(results / "ranking_scores.csv", index=False)
     places.round(2).to_csv(results / "observed_places.csv", index=False)
     summary = {
@@ -940,6 +957,7 @@ def _(
         "survey_points_tagged_lanesville": len(tagged),
         "survey_points_in_lanesville": len(survey_lanesville),
         "observed_places": len(observed),
+        "observed_sites_30m_apart": len(_sites),
         "owp_branches_used": len(owp_layers),
         "crossings_in_area": len(crossings),
         "crossings_with_nbi_structure": int(crossings.nbi_structure.sum()),
