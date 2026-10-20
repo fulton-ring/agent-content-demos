@@ -68,7 +68,9 @@ def _():
     def response_cost(m: ModelResponse) -> float:
         return float((m.provider_details or {}).get("cost") or 0.0)
 
-    async def ask(model: str, output_type: type, instructions: str, prompt: str, pngs: list[Path], save: Path) -> dict:
+    async def ask(
+        model: str, output_type: type[BaseModel], instructions: str, prompt: str, pngs: list[Path], save: Path
+    ) -> dict:
         """One typed model call, with its cost and time, saved to `save` and reused if it's already there."""
         if save.exists():
             return json.loads(save.read_text())
@@ -159,7 +161,7 @@ def _():
         yyyymm: str = Field(description="The end of the tax year as YYYYMM, e.g. '201706'; December for calendar year.")
 
     def amount(line: str, label: str) -> Value | None:
-        return Field(None, description=f"Part I line {line}: {label}. Leave out if the box is empty.")  # ty: ignore[invalid-return-type]
+        return Field(None, description=f"Part I line {line}: {label}. Leave out if the box is empty.")
 
     class Page990EZ(BaseModel):
         """Page 1 of IRS Form 990-EZ as printed."""

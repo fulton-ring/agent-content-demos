@@ -57,7 +57,7 @@ def _():
     - an empty box, a dash or "NONE" is 0, because SOI records an empty box as 0;
     - `(1,200)`, `-1,200` and `<1,200>` are negative;
     - **cents are dropped, not rounded**. SOI keys `21,658.73` as 21658. Some filers print cents without a point,
-      as `34,796 19`, so two digits after a space at the end are read as cents too.
+      as `34,796 19` or `210 8`, so one or two digits after a space at the end are read as cents too.
     """)
     return
 
@@ -76,7 +76,8 @@ def _():
         if text in ("", "-", "-0-", "--", "NONE", "N/A", "NA", "0"):
             return 0
         negative = text.startswith(("(", "-", "<")) or text.endswith((")", ">"))
-        text = re.sub(r"[.\s]\d\d$", "", re.sub(r"[()<>\-]", "", text)).strip()
+        text = re.sub(r"[()<>\-]", "", text).strip().rstrip(".")
+        text = re.sub(r"[.\s]\d{1,2}$", "", text).strip()
         if not re.fullmatch(r"\d+", text.replace(" ", "")):
             return None
         number = int(text.replace(" ", ""))
@@ -102,7 +103,9 @@ def _(to_number):
     _sample = {f"{s['ein']}_{s['tax_pd']}": s for s in json.loads((OUT / "sample.json").read_text())}
     _saved = json.loads((OUT / "readings.json").read_text())
     readings, model_ids = _saved["readings"], _saved["models"]
-    not_page_1 = [k for k in readings["gemini"] if not any(readings[m][k]["output"]["is_990ez_page_1"] for m in readings)]
+    not_page_1 = [
+        k for k in readings["gemini"] if not any(readings[m][k]["output"]["is_990ez_page_1"] for m in readings)
+    ]
     rows = []
     for _key in readings["gemini"]:
         if _key in not_page_1:
@@ -155,9 +158,12 @@ def _(rows):
     soi_wrong = [r for r in to_check if r["truth"] != r["soi"]]
     print(f"{len(to_check)} fields checked on the scan; SOI was wrong on {len(soi_wrong)} of them")
     print(f"SOI disagrees with the scan on {len(soi_wrong)} of {len(rows)} fields ({len(soi_wrong) / len(rows):.1%})")
+    _kinds = [adjudicated[(r["page"], r["field"])]["kind"] for r in to_check if (r["page"], r["field"]) in adjudicated]
+    print("decisions by kind:", {k: _kinds.count(k) for k in sorted(set(_kinds))})
+    (OUT / "to_adjudicate.json").write_text(json.dumps(missing, indent=1))
     if missing:
-        print(f"{len(missing)} fields needed checking but have no decision, so SOI is taken as right:")
-        (OUT / "to_adjudicate.json").write_text(json.dumps(missing, indent=1))
+        print(f"{len(missing)} fields needed checking but have no decision, so SOI is taken as right for them;")
+        print("they are listed in output/to_adjudicate.json")
     mo.ui.table(
         [{k: r[k] for k in ("page", "field", "gemini", "qwen", "soi", "truth")} for r in soi_wrong],
         selection=None,
@@ -202,6 +208,7 @@ def _(rows):
                 "single model": _model,
                 "wrong values": len(_wrong),
                 "error rate": f"{len(_wrong) / n:.2%}",
+                "error rate against SOI as published": f"{sum(r[_model] != r['soi'] for r in rows) / n:.2%}",
                 "caught by disagreement": sum(r in review for r in _wrong),
                 "caught by own confidence (same budget)": sum(r[_model] != r["truth"] for r in _by_conf),
                 "fields below 0.9 confidence": sum(r[f"{_model}_conf"] < 0.9 for r in rows),
@@ -299,7 +306,7 @@ def _():
 @app.cell
 def _(wrong_accepted):
     def crop(row: dict) -> Image.Image:
-        """The page around the field's box, the box outlined; the whole row if no model gave a box."""
+        """The page around the field's box, with the box outlined; the whole page, small, if no model gave a box."""
         page = Image.open(PAGES / f"{row['page']}.png").convert("RGB")
         w, h = page.size
         if not row["bbox"] or len(row["bbox"]) != 4:
@@ -307,15 +314,19 @@ def _(wrong_accepted):
         xa, ya, xb, yb = (row["bbox"][i] * (w if i % 2 == 0 else h) / 1000 for i in range(4))
         x0, x1, y0, y1 = min(xa, xb), max(xa, xb), min(ya, yb), max(ya, yb)
         ImageDraw.Draw(page).rectangle([x0 - 4, y0 - 4, x1 + 4, y1 + 4], outline="red", width=3)
-        return page.crop((0, max(0, y0 - 60), w, min(h, y1 + 60)))
+        return page.crop((max(0, x0 - 550), max(0, y0 - 30), min(w, x1 + 60), min(h, y1 + 20)))
 
     SHOTS.mkdir(exist_ok=True)
+    for _old in SHOTS.glob("accepted-wrong-*.png"):
+        _old.unlink()
     _items = []
     for _r in wrong_accepted:
         _path = SHOTS / f"accepted-wrong-{_r['page']}-{_r['field']}.png"
         crop(_r).save(_path)
         _items.append(
-            mo.vstack([mo.md(f"`{_r['page']}` {_r['field']}: read {_r['gemini']}, scan says {_r['truth']}"), mo.image(_path)])
+            mo.vstack(
+                [mo.md(f"`{_r['page']}` {_r['field']}: read {_r['gemini']}, scan says {_r['truth']}"), mo.image(_path)]
+            )
         )
     mo.vstack(_items)
     return
@@ -326,13 +337,28 @@ def _():
     mo.md(r"""
     ## What didn't work
 
+    - **Both models miss the IRS's own corrections.** When a filer prints a wrong EIN or tax year, an IRS clerk
+      circles it and writes the right one by hand, often beside the organization's name or at the top of the page.
+      SOI keys the correction. Both models read the typed value, agree, and the wrong value goes through without
+      review. This is most of what the disagreement rule lets through. Two readings that make the same mistake
+      don't disagree; a prompt that asks for handwritten corrections might catch them, but this demo didn't test it.
+    - **Both models put a value one line down** on a page where line 17 was empty and line 16 wasn't.
+    - **Model confidence is close to useless as a routing signal.** Both models put 0.9 or 0.95 on nearly every
+      value, right or wrong. Ranked by confidence, the same review budget catches far fewer errors than
+      disagreement (table above).
     - **The first frozen schema asked for the tax year as YYYYMM in a field described as "exactly as printed".**
       Both models followed "as printed" and returned dates like `2017` or `06/30/2017`, so the tax period disagreed
-      with SOI on every page. Freezing a schema doesn't make it right; the fix was a separate `yyyymm` field, and a
-      second full reading ($2.07). Both runs are under `output/answers/`, one folder per schema hash.
-    - **Cents.** Read naively, `21,658.73` rounds to 21659 and `34,796 19` reads as 3479619, both "wrong" against
-      SOI. The scoring rule now drops cents the way SOI does. A production pipeline would put this rule in the
-      schema, so each model returns whole dollars.
+      with SOI on every page. Freezing a schema doesn't make it right. The fix was a separate `yyyymm` field and a
+      second full reading, which cost about as much as the first; this run has only the second.
+    - **Reading amounts.** The first scoring rounded cents, so `21,658.73` scored as 21659 against SOI's 21658, and
+      it read `34,796 19` as 3479619 and couldn't read `(2,390.)` at all. These were scoring bugs, not model
+      errors, and checking the disagreements on the scan is what found them. A production pipeline would put the
+      rule in the schema, so each model returns whole dollars.
+    - **The SOI extract is not a transcription.** SOI recomputes totals when the filer's arithmetic is wrong, fixes
+      signs, moves amounts between lines, fills in lines the filer left empty, and sometimes mistypes. Scored
+      against SOI as published, without checking on the scan, the models look two to three times worse than they
+      are (the "against SOI as published" column above). Each case is in `adjudications.json` with its kind:
+      `SOI edit`, `SOI typo`, `IRS mark`, `both models wrong` or `ambiguous`.
     """)
     return
 
