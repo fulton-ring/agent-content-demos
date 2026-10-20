@@ -17,9 +17,9 @@ Issue: [#49](https://github.com/fulton-ring/agent-content-demos/issues/49), a su
 ```
 
 This needs [uv](https://docs.astral.sh/uv/). It downloads about 175,000 rows from FEMA's public
-ArcGIS layers (about 90 seconds the first time; cached in `~/.cache/nri-sensitivity-test`, or
-set `NRI_CACHE`), runs `notebook.py` as a script, and writes every table and the figure to
-`results/`. A run from the cache takes about 15 seconds. To read it with its outputs, use
+ArcGIS layers (about 90 seconds; cached in `~/.cache/nri-sensitivity-test`, or set `NRI_CACHE`), runs
+`notebook.py` as a script, and writes every table and the figure to `results/`. The whole run
+takes about 11 minutes, cached or not, because FEMA's k-means rating runs many times. To read it with its outputs, use
 `uv run marimo edit notebook.py`.
 
 ## Data
@@ -68,8 +68,8 @@ tracts misses FEMA's v1.20 county values by 9.9% at the median. The v1.20 docume
 describes the tract sum.
 
 **5. What moved county ratings between v1.19 and v1.20.** Rebuilding all 16 combinations of
-old and new inputs reproduces FEMA's 812 county rating changes exactly. Split with Shapley
-values:
+old and new inputs reproduces FEMA's 812 county rating changes in total (812 = 812). Split with
+Shapley values:
 
 | Change | Share of the 812 |
 |---|---|

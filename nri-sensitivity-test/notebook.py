@@ -551,7 +551,8 @@ def _(county_changes, fema_band, mo):
     _full = county_changes.iloc[3]
     _published = int((fema_band["v119"] != fema_band["v120"]).sum())
     mo.md(rf"""
-    **Result.** At county level the swap alone barely moves the composite: rank correlation
+    **Result.** At county level the swap alone moves the composite much less than the release did:
+    rank correlation
     {_swap["rank correlation"]:.3f}, {_swap["change band"]:,} of {_swap["counties"]:,} counties
     ({_swap["share changing band"]:.1%}) change rating band, {_swap["move 2+ bands"]} move two or
     more bands, and {_swap["top-100 overlap"]} of the top 100 stay in the top 100. The release as a
@@ -560,7 +561,7 @@ def _(county_changes, fema_band, mo):
     re-rate FEMA's published values. FEMA's own published labels change for {_published:,} of
     these counties.
 
-    Summing tracts instead, as our scratch analysis did, gives a similar answer
+    Summing tracts instead, as our scratch analysis did, gives about half the change
     ({_summed["share changing band"]:.1%} changing band, rank correlation
     {_summed["rank correlation"]:.3f}).
     """)
