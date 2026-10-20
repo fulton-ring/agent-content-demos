@@ -8,6 +8,7 @@ app = marimo.App(width="medium")
 def _():
     import json
     import logging
+    import math
     import os
     import re
     import time
@@ -61,6 +62,7 @@ def _():
         json,
         linemerge,
         log,
+        math,
         merge,
         mo,
         ndimage,
@@ -224,7 +226,10 @@ def _(Point, arcgis, cache, fetch, gpd, pd, re, zipfile):
     _named = []
     for _label, _where in [
         ("Methodist church", "add_number=2575 AND UPPER(st_name) LIKE '%JOHNS CHURCH%' AND county_fips='18061'"),
-        ("School track and ball field", "add_number=2725 AND UPPER(st_name) LIKE '%CRESTVIEW%' AND county_fips='18061'"),
+        (
+            "School track and ball field",
+            "add_number=2725 AND UPPER(st_name) LIKE '%CRESTVIEW%' AND county_fips='18061'",
+        ),
     ]:
         _hit = arcgis(
             _addr, {"where": _where, "outFields": "geofulladdress,latitude,longitude", "returnGeometry": "false"}
@@ -518,7 +523,9 @@ def _(mo):
     OWP's HAND rasters sit in a Requester Pays bucket that anonymous users can't read. CIROH
     mirrors them publicly. We use release 4.9.9.0 (April 2026), HUC8 05140104. It's built per
     stream "branch", so for each cell we take the lowest HAND across branches, which is how the
-    branches are composited for mapping.
+    branches are composited for mapping. This release stores HAND as int16 millimetres. We
+    checked that against CIROH's 2024 float32 copy, which reads 5.28 m where 4.9.9.0 reads 4292,
+    and divide by 1000.
 
     The third ranking needs no flow routing at all. It's a building's lowest ground elevation
     minus the elevation of the nearest stream cell in a straight line.
@@ -541,6 +548,10 @@ def _(AREA, Window, disjoint_bounds, from_bounds, np, rasterio, re, requests, tr
             _w = from_bounds(*_b, _s.transform).round_offsets().round_lengths()
             _w = _w.intersection(Window(0, 0, _s.width, _s.height))
             _a = _s.read(1, window=_w, masked=True).astype("float32").filled(np.nan)
+            if _s.dtypes[0] == "int16":
+                _a /= (
+                    1000  # 4.x releases store HAND as int16 millimetres; the 2024 float copy gives the same values in m
+                )
             if np.isfinite(_a).any():
                 owp_layers.append((_a, _s.window_transform(_w), _s.crs))
     print(f"{len(_keys)} OWP branches listed; {len(owp_layers)} cover the study area")
@@ -724,33 +735,51 @@ def _(mo):
     mo.md(r"""
     ## 9. Where the flooded places land
 
-    For each ranking we sort the candidates from lowest to highest score. An observed place's
-    rank is the best rank of any candidate within 30 m of it. If no structure or crossing is
-    within 30 m, it can't be found at all. We count how many places land in the top 25, 50 and
-    100 and report the median rank, both for the whole study area and for the town alone.
-    Candidates with no value (outside the OWP raster's coverage, for example) rank last.
+    For each ranking we sort the candidates from lowest to highest score. Ties share their
+    average rank, which matters for the 10 m HAND, where many cells are exactly 0. An observed
+    place's rank is the best rank of any candidate within 30 m of it. If no structure or
+    crossing is within 30 m, it can't be found at all. We count how many places land in the top
+    25, 50 and 100 and report the median rank, both for the whole study area and for the town
+    alone. The town ranking scores only the places inside the town, which leaves out SR 62 at
+    the county line. Candidates with no value (outside the OWP raster's coverage, for example)
+    rank last.
+
+    **Random order** is the baseline: the number of places expected in the top *K* if the
+    candidates were shuffled. A place with *m* candidates within 30 m, out of *N*, is in the
+    top *K* with probability 1 − C(N−m, K) / C(N, K).
     """)
 
 
 @app.cell
-def _(METHODS, UTM, candidates, np, observed, pd):
+def _(METHODS, UTM, candidates, gpd, math, np, observed, pd, town):
     _obs = observed.to_crs(UTM)
+    _town_utm = gpd.GeoSeries([town], crs="EPSG:4326").to_crs(UTM).iloc[0]
     _rows, ranks = [], {}
-    for _scope, _cands in [
-        ("Lanesville area (7 x 6.7 km)", candidates),
-        ("Lanesville town", candidates[candidates.in_town]),
+    for _scope, _cands, _in in [
+        ("Lanesville area (7 x 6.7 km)", candidates, np.ones(len(_obs), bool)),
+        ("Lanesville town", candidates[candidates.in_town], _obs.within(_town_utm).to_numpy()),
     ]:
-        _near = [_cands.index[_cands.distance(p) <= 30] for p in _obs.geometry]
+        _near = [_cands.index[_cands.distance(p) <= 30] if i else [] for p, i in zip(_obs.geometry, _in)]
+        _n = len(_cands)
+        _base = {"scope": _scope, "candidates": _n, "places": int(_in.sum())}
         for _m, _label in METHODS.items():
-            _rank = _cands[_m].fillna(np.inf).rank(method="min")
+            _rank = _cands[_m].fillna(np.inf).rank(method="average")
             _best = np.array([_rank.loc[n].min() if len(n) else np.nan for n in _near])
+            _best[~_in] = np.nan
             ranks[(_scope, _m)] = _best
-            _row = {"scope": _scope, "ranking": _label, "candidates": len(_cands), "places": len(_obs)}
+            _row = {**_base, "ranking": _label}
             for _k in (25, 50, 100):
                 _row[f"top {_k}"] = int((_best <= _k).sum())
-            _row["no candidate within 30 m"] = int(np.isnan(_best).sum())
+            _row["no candidate within 30 m"] = int((np.isnan(_best) & _in).sum())
             _row["median rank"] = float(np.nanmedian(_best)) if np.isfinite(_best).any() else np.nan
+            _row["candidates with no value"] = int(_cands[_m].isna().sum())
+            _row["candidates tied at lowest"] = int((_cands[_m] == _cands[_m].min()).sum())
             _rows.append(_row)
+        _row = {**_base, "ranking": "Random order (expected)"}
+        for _k in (25, 50, 100):
+            _p = [1 - math.comb(_n - len(n), _k) / math.comb(_n, _k) for n in _near if len(n)]
+            _row[f"top {_k}"] = round(sum(_p), 1)
+        _rows.append(_row)
     scores = pd.DataFrame(_rows)
     scores
     return ranks, scores
@@ -782,28 +811,34 @@ def _(
     candidates,
     dem_transform,
     depression,
+    gpd,
     np,
     observed,
     pd,
     ranks,
     stream_distance,
+    town,
 ):
     _obs = observed.to_crs(UTM)
+    _town_utm = gpd.GeoSeries([town], crs="EPSG:4326").to_crs(UTM).iloc[0]
     _inv = ~dem_transform
     _rc = [tuple(int(v) for v in (_inv * (p.x, p.y))[::-1]) for p in _obs.geometry]
     _scope = "Lanesville town"
-    places = pd.DataFrame({"place": _obs.place, "kind": _obs.kind})
+    places = pd.DataFrame({"place": _obs.place, "kind": _obs.kind, "in town": _obs.within(_town_utm)})
+    places["area rank, 1 m HAND"] = ranks[("Lanesville area (7 x 6.7 km)", "hand_1m")]
     for _m, _label in METHODS.items():
-        places[f"rank, {_label}"] = ranks[(_scope, _m)]
+        places[f"town rank, {_label}"] = ranks[(_scope, _m)]
     _near = [candidates[candidates.in_town & (candidates.distance(p) <= 30)] for p in _obs.geometry]
     places["best 1 m HAND within 30 m (m)"] = [n.hand_1m.min() if len(n) else np.nan for n in _near]
     places["to nearest stream (m)"] = [float(stream_distance[r, c]) for r, c in _rc]
     places["depression depth (m)"] = [float(np.nanmax(depression[r - 3 : r + 4, c - 3 : c + 4])) for r, c in _rc]
 
     def _reason(row: pd.Series) -> str:
-        if row["rank, 1 m HAND"] <= 100:
+        if not row["in town"]:
+            return "outside the town (area ranking only)"
+        if row["town rank, 1 m HAND"] <= 100:
             return "caught (top 100)"
-        if np.isnan(row["rank, 1 m HAND"]):
+        if np.isnan(row["town rank, 1 m HAND"]):
             return "no candidate within 30 m"
         if row["depression depth (m)"] >= 0.3:
             return "in a depression"
