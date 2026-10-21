@@ -77,12 +77,14 @@ def main() -> None:
         point = gpd.GeoSeries(gpd.points_from_xy([row["lon"]], [row["lat"]]), crs=4326).to_crs(3857).iloc[0]
         same_kind = candidates[candidates["layer"] == row["layer"]]
         fig, axes = plt.subplots(1, 2, figsize=(16, 8))
-        for ax, (zoom, radius) in zip(axes, [(15, 2), (18, 1)], strict=True):
+        for ax, (zoom, radius) in zip(axes, [(15, 1), (18, 1)], strict=True):
             image, extent = mosaic(row["lon"], row["lat"], zoom, radius)
             ax.imshow(image, extent=extent)
             near = same_kind.cx[extent[0] : extent[1], extent[2] : extent[3]]
             for side, colour in [("Overture", "cyan"), ("OSM", "yellow")]:
-                near[near["side"] == side].plot(ax=ax, color=colour, markersize=80, marker="^")
+                shapes = near[near["side"] == side]
+                if len(shapes):
+                    shapes.plot(ax=ax, facecolor="none", edgecolor=colour, color=colour, markersize=80, marker="^")
             ax.scatter([point.x], [point.y], s=300, facecolors="none", edgecolors="red", linewidths=2.5)
             ax.set_xlim(extent[0], extent[1])
             ax.set_ylim(extent[2], extent[3])
