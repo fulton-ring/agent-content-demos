@@ -70,13 +70,13 @@ def main() -> None:
     lines = gpd.read_parquet(DATA / "hifld-next-transmission-lines-v1.0.0.parquet").to_crs(3857)
     overture = next(DATA.glob("overture-substations-us-*.parquet"))
     raw = pd.read_parquet(overture)
-    subs = gpd.GeoDataFrame(raw[["id"]], geometry=gpd.GeoSeries.from_wkb(raw["wkb"]), crs=4326).to_crs(3857)
+    subs = gpd.GeoSeries.from_wkb(raw["wkb"], crs=4326).to_crs(3857)
     chips = DATA / "chips"
     chips.mkdir(exist_ok=True)
     for row in sample.to_dict("records"):
         if (chips / f"{row['id']}.jpg").exists():
             continue
-        point = gpd.GeoSeries(gpd.points_from_xy([row["lon"]], [row["lat"]]), crs=4326).to_crs(3857).iloc[0]
+        point = gpd.GeoSeries.from_xy([row["lon"]], [row["lat"]], crs=4326).to_crs(3857).iloc[0]
         fig, axes = plt.subplots(1, 2, figsize=(16, 8))
         for ax, (zoom, radius) in zip(axes, [(15, 2), (18, 1)], strict=True):
             image, extent = mosaic(row["lon"], row["lat"], zoom, radius)
