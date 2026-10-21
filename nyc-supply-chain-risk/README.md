@@ -158,5 +158,4 @@ from public data. Water supply, refined fuel and food can't: their sources name 
 
 The Python is about 2,300 lines (power 880, lifelines 1,190, shared helpers 230), over the 1,000-line budget
 because #63 added six lifelines to #62's one, and the README is a little over 150 lines for the same reason. Most of
-`lifelines.py` is the link and stressor tables, one quoted
-passage per row, which the formatter spreads over several lines each.
+`lifelines.py` is the link and stressor tables, one quoted passage per row, which the formatter spreads out.
