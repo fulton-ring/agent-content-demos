@@ -21,6 +21,7 @@ class Config:
     project_number: int
     repo: str
     max_in_progress: int
+    max_starts_per_day: int
     cooldown: timedelta
     dry_run: bool
 
@@ -40,6 +41,7 @@ def load_config() -> Config:
         project_number=int(required("PROJECT_NUMBER")),
         repo=required("REPO"),
         max_in_progress=int(os.environ.get("MAX_IN_PROGRESS", "5")),
+        max_starts_per_day=int(os.environ.get("MAX_STARTS_PER_DAY", "5")),
         cooldown=timedelta(hours=float(os.environ.get("COOLDOWN_HOURS", "6"))),
         dry_run=os.environ.get("DRY_RUN", "") == "1",
     )
@@ -73,7 +75,9 @@ def run(config: Config) -> int:
     items = github.items(config.project_owner, config.project_number, config.repo)
     cards = [apply_signals(github, fields, item, config.dry_run) for item in items]
     now = datetime.now(UTC)
-    chosen = cards_to_start(cards, now, config.max_in_progress, config.cooldown)
+    chosen = cards_to_start(
+        cards, now, config.max_in_progress, config.max_starts_per_day, config.cooldown
+    )
     print(f"{len(cards)} cards on the board, {len(chosen)} to start")
     if config.dry_run:
         for card in chosen:

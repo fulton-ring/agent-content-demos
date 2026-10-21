@@ -15,6 +15,7 @@ Then a card gets a worker when all of these hold:
 - The issue isn't blocked by an open issue.
 - No `Worker started` comment on the issue in the last 6 hours.
 - Fewer than `MAX_IN_PROGRESS` Claude cards are **In progress** (30 in the workflow, a safety ceiling rather than a throttle).
+- Fewer than `MAX_STARTS_PER_DAY` workers were started in the last 24 hours, counting `Worker started` comments on every issue on the board (5 in the workflow). This sets the pace; extra Ready cards wait, oldest first.
 
 For each one it starts the worker routine with the issue in the payload, moves the card to **In progress** and comments `Worker started <time>: <session url>` on the issue. If a start fails, it logs the error, goes on to the next card, and the run exits with an error so the failure shows in Actions. The card stays Ready and is tried again next run.
 
@@ -39,6 +40,7 @@ DRY_RUN=1 GH_TOKEN=... SPIKE_WORKER_TOKEN=... WORKER_ROUTINE_ID=trig_01QFJTcXruu
 | `PROJECT_OWNER`, `PROJECT_NUMBER` | The board |
 | `REPO` | Only issues from this repo are started |
 | `MAX_IN_PROGRESS` | Cap on Claude cards In progress (default 5) |
+| `MAX_STARTS_PER_DAY` | Cap on workers started in any 24 hours (default 5) |
 | `COOLDOWN_HOURS` | Hours after a `Worker started` comment before another worker can start on that issue (default 6) |
 | `DRY_RUN` | `1` to list without starting |
 

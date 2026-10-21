@@ -19,7 +19,7 @@ class Card:
     agent: str | None
     not_before: date | None
     open_blockers: int
-    last_worker_start: datetime | None
+    worker_starts: tuple[datetime, ...]  # times of the issue's Worker started comments
 
 
 def is_claude_card(card: Card) -> bool:
@@ -33,23 +33,34 @@ def is_startable(card: Card, now: datetime, cooldown: timedelta) -> bool:
         return False
     if card.not_before is not None and card.not_before > now.date():
         return False
-    return card.last_worker_start is None or now - card.last_worker_start >= cooldown
+    last_start = max(card.worker_starts, default=None)
+    return last_start is None or now - last_start >= cooldown
+
+
+def starts_in_last_day(cards: list[Card], now: datetime) -> int:
+    """Workers started on any issue on the board in the 24 hours before `now`."""
+    return sum(1 for c in cards for started in c.worker_starts if now - started < timedelta(days=1))
 
 
 def cards_to_start(
-    cards: list[Card], now: datetime, max_in_progress: int, cooldown: timedelta
+    cards: list[Card],
+    now: datetime,
+    max_in_progress: int,
+    max_starts_per_day: int,
+    cooldown: timedelta,
 ) -> list[Card]:
-    """Ready Claude cards to start now, oldest first, without going over the in-progress cap."""
+    """Ready Claude cards to start now, oldest first, within the in-progress and daily caps."""
     assert max_in_progress >= 0
+    assert max_starts_per_day >= 0
     running = sum(
         1 for c in cards if c.issue_open and c.status == IN_PROGRESS and is_claude_card(c)
     )
     free_slots = max(0, max_in_progress - running)
+    starts_left = max(0, max_starts_per_day - starts_in_last_day(cards, now))
     startable = [c for c in cards if is_startable(c, now, cooldown)]
-    return startable[:free_slots]
+    return startable[: min(free_slots, starts_left)]
 
 
-def last_worker_start(comments: list[tuple[str, datetime]]) -> datetime | None:
-    """The latest time a comment recorded a worker starting on the issue."""
-    starts = [created for body, created in comments if body.startswith(WORKER_STARTED)]
-    return max(starts, default=None)
+def worker_starts(comments: list[tuple[str, datetime]]) -> tuple[datetime, ...]:
+    """The times comments recorded a worker starting on the issue."""
+    return tuple(created for body, created in comments if body.startswith(WORKER_STARTED))

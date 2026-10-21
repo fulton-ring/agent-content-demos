@@ -23,7 +23,7 @@ CARD = Card(
     agent=None,
     not_before=None,
     open_blockers=0,
-    last_worker_start=None,
+    worker_starts=(),
 )
 
 

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any
 
-from board_dispatcher.board import Card, last_worker_start
+from board_dispatcher.board import Card, worker_starts
 from board_dispatcher.sync import Label, Signals
 
 GRAPHQL_URL = "https://api.github.com/graphql"
@@ -211,7 +211,7 @@ def _to_item(node: dict[str, Any], repo: str) -> BoardItem | None:
         agent=_single_select(node.get("agent")),
         not_before=not_before,
         open_blockers=issue["issueDependenciesSummary"]["blockedBy"],
-        last_worker_start=last_worker_start(comments),
+        worker_starts=worker_starts(comments),
     )
     signals = Signals(
         labels=tuple(Label(n["id"], n["name"]) for n in issue["labels"]["nodes"]),

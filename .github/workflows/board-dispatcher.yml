@@ -38,8 +38,10 @@ jobs:
       PROJECT_OWNER: fulton-ring
       PROJECT_NUMBER: "1"
       REPO: ${{ github.repository }}
-      # A safety ceiling, not a throttle: the Research manager's open-issue limit sets the pace.
+      # A safety ceiling on cards In progress at once.
       MAX_IN_PROGRESS: "30"
+      # The pace: at most this many workers started in any 24 hours, across the whole board.
+      MAX_STARTS_PER_DAY: "5"
       COOLDOWN_HOURS: "6"
       DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && '1' || '' }}
     steps:
