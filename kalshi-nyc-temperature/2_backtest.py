@@ -134,7 +134,7 @@ def _(days, markets, prices):
     book = book[_ok].copy()
     book["p_market"] = book.mid / book.groupby(["date", "snapshot"]).mid.transform("sum")
     _spread = (book.yes_ask - book.yes_bid).median()
-    print(f"Median quoted spread: {_spread * 100:.0f} cents")
+    print(f"Median quoted spread: {_spread * 100:.0f}¢")
     book.groupby("snapshot").date.nunique().rename("days with a full book")
     return (book,)
 
