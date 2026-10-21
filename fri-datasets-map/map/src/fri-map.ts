@@ -153,7 +153,8 @@ const STYLE = `
 .fri-map .fri-controls { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-bottom: 8px; }
 .fri-map select { font: inherit; margin-left: 4px; }
 .fri-map .fri-canvas { height: var(--fri-map-height, 560px); border: 1px solid #ccc; background: #f4f6f8; }
-.fri-map .fri-legend { background: #fff; padding: 6px 8px; border-radius: 4px; line-height: 1.5; }
+.fri-map .fri-legend { background: #fff; padding: 4px 6px; border-radius: 4px; font-size: 12px;
+  line-height: 1.3; }
 .fri-map .fri-swatch { display: inline-block; width: 14px; height: 10px; margin-right: 6px;
   border: 1px solid #999; vertical-align: middle; }
 .fri-map .fri-note { font-size: 12px; color: #555; margin-top: 4px; }

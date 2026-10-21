@@ -305,7 +305,7 @@ def _(mo):
     factor of 2, on two public storm catalogues, with Knutson et al.'s projected changes. Its
     range spans both catalogues and every published Knutson percentile. Its comparison table
     covers the 2,219 counties where FEMA published a hurricane multiplier; we add a flag for
-    FEMA's ~2.0 band (1.9 to 2.1). About 640 of those counties sit at FEMA's floor of 1; of the
+    FEMA's ~2.0 band (1.9 to 2.1). Between 615 and 643 of them sit at FEMA's floor of 1; of the
     rest, 95-97% are in the band in three scenarios, and about a third in late century, higher
     warming, where FEMA's values spread upward.
     """)
