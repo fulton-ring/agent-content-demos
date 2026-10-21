@@ -24,7 +24,7 @@ To read one as a notebook: `uv run marimo edit citywide.py`. Downloads (about 80
 
 - **Brooklyn** takes 3 to 13 minutes from a clean checkout, mostly retrying FEMA's flood map server, which drops
   about half its connections. If it gives up, run it again: answers are cached as they arrive.
-- **Citywide** took CW_FIRST from a clean checkout and about CW_LATER after that.
+- **Citywide** took 6 minutes from a clean checkout and about 2 minutes after that.
 
 ## The data
 
@@ -70,7 +70,7 @@ verified.
 
 ![Brooklyn power dependencies](output/map.png)
 
-## Results: citywide (run of RUN_DATE)
+## Results: citywide (run of 2026-10-21)
 
 - **Network → area substation: all 76 load areas paired from a public table.**
   - The 2025 table names 50 NYC area substations. Counting each one in the borough where most of the lots it
@@ -84,7 +84,7 @@ verified.
   - Most of the inferred are stations that share a site and a name with a 138 kV station (Corona, Jamaica,
     Hellgate).
   - Plus 28 documented 138 and 345 kV ties.
-- **Lots matched: LOTS_MATCHED of 857,347.**
+- **Lots matched: 856,988 (99.96%) of 857,347.**
   - 466,940 are in a network-supplied area.
   - 338,461 are within 500 ft of an overhead feeder. Staten Island's 33, 13 and 4 kV feeders are all in Con
     Edison's layer, tagged with its five area substations.

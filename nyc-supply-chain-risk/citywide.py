@@ -1126,7 +1126,7 @@ def _():
     - **The transmission step is a third inferred.** 20 of 53 area substation supply links have no document that
       names them. Most are co-located stations (Corona, Jamaica, Hellgate, East 179th Street, Mott Haven, Fresh
       Kills); the rest are Manhattan stations a 2016 testimony sentence gives as a group, Queensbridge to East 63rd
-      Street (only forum posts), and Bruckner, Woodrow and Willowbrook.
+      Street (only forum posts), Bruckner, Woodrow and Willowbrook, and LIPA's Valley Stream to Far Rockaway.
     - **Con Edison's line list went private after 2014.** The 138 kV ties come from the 2014 Gold Book, found only
       as a copy in a Kentucky PSC case; later Gold Books withhold the table.
     - **The Rockaways are a guess at the substation level.** PSEG Long Island's feeder map needs a login, so a
