@@ -12,6 +12,7 @@ with app.setup:
     from datetime import UTC, datetime
     from pathlib import Path
 
+    import duckdb
     import geopandas as gpd
     import marimo as mo
     import matplotlib
@@ -45,11 +46,11 @@ def _():
 
     Three things change at city scale:
 
-    1. **Network to area substation.** Con Edison's 2012 network ranking, filed with the PSC, pairs all of the
-       city's underground networks with their area substations. We parse it by code, compare it with the networks
-       on Con Edison's map today, and record what moved since 2012.
+    1. **Network to area substation.** Brooklyn used Con Edison's 2012 network table. Con Edison's 2025
+       reliability report has a current one for every area substation in the city; we read it by code and
+       compare it with 2012 to see what moved.
     2. **Area substation to transmission substation.** Brooklyn needed a handful of filings. The city needs one
-       link for every area substation, from Con Edison's and NYISO's public documents.
+       link for every area substation, from Con Edison's, NYISO's and LIPA's public documents.
     3. **The places Con Edison's networks don't reach.** Most of Staten Island and eastern Queens are fed by
        overhead feeders at 33, 27, 13 and 4 kV, and the Rockaways are served by LIPA through PSEG Long Island,
        not by Con Edison at all.
@@ -104,7 +105,13 @@ def _():
             load().to_parquet(path)
         return gpd.read_parquet(path)
 
-    return arcgis, cached, get
+    def read_table(text: str, columns: list[str]) -> pd.DataFrame:
+        """A table written one row per line with ' | ' between fields; an empty field is missing."""
+        rows = [[field.strip() or None for field in line.split(" | ")] for line in text.strip().splitlines()]
+        assert all(len(row) == len(columns) for row in rows), "every row needs one field per column"
+        return pd.DataFrame(rows, columns=columns)
+
+    return arcgis, cached, get, read_table
 
 
 @app.cell(hide_code=True)
@@ -280,7 +287,9 @@ def _(arcgis, cached):
         "coned-network-supplied-areas.parquet",
         lambda: arcgis(f"{_coned}/CECONY_NwkSuppliedArea_Prod/FeatureServer/0", {"outFields": "OBJECTID"}, 1000),
     )
-    networks = networks[networks["BOROUGH"] != "Westchester"].rename(columns={"NETWORK": "network", "BOROUGH": "borough"})
+    networks = networks[networks["BOROUGH"] != "Westchester"].rename(
+        columns={"NETWORK": "network", "BOROUGH": "borough"}
+    )
     # The map splits Richmond Hill at the borough line and Fulton and Bowling Green into sub-networks.
     networks["base"] = networks["network"].str.replace(r" - (BK|QN)| SN\d", "", regex=True)
     networks[["network", "borough"]].groupby("borough").size().rename("load areas on Con Edison's map")
@@ -395,6 +404,7 @@ def _(networks, normalise, ranking_2012, table_2025):
         & (network_links["area_substation"] != network_links["area_substation_2012"])
     ]
     _gone = sorted(set(ranking_2012["network_id"]) - set(table_2025["network_id"]))
+    _new = network_links["network_id"].isna() & (network_links["borough"] != "Staten Island")
     mo.vstack(
         [
             network_links.groupby(["borough", "how"]).size().unstack(fill_value=0),
@@ -402,7 +412,7 @@ def _(networks, normalise, ranking_2012, table_2025):
             _moved[["network", "area_substation_2012", "area_substation"]],
             mo.md(
                 "New since 2012 (no 2012 row): "
-                f"{', '.join(network_links.loc[network_links['network_id'].isna() & (network_links['borough'] != 'Staten Island'), 'network'])}. "
+                f"{', '.join(network_links.loc[_new, 'network'])}. "
                 f"2012 network IDs missing from the 2025 table: {', '.join(_gone) or 'none'}."
             ),
         ]
@@ -421,28 +431,30 @@ def _():
 
 
 @app.cell
-def _():
-    _jan, _upd = "psc-eiop-exhibits-2025", "psc-eiop-exhibits-2025-upd"
-    network_changes = pd.DataFrame(
-        [
-            ("Ridgewood", "Brownsville No. 1", "Glendale", 2026, _jan, "transfer 60 MW from Brownsville No. 1 to Glendale."),
-            ("Crown Heights", "Brownsville No. 1", "Gateway Park No. 1", 2028, _jan,
-             "Split Crown Heights network and transfer 120 MW from Brownsville No. 1 to Gateway"),
-            ("Jamaica", "Jamaica", "Idlewild", 2028, _jan,
-             "Transferring 170 MW from the Jamaica Network to the new Idlewild 27 kV Distribution Area Substation"),
-            ("Flatbush", "Bensonhurst No. 2", "Gateway Park No. 1", 2030, _jan,
-             "4B South of Newkirk Avenue will be supplied by the newly established Gateway Park 1 (GP1) substation."),
-            ("Williamsburg", "Water Street", "Nevins Street", 2032, _jan,
-             "6B South of Flushing Avenue supplied by the new Nevins station."),
-            ("Flushing", "Corona No. 1", "Hillside", 2033, _jan,
-             "this load will then be fed from the new Hillside substation and will be referred to as the Bayside network."),
-            ("Richmond Hill", "Brownsville No. 2", "Atlantic", 2034, _upd,
-             "Brownsville No. 2 to Atlantic Area Substation-Richmond Hill (9B) to Ozone Park (11Q) Transfer"),
-            ("Bay Ridge", "Greenwood", "Industry City", 2034, _upd,
-             "Greenwood to Industry City - Bay Ridge (8B) to South Brooklyn (15B) Transfer"),
-        ],
-        columns=["network", "from", "to", "year", "source", "passage"],
-    ).assign(change=lambda d: "part moves from " + d["from"] + " to " + d["to"] + " (" + d["year"].astype(str) + ")")
+def _(read_table):
+    # network | from | to | year | source | passage
+    network_changes = read_table(
+        """
+    Ridgewood | Brownsville No. 1 | Glendale | 2026 | psc-eiop-exhibits-2025 | transfer 60 MW from Brownsville No. 1 to Glendale.
+    Crown Heights | Brownsville No. 1 | Gateway Park No. 1 | 2028 | psc-eiop-exhibits-2025 | Split Crown Heights network and transfer 120 MW from Brownsville No. 1 to Gateway
+    Jamaica | Jamaica | Idlewild | 2028 | psc-eiop-exhibits-2025 | Transferring 170 MW from the Jamaica Network to the new Idlewild 27 kV Distribution Area Substation
+    Flatbush | Bensonhurst No. 2 | Gateway Park No. 1 | 2030 | psc-eiop-exhibits-2025 | 4B South of Newkirk Avenue will be supplied by the newly established Gateway Park 1 (GP1) substation.
+    Williamsburg | Water Street | Nevins Street | 2032 | psc-eiop-exhibits-2025 | 6B South of Flushing Avenue supplied by the new Nevins station.
+    Flushing | Corona No. 1 | Hillside | 2033 | psc-eiop-exhibits-2025 | this load will then be fed from the new Hillside substation and will be referred to as the Bayside
+    Richmond Hill | Brownsville No. 2 | Atlantic | 2034 | psc-eiop-exhibits-2025-upd | Brownsville No. 2 to Atlantic Area Substation-Richmond Hill (9B) to Ozone Park (11Q) Transfer
+    Bay Ridge | Greenwood | Industry City | 2034 | psc-eiop-exhibits-2025-upd | Greenwood to Industry City - Bay Ridge (8B) to South Brooklyn (15B) Transfer
+        """,
+        ["network", "from", "to", "year", "source", "passage"],
+    )
+    network_changes["change"] = (
+        "part moves from "
+        + network_changes["from"]
+        + " to "
+        + network_changes["to"]
+        + " ("
+        + network_changes["year"]
+        + ")"
+    )
     network_changes[["network", "from", "to", "year"]]
     return (network_changes,)
 
@@ -472,115 +484,102 @@ def _():
 
 
 @app.cell
-def _():
-    _group = ("psc-eiop-2016", "supplied from the West 49th Street, East 13th Street, and")
-    _colt = ("colt-w49-2012", "Eleven 138 kV feeders from the station supply W 42nd St., W 50th St., W 65th St. and Astor")
-    _rainey = ("psc-eiop-2013", "Substations in Manhattan are supplied from Rainey")  # "the East 75th and West 110th"
-    _rows = [
-        # Area substations, Manhattan.
-        *(("West 49th Street 345 kV", s, *_colt, "documented") for s in (
-            "West 42nd Street No. 1", "West 42nd Street No. 2", "West 50th Street", "West 65th Street No. 1",
-            "West 65th Street No. 2", "Astor")),
-        ("East 13th Street 345 kV", "Cherry Street", "coned-lrtp-2011",
-         "Transfer 25 MW from Cherry St. (E 13th St. S/S) to Seaport #1", "documented"),
-        *(("East 13th Street 345 kV", s, *_group, "inferred") for s in (
-            "West 19th Street", "East 29th Street", "East 36th Street", "Avenue A")),
-        *(("Vernon 138 kV", s, *_group, "inferred") for s in (
-            "East 40th Street No. 1", "East 40th Street No. 2", "Murray Hill")),
-        *(("Queensbridge 138 kV", s, None, "inferred: only forum posts name it", "inferred") for s in (
-            "East 63rd Street No. 1", "East 63rd Street No. 2")),
-        *(("Farragut 345 kV", s, "psc-eiop-update-2022",
-           "the Seaport/Trade Center loads that are currently supplied by the Farragut", "documented") for s in (
-            "Seaport No. 1", "Seaport No. 2", "Trade Center No. 1")),
-        *(("Rainey 345 kV", s, *_rainey, "documented") for s in (
-            "East 75th Street", "West 110th Street No. 1", "West 110th Street No. 2")),
-        *(("East River 69 kV", s, "psc-eiop-2013", "East River Gen. No. 1 and the power supply to the Leonard",
-           "documented") for s in ("Leonard Street No. 1", "Leonard Street No. 2")),
-        ("Dunwoodie North 138 kV", "Sherman Creek", "nyiso-gold-book-2014",
-         "Dunwoodie North Sherman Creek (c) 138 7.88 1 1500 CU 648 715 A", "documented"),
-        # The Bronx.
-        ("Mott Haven 345 kV", "Parkview", "psc-eiop-update-2022",
-         "This project will establish 138kV supply feeder 38M85 from the Mott Haven 345kV Substation to the",
-         "planned"),
-        ("Mott Haven 345 kV", "Mott Haven", None, "inferred: same site", "inferred"),
-        *(("East 179th Street 138 kV", s, "nyiso-gold-book-2014",
-           "East 179th St. Parkchester 138 2.19 4 1250 CU 786 927 A", "documented") for s in (
-            "Parkchester No. 1", "Parkchester No. 2")),
-        ("East 179th Street 138 kV", "East 179th Street", None, "inferred: same site", "inferred"),
-        ("Hellgate 138 kV", "Hellgate", None, "inferred: same site", "inferred"),
-        ("Hellgate 138 kV", "Bruckner", None, "inferred: no document names Bruckner's supply", "inferred"),
-        # Brooklyn.
-        *(("Farragut 345 kV", f"Brownsville No. {n}", "bqdm-petition-2014",
-           "The Brownsville substations are supplied by a set of five 138,000 volt", "documented") for n in (1, 2)),
-        ("Farragut 345 kV", "Plymouth Street", "psc-eiop-2016", "supplied from the Farragut Substation by five 138 kV",
-         "documented"),
-        ("Hudson Avenue East 138 kV", "Water Street", "psc-eiop4-2019",
-         "creating an additional supply source for Plymouth and Water St.", "documented"),
-        ("Greenwood 138 kV", "Greenwood", "coned-lrtp-2014",
-         "transferred from the Greenwood Area Station (served by Greenwood Transmission Station).", "documented"),
-        *(("Greenwood 138 kV", f"Bensonhurst No. {n}", "nyiso-queue",
-           "Greenwood-Bensonhurst and Farragut-Brownsville 138 kV feeders", "documented") for n in (1, 2)),
-        # Queens.
-        ("Vernon 138 kV", "Glendale", "psc-eiop-2022", "with Feeder 38Q01 from Vernon Substation, the Glendale Area",
-         "documented"),
-        ("Vernon 138 kV", "Newtown", "psc-eiop4-2019",
-         "Installation of fourth transformer and 138 kV supply feeder 38Q05 from Vernon (east bus) to", "documented"),
-        ("Astoria East 138 kV", "North Queens", "psc-eiop-2016", "The Astoria East/North Queens Substation is a 138kV",
-         "documented"),
-        *(("Corona 138 kV", f"Corona No. {n}", None, "inferred: same site", "inferred") for n in (1, 2)),
-        ("Jamaica 138 kV", "Jamaica", None, "inferred: same site", "inferred"),
-        # Staten Island.
-        ("Fresh Kills 345 kV", "Wainwright", "psc-eiop-update-2022",
-         "originate from Fresh Kills Substation and are the only two supplies for Wainwright Substation.",
-         "documented"),
-        ("Fresh Kills 345 kV", "Willowbrook", "nyiso-binding-2003", "Willowbrook – Freshkills 138 kV", "inferred"),
-        ("Fresh Kills 345 kV", "Woodrow", None, "inferred: Woodrow's supply feeders are named, not their source",
-         "inferred"),
-        ("Fresh Kills 345 kV", "Fresh Kills", None, "inferred: same site", "inferred"),
-        ("Fox Hills 138 kV", "Fox Hills", "nyiso-gold-book-2026", "ConEd Fox Hills Fox Hills Transformer S 2030 138/33",
-         "documented"),
-        # The Rockaways (LIPA, operated by PSEG Long Island).
-        ("Valley Stream 138 kV", "Far Rockaway", "psc-wntp-2017",
-         "(defined as the area encompassing the Far Rockaway load pocket and parts of the", "inferred"),
-        ("Far Rockaway", "Arverne", "pseg-li-ltp-2023", "33kV Far Rockaway to Arverne New Circuit", "documented"),
-        ("Arverne", "Rockaway Beach", "pseg-li-ltp-2023",
-         "Install a new 33 kV circuit between the Arverne substation to the Rockaway Beach substation", "documented"),
-    ]
-    _gb = "nyiso-gold-book-2014"
-    _ties = [
-        # 138 and 345 kV ties, one hop out. Direction is bulk toward local; the lines themselves run both ways.
-        ("Gowanus 345 kV", "Greenwood 138 kV", "nyiso-gold-book-2026", "ConEd Gowanus Greenwood Xfmr/PAR/Feeder"),
-        ("Vernon 138 kV", "Greenwood 138 kV", _gb, "Vernon Greenwood (c) 138 9.58 2 1500 CU 810 908 A"),
-        ("Greenwood 138 kV", "Fox Hills 138 kV", _gb, "Greenwood Fox Hills (c) 138 6.41 2 1500 CU 810 908 A"),
-        ("Fresh Kills 345 kV", "Fox Hills 138 kV", _gb, "Fox Hills Fresh Kills (c) 138 7.51 2 2000 CU 844 960 A"),
-        ("Goethals 345 kV", "Fox Hills 138 kV", "nyiso-gold-book-2026", "ConEd Goethals Fox Hills Xfmr/PAR/Feeder"),
-        ("Goethals 345 kV", "Fresh Kills 345 kV", "nyiso-bps", "22 GOETHALS N.1 345 FRESHKILLS 345"),
-        ("Gowanus 345 kV", "Goethals 345 kV", "nyiso-bps", "25 GOWANUS N. 345 GOETHALS N.1 345"),
-        ("Farragut 345 kV", "Gowanus 345 kV", "nyiso-bps", "41 FARRAGUT 345 GOWANUS N41 345"),
-        ("Rainey 345 kV", "Farragut 345 kV", "nyiso-bps", "61 RAINEY 345 FARRAGUT 345"),
-        ("East 13th Street 345 kV", "Farragut 345 kV", "nyiso-bps", "45 E.13TH ST A 345 FARRAGUT 345"),
-        ("Hudson Avenue East 138 kV", "Farragut 345 kV", _gb, "Hudson Avenue East Farragut (c) 138 0.28 3 2000 CU 495"),
-        ("Astoria Annex 345 kV", "East 13th Street 345 kV", "nyiso-bps", "Q35L POLETTI 345 E.13TH ST C 345"),
-        ("West 49th Street 345 kV", "East 13th Street 345 kV", "nyiso-bps", "M54 W.49TH ST 345 E.13TH ST A 345"),
-        ("Sprain Brook 345 kV", "West 49th Street 345 kV", "nyiso-bps", "M51 SPRAINBROOK 345 W.49TH ST 345"),
-        ("Vernon 138 kV", "West 49th Street 345 kV", _gb, "Vernon West 49th Street 138 4.45 1 2000 CU 729 842 A"),
-        ("Rainey 345 kV", "Vernon 138 kV", "nyiso-bps", "36312 RAINEY 1 138 VERNON 138"),
-        ("Queensbridge 138 kV", "Vernon 138 kV", _gb, "Queensbridge Vernon (c) 138 0.59 1 2000 CU 1688 1920 A"),
-        ("Astoria West 138 kV", "Queensbridge 138 kV", _gb, "Astoria West Queensbridge (c) 138 2.87 2 1500 CU 1620"),
-        ("Hellgate 138 kV", "Astoria West 138 kV", _gb, "Hell Gate Astoria West (c) 138 1.55 5 1500 CU 746 876 A"),
-        ("Hellgate 138 kV", "Astoria East 138 kV", _gb, "Hell Gate Astoria East (c) 138 1.74 2 1500 CU 810 908 A"),
-        ("Astoria East 138 kV", "Corona 138 kV", _gb, "Astoria East Corona (c) 138 5.07 6 1500 CU 810 908 A"),
-        ("Corona 138 kV", "Jamaica 138 kV", _gb, "Corona Jamaica (c) 138 4.55 2 1500 CU 775 898 A"),
-        ("Hudson Avenue East 138 kV", "Jamaica 138 kV", _gb, "Hudson Avenue East Jamaica (c) 138 11.12 2 1500 CU 682"),
-        ("East 179th Street 138 kV", "Hellgate 138 kV", _gb, "East 179th St. Hell Gate (c) 138 4.26 3 1500 CU 769"),
-        ("Dunwoodie South 138 kV", "East 179th Street 138 kV", _gb, "Dunwoodie South East 179th St. (c) 138 7.45 1"),
-        ("East 179th Street 138 kV", "Sherman Creek", _gb, "Sherman Creek East 179th St. (c) 138 2.04 2 1500 CU 753"),
-        ("Rainey 345 kV", "Mott Haven 345 kV", _gb, "Mott Haven Rainey 345 4.39 2 2000 CU 1315 1377 A"),
-        ("Dunwoodie 345 kV", "Rainey 345 kV", "nyiso-bps", "71 DUNWOODIE 345 RAINEY 345"),
-    ]
-    supply_links = pd.DataFrame(_rows, columns=["supplier", "consumer", "source", "passage", "status"])
-    tie_links = pd.DataFrame(_ties, columns=["supplier", "consumer", "source", "passage"]).assign(status="documented")
-    supply_links.groupby("status").size().rename("area substation supply links")
+def _(read_table):
+    # supplier | consumer | status | source | passage. Testimony passages are the sentence about that station; the
+    # Rainey sentence opens on the line before ("the East 75th and West 110th Street Area").
+    supply_links = read_table(
+        """
+    West 49th Street 345 kV | West 42nd Street No. 1 | documented | colt-w49-2012 | Eleven 138 kV feeders from the station supply W 42nd St., W 50th St., W 65th St. and Astor
+    West 49th Street 345 kV | West 42nd Street No. 2 | documented | colt-w49-2012 | Eleven 138 kV feeders from the station supply W 42nd St., W 50th St., W 65th St. and Astor
+    West 49th Street 345 kV | West 50th Street | documented | colt-w49-2012 | Eleven 138 kV feeders from the station supply W 42nd St., W 50th St., W 65th St. and Astor
+    West 49th Street 345 kV | West 65th Street No. 1 | documented | colt-w49-2012 | Eleven 138 kV feeders from the station supply W 42nd St., W 50th St., W 65th St. and Astor
+    West 49th Street 345 kV | West 65th Street No. 2 | documented | colt-w49-2012 | Eleven 138 kV feeders from the station supply W 42nd St., W 50th St., W 65th St. and Astor
+    West 49th Street 345 kV | Astor | documented | colt-w49-2012 | Eleven 138 kV feeders from the station supply W 42nd St., W 50th St., W 65th St. and Astor
+    East 13th Street 345 kV | Cherry Street | documented | coned-lrtp-2011 | Transfer 25 MW from Cherry St. (E 13th St. S/S) to Seaport #1
+    East 13th Street 345 kV | West 19th Street | inferred | psc-eiop-2016 | supplied from the West 49th Street, East 13th Street, and
+    East 13th Street 345 kV | East 29th Street | inferred | psc-eiop-2016 | supplied from the West 49th Street, East 13th Street, and
+    East 13th Street 345 kV | East 36th Street | inferred | psc-eiop-2016 | supplied from the West 49th Street, East 13th Street, and
+    East 13th Street 345 kV | Avenue A | inferred | psc-eiop-2016 | supplied from the West 49th Street, East 13th Street, and
+    Vernon 138 kV | East 40th Street No. 1 | inferred | psc-eiop-2016 | supplied from the West 49th Street, East 13th Street, and
+    Vernon 138 kV | East 40th Street No. 2 | inferred | psc-eiop-2016 | supplied from the West 49th Street, East 13th Street, and
+    Vernon 138 kV | Murray Hill | inferred | psc-eiop-2016 | supplied from the West 49th Street, East 13th Street, and
+    Queensbridge 138 kV | East 63rd Street No. 1 | inferred |  | inferred: only forum posts name it
+    Queensbridge 138 kV | East 63rd Street No. 2 | inferred |  | inferred: only forum posts name it
+    Farragut 345 kV | Seaport No. 1 | documented | psc-eiop-update-2022 | the Seaport/Trade Center loads that are currently supplied by the Farragut
+    Farragut 345 kV | Seaport No. 2 | documented | psc-eiop-update-2022 | the Seaport/Trade Center loads that are currently supplied by the Farragut
+    Farragut 345 kV | Trade Center No. 1 | documented | psc-eiop-update-2022 | the Seaport/Trade Center loads that are currently supplied by the Farragut
+    Rainey 345 kV | East 75th Street | documented | psc-eiop-2013 | Substations in Manhattan are supplied from Rainey
+    Rainey 345 kV | West 110th Street No. 1 | documented | psc-eiop-2013 | Substations in Manhattan are supplied from Rainey
+    Rainey 345 kV | West 110th Street No. 2 | documented | psc-eiop-2013 | Substations in Manhattan are supplied from Rainey
+    East River 69 kV | Leonard Street No. 1 | documented | psc-eiop-2013 | East River Gen. No. 1 and the power supply to the Leonard
+    East River 69 kV | Leonard Street No. 2 | documented | psc-eiop-2013 | East River Gen. No. 1 and the power supply to the Leonard
+    Dunwoodie North 138 kV | Sherman Creek | documented | nyiso-gold-book-2014 | Dunwoodie North Sherman Creek (c) 138 7.88 1 1500 CU 648 715 A
+    Mott Haven 345 kV | Parkview | planned | psc-eiop-update-2022 | This project will establish 138kV supply feeder 38M85 from the Mott Haven 345kV Substation to the
+    Mott Haven 345 kV | Mott Haven | inferred |  | inferred: same site
+    East 179th Street 138 kV | Parkchester No. 1 | documented | nyiso-gold-book-2014 | East 179th St. Parkchester 138 2.19 4 1250 CU 786 927 A
+    East 179th Street 138 kV | Parkchester No. 2 | documented | nyiso-gold-book-2014 | East 179th St. Parkchester 138 2.19 4 1250 CU 786 927 A
+    East 179th Street 138 kV | East 179th Street | inferred |  | inferred: same site
+    Hellgate 138 kV | Hellgate | inferred |  | inferred: same site
+    Hellgate 138 kV | Bruckner | inferred |  | inferred: no document names Bruckner's supply
+    Farragut 345 kV | Brownsville No. 1 | documented | bqdm-petition-2014 | The Brownsville substations are supplied by a set of five 138,000 volt
+    Farragut 345 kV | Brownsville No. 2 | documented | bqdm-petition-2014 | The Brownsville substations are supplied by a set of five 138,000 volt
+    Farragut 345 kV | Plymouth Street | documented | psc-eiop-2016 | supplied from the Farragut Substation by five 138 kV
+    Hudson Avenue East 138 kV | Water Street | documented | psc-eiop4-2019 | creating an additional supply source for Plymouth and Water St.
+    Greenwood 138 kV | Greenwood | documented | coned-lrtp-2014 | transferred from the Greenwood Area Station (served by Greenwood Transmission Station).
+    Greenwood 138 kV | Bensonhurst No. 1 | documented | nyiso-queue | Greenwood-Bensonhurst and Farragut-Brownsville 138 kV feeders
+    Greenwood 138 kV | Bensonhurst No. 2 | documented | nyiso-queue | Greenwood-Bensonhurst and Farragut-Brownsville 138 kV feeders
+    Vernon 138 kV | Glendale | documented | psc-eiop-2022 | with Feeder 38Q01 from Vernon Substation, the Glendale Area
+    Vernon 138 kV | Newtown | documented | psc-eiop4-2019 | Installation of fourth transformer and 138 kV supply feeder 38Q05 from Vernon (east bus) to
+    Astoria East 138 kV | North Queens | documented | psc-eiop-2016 | The Astoria East/North Queens Substation is a 138kV
+    Corona 138 kV | Corona No. 1 | inferred |  | inferred: same site
+    Corona 138 kV | Corona No. 2 | inferred |  | inferred: same site
+    Jamaica 138 kV | Jamaica | inferred |  | inferred: same site
+    Fresh Kills 345 kV | Wainwright | documented | psc-eiop-update-2022 | originate from Fresh Kills Substation and are the only two supplies for Wainwright Substation.
+    Fresh Kills 345 kV | Willowbrook | inferred | nyiso-binding-2003 | Willowbrook – Freshkills 138 kV
+    Fresh Kills 345 kV | Woodrow | inferred |  | inferred: Woodrow's supply feeders are named, not their source
+    Fresh Kills 345 kV | Fresh Kills | inferred |  | inferred: same site
+    Fox Hills 138 kV | Fox Hills | documented | nyiso-gold-book-2026 | ConEd Fox Hills Fox Hills Transformer S 2030 138/33
+    Valley Stream 138 kV | Far Rockaway | inferred | psc-wntp-2017 | (defined as the area encompassing the Far Rockaway load pocket and parts of the
+    Far Rockaway | Arverne | documented | pseg-li-ltp-2023 | 33kV Far Rockaway to Arverne New Circuit
+    Arverne | Rockaway Beach | documented | pseg-li-ltp-2023 | Install a new 33 kV circuit between the Arverne substation to the Rockaway Beach substation
+        """,
+        ["supplier", "consumer", "status", "source", "passage"],
+    )
+    # 138 and 345 kV ties, one hop out. Direction is bulk toward local; the lines themselves run both ways.
+    tie_links = read_table(
+        """
+    Gowanus 345 kV | Greenwood 138 kV | nyiso-gold-book-2026 | ConEd Gowanus Greenwood Xfmr/PAR/Feeder
+    Vernon 138 kV | Greenwood 138 kV | nyiso-gold-book-2014 | Vernon Greenwood (c) 138 9.58 2 1500 CU 810 908 A
+    Greenwood 138 kV | Fox Hills 138 kV | nyiso-gold-book-2014 | Greenwood Fox Hills (c) 138 6.41 2 1500 CU 810 908 A
+    Fresh Kills 345 kV | Fox Hills 138 kV | nyiso-gold-book-2014 | Fox Hills Fresh Kills (c) 138 7.51 2 2000 CU 844 960 A
+    Goethals 345 kV | Fox Hills 138 kV | nyiso-gold-book-2026 | ConEd Goethals Fox Hills Xfmr/PAR/Feeder
+    Goethals 345 kV | Fresh Kills 345 kV | nyiso-bps | 22 GOETHALS N.1 345 FRESHKILLS 345
+    Gowanus 345 kV | Goethals 345 kV | nyiso-bps | 25 GOWANUS N. 345 GOETHALS N.1 345
+    Farragut 345 kV | Gowanus 345 kV | nyiso-bps | 41 FARRAGUT 345 GOWANUS N41 345
+    Rainey 345 kV | Farragut 345 kV | nyiso-bps | 61 RAINEY 345 FARRAGUT 345
+    East 13th Street 345 kV | Farragut 345 kV | nyiso-bps | 45 E.13TH ST A 345 FARRAGUT 345
+    Hudson Avenue East 138 kV | Farragut 345 kV | nyiso-gold-book-2014 | Hudson Avenue East Farragut (c) 138 0.28 3 2000 CU 495
+    Astoria Annex 345 kV | East 13th Street 345 kV | nyiso-bps | Q35L POLETTI 345 E.13TH ST C 345
+    West 49th Street 345 kV | East 13th Street 345 kV | nyiso-bps | M54 W.49TH ST 345 E.13TH ST A 345
+    Sprain Brook 345 kV | West 49th Street 345 kV | nyiso-bps | M51 SPRAINBROOK 345 W.49TH ST 345
+    Vernon 138 kV | West 49th Street 345 kV | nyiso-gold-book-2014 | Vernon West 49th Street 138 4.45 1 2000 CU 729 842 A
+    Rainey 345 kV | Vernon 138 kV | nyiso-bps | 36312 RAINEY 1 138 VERNON 138
+    Queensbridge 138 kV | Vernon 138 kV | nyiso-gold-book-2014 | Queensbridge Vernon (c) 138 0.59 1 2000 CU 1688 1920 A
+    Astoria West 138 kV | Queensbridge 138 kV | nyiso-gold-book-2014 | Astoria West Queensbridge (c) 138 2.87 2 1500 CU 1620
+    Hellgate 138 kV | Astoria West 138 kV | nyiso-gold-book-2014 | Hell Gate Astoria West (c) 138 1.55 5 1500 CU 746 876 A
+    Hellgate 138 kV | Astoria East 138 kV | nyiso-gold-book-2014 | Hell Gate Astoria East (c) 138 1.74 2 1500 CU 810 908 A
+    Astoria East 138 kV | Corona 138 kV | nyiso-gold-book-2014 | Astoria East Corona (c) 138 5.07 6 1500 CU 810 908 A
+    Corona 138 kV | Jamaica 138 kV | nyiso-gold-book-2014 | Corona Jamaica (c) 138 4.55 2 1500 CU 775 898 A
+    Hudson Avenue East 138 kV | Jamaica 138 kV | nyiso-gold-book-2014 | Hudson Avenue East Jamaica (c) 138 11.12 2 1500 CU 682
+    East 179th Street 138 kV | Hellgate 138 kV | nyiso-gold-book-2014 | East 179th St. Hell Gate (c) 138 4.26 3 1500 CU 769
+    Dunwoodie South 138 kV | East 179th Street 138 kV | nyiso-gold-book-2014 | Dunwoodie South East 179th St. (c) 138 7.45 1
+    East 179th Street 138 kV | Sherman Creek | nyiso-gold-book-2014 | Sherman Creek East 179th St. (c) 138 2.04 2 1500 CU 753
+    Rainey 345 kV | Mott Haven 345 kV | nyiso-gold-book-2014 | Mott Haven Rainey 345 4.39 2 2000 CU 1315 1377 A
+    Dunwoodie 345 kV | Rainey 345 kV | nyiso-bps | 71 DUNWOODIE 345 RAINEY 345
+        """,
+        ["supplier", "consumer", "source", "passage"],
+    ).assign(status="documented")
+    supply_links["status"].value_counts().rename("area substation supply links")
     return supply_links, tie_links
 
 
@@ -605,7 +604,9 @@ def _(document_pages, documents, network_changes, normalise, supply_links, tie_l
             network_changes.assign(what=network_changes["network"] + ": " + network_changes["change"]),
         ]
     )[["what", "source", "passage"]]
-    source_check = _checks.assign(result=[check(s, p) for s, p in zip(_checks["source"], _checks["passage"])])
+    source_check = _checks.assign(
+        result=[check(s, p) for s, p in zip(_checks["source"], _checks["passage"], strict=True)]
+    )
     source_check["document"] = source_check["source"].map(lambda s: documents[s][0] if isinstance(s, str) else "")
     source_check["url"] = source_check["source"].map(lambda s: documents[s][1] if isinstance(s, str) else "")
     source_check.to_csv(OUT / "source_check.csv", index=False)
@@ -617,6 +618,78 @@ def _(document_pages, documents, network_changes, normalise, supply_links, tie_l
         ]
     )
     return (source_check,)
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ## 4. Where each facility is
+
+    Footprints come from OpenStreetMap through Overture's versioned GeoParquet, read with DuckDB, as in the
+    Brooklyn notebook (same release and cache file). Document names are matched to OSM names by rule: drop the
+    voltage and the `No. 1` (co-located stations share a site), then look for `<name> Substation` or `<name>`.
+    A few OSM spellings differ and are listed by hand. A facility's borough is the borough of the nearest tax lot
+    within 2,000 feet; anything farther is outside the city.
+    """)
+    return
+
+
+@app.cell
+def _():
+    overture_release = "2026-09-23.0"
+    _path = DATA / f"overture-power-nyc-{overture_release}.parquet"
+    if not _path.exists():
+        _con = duckdb.connect()
+        _con.sql("INSTALL spatial; LOAD spatial; INSTALL httpfs; LOAD httpfs;")
+        # An empty key makes DuckDB read the public bucket anonymously instead of using any AWS credentials around.
+        _con.sql("CREATE SECRET overture (TYPE s3, KEY_ID '', SECRET '', REGION 'us-west-2')")
+        _con.sql(f"""
+            COPY (
+                SELECT id, class, names.primary AS name, source_tags['operator'] AS operator,
+                       source_tags['voltage'] AS voltage, source_tags['substation'] AS substation_type,
+                       ST_AsWKB(geometry) AS geometry
+                FROM read_parquet('s3://overturemaps-us-west-2/release/{overture_release}/theme=base/type=infrastructure/*')
+                WHERE bbox.xmin > -74.3 AND bbox.xmax < -73.6 AND bbox.ymin > 40.45 AND bbox.ymax < 40.95
+                  AND subtype = 'power' AND class IN ('substation', 'plant')
+            ) TO '{_path}' (FORMAT parquet)
+        """)
+    _osm = pd.read_parquet(_path)
+    osm_power = gpd.GeoDataFrame(_osm, geometry=shapely.from_wkb(_osm["geometry"]), crs=4326)
+    return osm_power, overture_release
+
+
+@app.cell
+def _(lots, osm_power, supply_links, table_2025, tie_links):
+    _links = pd.concat([supply_links, tie_links])
+    _names = sorted(set(_links["supplier"]) | set(_links["consumer"]) | set(table_2025["area_substation"]))
+    _spelling = {
+        "Hellgate": "Hell Gate",
+        "Fox Hills": "Fox Hill",
+        "Plymouth Street": "Plymouth",
+        "Valley Stream": "2K Valley Stream",
+        "Hudson Avenue East": "Hudson Avenue",
+    }
+    _subs = osm_power[osm_power["class"] == "substation"]
+    _footprints = _subs.dissolve(by="name")["geometry"]
+    _rows = []
+    for _name in _names:
+        _key = re.sub(r" \d+ kV$| No\. \d$", "", _name)
+        _key = _spelling.get(_key, _key)
+        _osm = next((n for n in (f"{_key} Substation", _key) if n in _footprints.index), None)
+        _kind = "transmission substation" if _name.endswith(" kV") else "area substation"
+        _rows.append({"node": _name, "kind": _kind, "osm_name": _osm, "geometry": _footprints[_osm] if _osm else None})
+    facility_nodes = gpd.GeoDataFrame(_rows, crs=4326)
+    _located = facility_nodes[facility_nodes.geometry.notna()]
+    _near = gpd.sjoin_nearest(
+        gpd.GeoDataFrame(geometry=_located.geometry.representative_point(), crs=4326).to_crs(NY_FEET),
+        lots[["borough", "geometry"]].to_crs(NY_FEET),
+        how="left",
+        max_distance=2000,
+    )
+    facility_nodes["borough"] = _near[~_near.index.duplicated()]["borough"].reindex(facility_nodes.index)
+    facility_nodes.loc[facility_nodes.geometry.notna() & facility_nodes["borough"].isna(), "borough"] = "outside NYC"
+    facility_nodes[["node", "kind", "osm_name", "borough"]]
+    return (facility_nodes,)
 
 
 @app.cell(hide_code=True)
@@ -721,13 +794,132 @@ def _(lots, serve):
 @app.cell(hide_code=True)
 def _():
     mo.md(r"""
+    **The Rockaways.** LIPA, not Con Edison, serves the Rockaway peninsula, through PSEG Long Island. PSEG Long
+    Island's hosting capacity map needs a login, so no public layer ties a lot to a feeder there. We place lots
+    with the NY Department of Public Service's utility territory map (data.ny.gov `awza-4vgu`): a lot that no Con
+    Edison network or feeder reaches and that sits in LIPA's territory gets the nearest of LIPA's three Rockaway
+    substations (Far Rockaway, Arverne, Rockaway Beach), marked inferred.
+    """)
+    return
+
+
+@app.cell
+def _(cached, facility_nodes, lot_service, lots, network_links):
+    def _lipa_territory() -> gpd.GeoDataFrame:
+        shapes = gpd.read_file(
+            io.BytesIO(
+                requests.get(
+                    "https://data.ny.gov/api/geospatial/awza-4vgu?method=export&format=GeoJSON",
+                    timeout=180,
+                    headers={"User-Agent": "Mozilla/5.0 (nyc-supply-chain-risk spike)"},
+                ).content
+            )
+        )
+        return shapes[shapes["comp_short"] == "LIPA"][["comp_full", "geometry"]]
+
+    lipa = cached("nys-dps-lipa-territory.parquet", _lipa_territory)
+    _in_lipa = lots.index.isin(gpd.sjoin(lots[["geometry"]], lipa, predicate="within").index)
+    _stations = facility_nodes[facility_nodes["node"].isin(["Far Rockaway", "Arverne", "Rockaway Beach"])]
+    assert _stations.geometry.notna().all(), "the three LIPA Rockaway substations must be on the map"
+    _open = _in_lipa & (lot_service["match"] == "not matched").to_numpy()
+    _nearest = gpd.sjoin_nearest(
+        lots.loc[_open, ["geometry"]].to_crs(NY_FEET),
+        gpd.GeoDataFrame(
+            {"node": _stations["node"].to_numpy()}, geometry=_stations.geometry.to_numpy(), crs=4326
+        ).to_crs(NY_FEET),
+    )
+    lot_area = lot_service.copy()
+    lot_area.loc[_open, "served_by"] = _nearest[~_nearest.index.duplicated()]["node"]
+    lot_area.loc[_open, "match"] = "LIPA territory, nearest substation (inferred)"
+    # A network name becomes its area substation; a feeder match already names one.
+    _station = network_links.set_index("network")["area_substation"]
+    lot_area["area_substation"] = lot_area["served_by"].map(_station).fillna(lot_area["served_by"])
+    lot_area["in_lipa_territory"] = _in_lipa
+    _match = pd.crosstab(lot_area["borough"], lot_area["match"], margins=True)
+    mo.vstack(
+        [
+            _match,
+            mo.md(
+                f"Lots in LIPA's territory that a Con Edison layer also reaches (territory edges disagree): "
+                f"{int((_in_lipa & (lot_service['match'] != 'not matched').to_numpy()).sum()):,}."
+            ),
+        ]
+    )
+    return (lot_area,)
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ## 6. The dependency chain, and how much of it is documented
+
+    Every lot now has an area substation. Its first transmission station is that substation's supplier in section
+    3. Counting lots behind each one gives FEMA's Phase 2 concentration test at city scale ("the seven or fewer
+    sources that are likely to generate 70 to 80 percent of total flows"), counting tax lots, not load. And for
+    each lot we ask how much of its chain rests on documents: the lot-to-substation step (network boundary or
+    feeder versus inference) and the substation-to-transmission step (documented, planned or inferred).
+    """)
+    return
+
+
+@app.cell
+def _(lot_area, supply_links):
+    _first = supply_links[~supply_links["supplier"].isin(["Far Rockaway", "Arverne"])].drop_duplicates("consumer")
+    _first = _first.set_index("consumer")
+    chain = lot_area.assign(
+        transmission=lot_area["area_substation"].map(_first["supplier"]),
+        supply_status=lot_area["area_substation"].map(_first["status"]),
+    )
+    # The Rockaway stations hang off Far Rockaway, which LIPA's filings place behind Valley Stream.
+    _lipa = chain["area_substation"].isin(["Far Rockaway", "Arverne", "Rockaway Beach"])
+    chain.loc[_lipa, "transmission"] = "Valley Stream 138 kV"
+    chain.loc[_lipa, "supply_status"] = "inferred"
+    chain["lot_step"] = chain["match"].map(
+        lambda m: (
+            "documented"
+            if m in ("network boundary", "overhead feeder")
+            else "inferred"
+            if m != "not matched"
+            else "none"
+        )
+    )
+    _n = len(chain)
+    by_station = chain["area_substation"].value_counts()
+    by_transmission = chain["transmission"].value_counts()
+    stations_for_80 = int((by_station.cumsum() / _n < 0.8).sum() + 1)
+    transmission_for_80 = int((by_transmission.cumsum() / _n < 0.8).sum() + 1)
+    chain_documented = pd.crosstab(chain["lot_step"], chain["supply_status"].fillna("none"), margins=True)
+    pd.DataFrame({"lots": by_transmission, "share": (by_transmission / _n).round(3)}).to_csv(
+        OUT / "concentration_transmission.csv", index_label="transmission"
+    )
+    pd.DataFrame({"lots": by_station, "share": (by_station / _n).round(3)}).to_csv(
+        OUT / "concentration_area_substations.csv", index_label="area_substation"
+    )
+    mo.vstack(
+        [
+            mo.md(
+                f"**{stations_for_80} area substations and {transmission_for_80} first-hop transmission stations "
+                f"serve 80% of the city's {_n:,} lots.** Lots behind each transmission station:"
+            ),
+            (by_transmission / _n).round(3).rename("share of NYC lots").head(12),
+            mo.md("Lots by how their chain is sourced (rows: lot to substation; columns: substation to transmission):"),
+            chain_documented,
+        ]
+    )
+    return by_station, by_transmission, chain, chain_documented, stations_for_80, transmission_for_80
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
     ## 7. Coverage against Con Edison's own counts
 
     The Joint Utilities' 2024 reliability report describes each Con Edison region's distribution system in a short
     list ("Brooklyn's distribution system is comprised of: 6 Area substations, 11 Network/Load areas, ...").
     The notebook reads those lists from the PDF and sets them beside what the public sources give: the area
-    substations the 2012 table and Staten Island's load areas name, the load areas on Con Edison's map, and the
-    4 kV unit substations OpenStreetMap has in each borough (read from Overture, as in the Brooklyn notebook).
+    substations in the 2025 table (each counted in the borough where most of the lots it serves are), how many of
+    them OpenStreetMap places, the load areas on Con Edison's map, and the 4 kV unit substations OpenStreetMap has
+    in each borough.
     """)
     return
 
@@ -761,6 +953,194 @@ def _(document_pages):
     published_counts = pd.Series(_published, name="Con Edison 2024 report")
     published_counts.unstack()
     return (published_counts,)
+
+
+@app.cell
+def _(chain, facility_nodes, lots, networks, osm_power, published_counts, table_2025):
+    # An area substation's borough is where most of the lots it serves are (Hellgate is in the Bronx but serves
+    # Yorkville in Manhattan).
+    _home = chain.groupby("area_substation")["borough"].agg(lambda b: b.value_counts().index[0])
+    _named = pd.Series(sorted(set(table_2025["area_substation"])), dtype=str).map(_home)
+    _on_osm = facility_nodes.loc[
+        facility_nodes["node"].isin(table_2025["area_substation"]) & facility_nodes["osm_name"].notna(), "node"
+    ].map(_home)
+    # 4 kV unit and multibank substations: OSM features stepping 27 or 33 kV down to 4 kV, by nearest lot.
+    _unit = osm_power[osm_power["voltage"].fillna("").str.match(r"(27000|33000);4000")]
+    _unit_pts = gpd.GeoDataFrame(geometry=_unit.geometry.representative_point(), crs=4326).to_crs(NY_FEET)
+    _unit_borough = gpd.sjoin_nearest(_unit_pts, lots[["borough", "geometry"]].to_crs(NY_FEET), max_distance=2000)
+    _unit_borough = _unit_borough[~_unit_borough.index.duplicated()]["borough"]
+    _boroughs = list(BOROUGHS.values())
+    coverage = pd.DataFrame(
+        {
+            "area substations, 2024 report": [published_counts.get((b, "area substations")) for b in _boroughs],
+            "area substations, 2025 table": [int((_named == b).sum()) for b in _boroughs],
+            "area substations found on OSM": [int((_on_osm == b).sum()) for b in _boroughs],
+            "load areas, 2024 report": [published_counts.get((b, "networks or load areas")) for b in _boroughs],
+            "load areas on Con Edison's map": [int((networks["borough"] == b).sum()) for b in _boroughs],
+            "4 kV unit substations, 2024 report": [
+                published_counts.get((b, "4 kV unit and multibank substations")) for b in _boroughs
+            ],
+            "4 kV unit substations on OSM": [int((_unit_borough == b).sum()) for b in _boroughs],
+        },
+        index=_boroughs,
+    )
+    coverage.to_csv(OUT / "coverage.csv", index_label="borough")
+    coverage
+    return (coverage,)
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ## 8. Facilities and links, by type and borough
+    """)
+    return
+
+
+@app.cell
+def _(facility_nodes, network_links, supply_links, tie_links):
+    _borough = facility_nodes.set_index("node")["borough"].fillna("not located")
+    facilities_by_borough = pd.crosstab(facility_nodes["kind"], facility_nodes["borough"].fillna("not located"))
+    _supply = supply_links.assign(
+        type="transmission -> area substation", borough=supply_links["consumer"].map(_borough)
+    )
+    _ties = tie_links.assign(type="transmission tie", borough=tie_links["consumer"].map(_borough))
+    _networks = network_links.assign(
+        type="area substation -> load area",
+        status=network_links["area_substation"].notna().map({True: "documented", False: "none"}),
+    )
+    all_links = pd.concat(
+        [
+            _networks[["type", "borough", "status"]],
+            _supply[["type", "borough", "status"]],
+            _ties[["type", "borough", "status"]],
+        ],
+        ignore_index=True,
+    )
+    links_by_borough = pd.crosstab([all_links["type"], all_links["status"]], all_links["borough"], margins=True)
+    links_by_borough.to_csv(OUT / "links_by_borough.csv")
+    facility_nodes.drop(columns="geometry").to_csv(OUT / "facilities.csv", index=False)
+    pd.concat([supply_links.assign(type="supply"), tie_links.assign(type="tie")]).to_csv(OUT / "links.csv", index=False)
+    mo.vstack([facilities_by_borough, links_by_borough])
+    return all_links, facilities_by_borough, links_by_borough
+
+
+@app.cell
+def _(chain, facility_nodes, networks, supply_links, tie_links):
+    _fig, _ax = plt.subplots(figsize=(11, 11))
+    networks.plot(ax=_ax, color="lightsteelblue", alpha=0.35, edgecolor="grey", linewidth=0.4)
+    _located = facility_nodes[facility_nodes.geometry.notna()].set_index("node")
+    _centre = _located.geometry.representative_point()
+    _colour = {"documented": "black", "planned": "darkorange", "inferred": "red"}
+    for _link in pd.concat([supply_links, tie_links]).itertuples():
+        if _link.supplier in _centre.index and _link.consumer in _centre.index:
+            _a, _b = _centre[_link.supplier], _centre[_link.consumer]
+            _ax.plot(
+                [_a.x, _b.x],
+                [_a.y, _b.y],
+                color=_colour[_link.status],
+                linewidth=0.7,
+                linestyle="-" if _link.status == "documented" else "--",
+            )
+    _lots_per = chain["area_substation"].value_counts()
+    for _kind, (_marker, _c) in {"transmission substation": ("^", "navy"), "area substation": ("o", "teal")}.items():
+        _pts = _centre[_located["kind"] == _kind]
+        _size = (
+            20 + _pts.index.map(lambda n: _lots_per.get(n, 0)).to_numpy() / 300 if _kind == "area substation" else 70
+        )
+        _ax.scatter(_pts.x, _pts.y, marker=_marker, color=_c, s=_size, label=_kind, zorder=3, alpha=0.85)
+    _ax.set_xlim(-74.27, -73.69)
+    _ax.set_ylim(40.49, 40.92)
+    _ax.legend(loc="upper left")
+    _ax.set_title(
+        "NYC power supply chain: load areas (shaded), area substations sized by lots served,\n"
+        "documented links (black), planned (orange), inferred (red)"
+    )
+    _ax.set_axis_off()
+    _fig.savefig(OUT / "map.png", dpi=120, bbox_inches="tight")
+    _fig
+    return
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ## 9. Summary of this run
+
+    The counts below come from this run; the README discusses them.
+    """)
+    return
+
+
+@app.cell
+def _(
+    all_links,
+    by_transmission,
+    chain,
+    chain_documented,
+    coverage,
+    facilities_by_borough,
+    network_changes,
+    network_links,
+    overture_release,
+    source_check,
+    stations_for_80,
+    transmission_for_80,
+):
+    _n = len(chain)
+    _unmatched = chain[chain["match"] == "not matched"]
+    _both = int(((chain["lot_step"] == "documented") & (chain["supply_status"] == "documented")).sum())
+    summary = {
+        "run_date": datetime.now(UTC).strftime("%Y-%m-%d"),
+        "overture_release": overture_release,
+        "nyc_lots": _n,
+        "lots_by_match": chain["match"].value_counts().to_dict(),
+        "lots_matched_share": round(1 - len(_unmatched) / _n, 4),
+        "unmatched_lots_by_borough": _unmatched["borough"].value_counts().to_dict(),
+        "lots_with_both_steps_documented_share": round(_both / _n, 3),
+        "lots_with_no_transmission_link": int(chain["transmission"].isna().sum()),
+        "chain_sourcing": chain_documented.to_dict(),
+        "area_substations_for_80pct_of_lots": stations_for_80,
+        "transmission_stations_for_80pct_of_lots": transmission_for_80,
+        "lots_by_first_transmission_station": {k: int(v) for k, v in by_transmission.items()},
+        "load_areas_by_how_paired": network_links["how"].value_counts().to_dict(),
+        "planned_network_changes": len(network_changes),
+        "facilities_by_type_and_borough": facilities_by_borough.to_dict(orient="index"),
+        "links_by_type_and_status": {
+            f"{t} / {s}": int(n) for (t, s), n in all_links.groupby(["type", "status"]).size().items()
+        },
+        "coverage": coverage.to_dict(orient="index"),
+        "passages": source_check["result"].value_counts().to_dict(),
+        "run_seconds": round(time.perf_counter() - RUN_STARTED, 1),
+    }
+    (OUT / "summary.json").write_text(json.dumps(summary, indent=2, default=str))
+    mo.md(f"```json\n{json.dumps(summary, indent=2, default=str)}\n```")
+    return (summary,)
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ## 10. What didn't work, and what this doesn't show
+
+    - **The transmission step is a third inferred.** 20 of 53 area substation supply links have no document that
+      names them. Most are co-located stations (Corona, Jamaica, Hellgate, East 179th Street, Mott Haven, Fresh
+      Kills); the rest are Manhattan stations a 2016 testimony sentence gives as a group, Queensbridge to East 63rd
+      Street (only forum posts), and Bruckner, Woodrow and Willowbrook.
+    - **Con Edison's line list went private after 2014.** The 138 kV ties come from the 2014 Gold Book, found only
+      as a copy in a Kentucky PSC case; later Gold Books withhold the table.
+    - **The Rockaways are a guess at the substation level.** PSEG Long Island's feeder map needs a login, so a
+      Rockaway lot gets the nearest of three LIPA substations.
+    - **Some Bronx lots sit on Westchester feeders.** Lots within 500 feet of an overhead segment tagged with a
+      Westchester station (Washington Street, Granite Hill, Cedar Street) are matched to it; the 2024 report does
+      count 19 Westchester feeders among the Bronx's, but we have no transmission link for those stations.
+    - **OSM places about two thirds of the area substations** and few 4 kV unit substations, so hazards per facility
+      (as in Brooklyn) would miss a third of the chain. This notebook doesn't attach hazards.
+    - **Lots, not load**, as in Brooklyn; and the 500 ft feeder rule and load-area fallback are models.
+    - **Planned changes aren't applied.** Five new area substations and eight network splits are due between 2026
+      and 2035 (section 2).
+    """)
+    return
 
 
 if __name__ == "__main__":
