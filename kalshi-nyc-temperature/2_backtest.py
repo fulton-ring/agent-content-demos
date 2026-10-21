@@ -291,7 +291,6 @@ def _(mo):
 
 @app.cell
 def _(RESULTS, SNAPSHOTS, SOURCES, np, pd, scored):
-    _cols = [f"p_{s}" for s in SOURCES]
     _rows = []
     _daily = []
     for _snap in SNAPSHOTS:
@@ -323,7 +322,6 @@ def _(RESULTS, SNAPSHOTS, SOURCES, np, pd, scored):
         )
     scores = pd.DataFrame(_rows)
     scores.to_csv(RESULTS / "scores.csv", index=False)
-    _ = _cols
     scores.round(3)
     return (daily_scores,)
 

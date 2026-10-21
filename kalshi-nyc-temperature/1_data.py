@@ -37,6 +37,7 @@ def _():
     import datetime as dt
     import json
     import os
+    import random
     import time
     from concurrent.futures import ThreadPoolExecutor
     from pathlib import Path
@@ -74,23 +75,36 @@ def _():
         json,
         np,
         pd,
+        random,
         requests,
         time,
     )
 
 
 @app.cell
-def _(requests, time):
+def _(random, requests, time):
     def get(url: str, params: dict | None = None, headers: dict | None = None) -> requests.Response:
-        """GET with a bounded retry: Kalshi rate-limits anonymous reads and answers 429."""
-        for attempt in range(8):
-            resp = requests.get(url, params=params, headers=headers, timeout=60)
-            if resp.status_code in (429, 500, 502, 503, 504):
-                time.sleep(min(2**attempt, 30))
+        """GET with a bounded retry: Kalshi rate-limits anonymous reads, and connections drop."""
+        for attempt in range(40):
+            try:
+                resp = requests.get(url, params=params, headers=headers, timeout=60)
+            except (
+                requests.ConnectionError,
+                requests.Timeout,
+                requests.exceptions.ChunkedEncodingError,
+            ):
+                time.sleep(min(2**attempt, 20))
+                continue
+            if resp.status_code == 429:
+                # Anonymous candlestick reads get about one call every 3-5 seconds.
+                time.sleep(random.uniform(3, 10))
+                continue
+            if resp.status_code in (500, 502, 503, 504):
+                time.sleep(min(2**attempt, 20))
                 continue
             resp.raise_for_status()
             return resp
-        raise RuntimeError(f"gave up after 8 tries: {url} {params}")
+        raise RuntimeError(f"gave up after 40 tries: {url} {params}")
 
     return (get,)
 
@@ -103,10 +117,10 @@ def _(mo):
 
         Each day is one event, such as `KXHIGHNY-26OCT20`, with six brackets: two tails
         ("64° or below", "73° or above") and four 2-degree ranges. Kalshi moves markets that
-        settled before a cutoff date to separate `/historical/` endpoints, so we ask the live
-        endpoint first and fall back to the archive. The answer key is Kalshi's own settled
-        value (`expiration_value`). Note that the settlement source changed during the period:
-        the NWS Daily Climate Report until mid-August 2026, then The Weather Company.
+        settled before a cutoff date to separate `/historical/` endpoints, so we list the
+        series from both. The answer key is Kalshi's own settled value (`expiration_value`).
+        The settlement source changed during the period: the NWS Daily Climate Report until
+        mid-August 2026, then The Weather Company.
         """
     )
     return
@@ -120,51 +134,51 @@ def _(CACHE, END, START, dt, get, json, pd):
     def event_date(ticker: str) -> dt.date:
         return dt.datetime.strptime(ticker.split("-")[1], "%y%b%d").date()
 
-    events = []
-    cursor = ""
-    for _ in range(50):
-        _page = get(
-            f"{KALSHI}/events",
-            {"series_ticker": SERIES, "limit": 200, **({"cursor": cursor} if cursor else {})},
-        ).json()
-        events += _page["events"]
-        cursor = _page.get("cursor") or ""
-        if not cursor:
-            break
-    events = [e for e in events if e["event_ticker"].startswith(SERIES + "-")]
-    events = sorted(
-        (e for e in events if START <= event_date(e["event_ticker"]) <= END),
-        key=lambda e: e["event_ticker"],
-    )
+    def listing(path: str, key: str, extra: dict) -> list[dict]:
+        found, cursor = [], ""
+        for _ in range(100):
+            params = {"series_ticker": SERIES, **extra, **({"cursor": cursor} if cursor else {})}
+            page = get(f"{KALSHI}{path}", params).json()
+            found += page[key]
+            cursor = page.get("cursor") or ""
+            if not cursor:
+                return found
+        raise RuntimeError(f"more than 100 pages at {path}")
 
-    def event_markets(event_ticker: str) -> list[dict]:
-        path = CACHE / "kalshi" / f"{event_ticker}.markets.json"
-        if path.exists():
-            return json.loads(path.read_text())
-        found = get(f"{KALSHI}/markets", {"event_ticker": event_ticker}).json()["markets"]
-        if not found:
-            found = get(f"{KALSHI}/historical/markets", {"event_ticker": event_ticker}).json()[
-                "markets"
-            ]
-        path.write_text(json.dumps(found))
-        return found
+    _cached = CACHE / "kalshi" / f"markets-{START}-{END}.json"
+    if not _cached.exists():
+        _live = listing("/markets", "markets", {"status": "settled", "limit": 1000})
+        _archived = listing("/historical/markets", "markets", {"limit": 1000})
+        for _m in _live:
+            _m["archived"] = False
+        for _m in _archived:
+            _m["archived"] = True
+        _cached.write_text(json.dumps(_live + _archived))
+    _sources = {
+        e["event_ticker"]: (e.get("settlement_sources") or [{}])[0].get("name", "")
+        for e in listing("/events", "events", {"limit": 200})
+    }
 
     _rows = []
-    for _e in events:
-        for _m in event_markets(_e["event_ticker"]):
-            _rows.append(
-                {
-                    "date": event_date(_e["event_ticker"]),
-                    "ticker": _m["ticker"],
-                    "strike_type": _m["strike_type"],
-                    "floor": _m.get("floor_strike"),
-                    "cap": _m.get("cap_strike"),
-                    "result": _m["result"],
-                    "settled_high": float(_m["expiration_value"] or "nan"),
-                    "source": (_e.get("settlement_sources") or [{}])[0].get("name", ""),
-                }
-            )
-    markets = pd.DataFrame(_rows)
+    for _m in json.loads(_cached.read_text()):
+        _day = event_date(_m["event_ticker"])
+        if not START <= _day <= END:
+            continue
+        _rows.append(
+            {
+                "date": _day,
+                "event": _m["event_ticker"],
+                "ticker": _m["ticker"],
+                "archived": _m["archived"],
+                "strike_type": _m["strike_type"],
+                "floor": _m.get("floor_strike"),
+                "cap": _m.get("cap_strike"),
+                "result": _m["result"],
+                "settled_high": float(_m["expiration_value"] or "nan"),
+                "source": _sources.get(_m["event_ticker"], ""),
+            }
+        )
+    markets = pd.DataFrame(_rows).drop_duplicates("ticker").sort_values("ticker")
     markets.to_parquet(CACHE / "markets.parquet")
     print(f"{markets.date.nunique()} days, {len(markets)} brackets")
     markets.groupby("source").date.nunique()
@@ -200,8 +214,9 @@ def _(CACHE, ET, KALSHI, SERIES, dt, get, json, markets, pd):
         value = quote.get("close_dollars", quote.get("close"))
         return float(value) if value is not None else float("nan")
 
-    def candles(ticker: str, day: dt.date) -> list[dict]:
-        path = CACHE / "kalshi" / f"{ticker}.candles.json"
+    def event_candles(event: str, day: dt.date, tickers: list[str], archived: bool) -> dict:
+        """Hourly candles for each bracket of one day, from the day before 4 pm to 2 pm."""
+        path = CACHE / "kalshi" / f"{event}.candles.json"
         if path.exists():
             return json.loads(path.read_text())
         params = {
@@ -209,33 +224,40 @@ def _(CACHE, ET, KALSHI, SERIES, dt, get, json, markets, pd):
             "end_ts": int(snapshot_time(day, "D 14:00").timestamp()),
             "period_interval": 60,
         }
-        resp = get(f"{KALSHI}/series/{SERIES}/markets/{ticker}/candlesticks", params).json()
-        found = resp.get("candlesticks") or []
-        if not found:
-            found = get(f"{KALSHI}/historical/markets/{ticker}/candlesticks", params).json()[
-                "candlesticks"
-            ]
+        if archived:
+            # The archive has no event-level endpoint, so it is one call per bracket.
+            found = {
+                t: get(f"{KALSHI}/historical/markets/{t}/candlesticks", params).json()[
+                    "candlesticks"
+                ]
+                for t in tickers
+            }
+        else:
+            resp = get(f"{KALSHI}/series/{SERIES}/events/{event}/candlesticks", params).json()
+            found = dict(zip(resp["market_tickers"], resp["market_candlesticks"], strict=True))
         path.write_text(json.dumps(found))
         return found
 
     _rows = []
-    for _m in markets.itertuples():
-        _by_end = {c["end_period_ts"]: c for c in candles(_m.ticker, _m.date)}
-        for _name in SNAPSHOTS:
-            _ts = int(snapshot_time(_m.date, _name).timestamp())
-            # The latest candle that ended at or before the snapshot, within two hours.
-            _candle = next(
-                (_by_end[t] for t in range(_ts, _ts - 7200, -3600) if t in _by_end), None
-            )
-            _rows.append(
-                {
-                    "date": _m.date,
-                    "ticker": _m.ticker,
-                    "snapshot": _name,
-                    "yes_bid": dollars(_candle, "yes_bid") if _candle else float("nan"),
-                    "yes_ask": dollars(_candle, "yes_ask") if _candle else float("nan"),
-                }
-            )
+    for (_event, _day, _archived), _brackets in markets.groupby(["event", "date", "archived"]):
+        _all = event_candles(_event, _day, list(_brackets.ticker), _archived)
+        for _ticker in _brackets.ticker:
+            _by_end = {c["end_period_ts"]: c for c in _all.get(_ticker, [])}
+            for _name in SNAPSHOTS:
+                _ts = int(snapshot_time(_day, _name).timestamp())
+                # The latest candle that ended at or before the snapshot, within two hours.
+                _candle = next(
+                    (_by_end[t] for t in range(_ts, _ts - 7200, -3600) if t in _by_end), None
+                )
+                _rows.append(
+                    {
+                        "date": _day,
+                        "ticker": _ticker,
+                        "snapshot": _name,
+                        "yes_bid": dollars(_candle, "yes_bid") if _candle else float("nan"),
+                        "yes_ask": dollars(_candle, "yes_ask") if _candle else float("nan"),
+                    }
+                )
     prices = pd.DataFrame(_rows)
     prices.to_parquet(CACHE / "prices.parquet")
     prices.groupby("snapshot")[["yes_bid", "yes_ask"]].count()
