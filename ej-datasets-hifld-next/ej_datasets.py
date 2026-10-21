@@ -817,7 +817,7 @@ def _(OUT_DIR, pl):
             "columns_all_null": sum(out[c].null_count() == out.height for c in src.columns),
         }
         if area:
-            matched = out.filter(pl.col("census_aland").is_not_null())
+            matched = out.filter(pl.col("census_aland").is_not_null() & pl.col(area).is_not_null())
             same = (matched["census_aland"] - matched[area]).abs() < 1
             result["shape_area_matches_source"] = f"{same.sum()} of {matched.height}"
         nulls = pl.DataFrame(
@@ -934,7 +934,10 @@ def _(OUT_DIR, compare, ejam_2022_raw, ejam_raw, epa, pl):
         tag: {
             "ejam_rows": frame.height,
             "only_in_ejam": frame.join(epa, left_on="bgfips", right_on="geoid", how="anti").height,
-            "only_in_epa": epa.join(frame, left_on="geoid", right_on="bgfips", how="anti").height,
+            "only_in_epa": epa.join(frame, left_on="geoid", right_on="bgfips", how="anti")
+            .group_by("st_abbrev", "cnty_name")
+            .agg(pl.len().alias("block_groups"), pl.col("acstotpop").sum().alias("people"))
+            .to_dicts(),
         }
         for tag, frame in {"v3.2022.3": ejam_2022_raw, "v3.2024.0": ejam_raw}.items()
     }
@@ -944,8 +947,23 @@ def _(OUT_DIR, compare, ejam_2022_raw, ejam_raw, epa, pl):
 
 
 @app.cell
-def _(diffs, pl):
-    diffs.filter(pl.col("comparison") == "v3.2022.3 vs EPA 2024").sort("share_equal").head(15)
+def _(diffs, mo, pl):
+    _same = diffs.filter(
+        (pl.col("comparison") == "v3.2024.0 vs EPA 2024") & (pl.col("share_equal") >= 0.999)
+    )["ejam_column"].to_list()
+    _replica = diffs.filter(pl.col("comparison") == "v3.2022.3 vs EPA 2024")
+    mo.md(f"""
+    At the same Census vintage, {(_replica["share_equal"] >= 0.999).sum()} of
+    {_replica.height} paired columns match EPA's in at least 99.9% of block groups, and the
+    lowest match is {_replica["share_equal"].min():.4%}. In v3.2024.0 these
+    {len(_same)} columns are still identical to EPA's: {", ".join(_same)}.
+
+    So the new release updates the Census demographics, and the demographic and EJ indexes
+    built from them, but the environmental indicators and life expectancy are EPA's 2024
+    values. The counts of EJ indexes at or above the 80th percentile (`count.ej.80up`) are
+    unchanged too, although most EJ index values moved, which suggests they were carried
+    over rather than recomputed. The full table is in `outputs/diff_vs_epa_2024.csv`.
+    """)
     return
 
 
@@ -1069,6 +1087,13 @@ def _(mo):
     - **EJAM v3.2024.0 has no per-block-group percentiles.** EJAM computes them when it runs
       a report from its national and state lookup tables, so the hosted file has raw values
       and EJ indexes but not EPA's `P_`, `B_` and `T_` columns (see section 8).
+    - **Water-only block groups have no shape.** The cartographic boundary files leave out
+      block groups that are all water, so about 440 rows per block-group file, with no
+      population, have empty geometry. TIGER/Line block groups would fill them at the cost
+      of a 1 GB download and much larger files.
+    - **EJAM v3.2024.0 drops 39 block groups.** They are in Suffolk County, New York, and
+      are missing from Census's ACS 2020-2024 tables, which EJAM's pipeline documentation
+      describes; EPA's 2024 file had people in them.
     - **No uploads.** Uploading to HIFLD Next is left to the founders; the STAC records are
       shaped after the catalog's published collections but have not been through its
       ingest.
