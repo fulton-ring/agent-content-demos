@@ -276,7 +276,7 @@ def _(box_filter, layers, overture_connection):
         _con.sql(f"COPY ({' UNION ALL '.join(_selects)}) TO '{places_path}.part' (FORMAT parquet)")
         Path(f"{places_path}.part").rename(places_path)
     places = pd.read_parquet(places_path)
-    places.groupby("basic_category").size().sort_values(ascending=False).head(20)
+    places["basic_category"].value_counts().head(20)
     return (places,)
 
 
@@ -709,8 +709,9 @@ def _():
     **Signs of trouble in HIFLD.** Three things the match can flag without anyone looking at imagery:
 
     - **Possibly misplaced:** no same-kind feature within 250 m, but a name match 250 m–2 km away, on either side.
-    - **Possibly closed:** HIFLD's own status says closed (hospitals' `CLOSED`, schools' NCES status 2 "closed"),
-      or the matched Overture place is `permanently_closed`.
+    - **Possibly closed:** HIFLD's own status says closed (hospitals' `CLOSED`, schools' NCES status 2 "closed",
+      power plants' EIA `RE` retired or `CN` cancelled), or the matched Overture place is `permanently_closed`.
+      These records are still in the layers.
     - **Possible duplicates:** two records in the same layer within 50 m of each other with matching names.
     """)
     return
@@ -724,8 +725,10 @@ def _(crosswalk, hifld_points, layers, name_score, normalise):
     crosswalk["possibly_misplaced"] = crosswalk["hifld_only"] & (
         _named_far(crosswalk, "overture") | _named_far(crosswalk, "osm")
     )
-    _closed_in_hifld = (crosswalk["status"].str.upper() == "CLOSED") | (
-        (crosswalk["layer"] == "Public schools") & (crosswalk["status"] == "2")
+    _closed_in_hifld = (
+        (crosswalk["status"].str.upper() == "CLOSED")
+        | ((crosswalk["layer"] == "Public schools") & (crosswalk["status"] == "2"))
+        | ((crosswalk["layer"] == "Power plants") & crosswalk["status"].isin(["RE", "CN"]))
     )
     _closed_in_overture = (crosswalk["overture_status"] == "permanently_closed") & (
         crosswalk["overture_distance_m"] <= 250
@@ -839,6 +842,10 @@ def _():
       a ZIP centroid, or the facility a few blocks away);
     - **closed:** the site is empty, demolished, or clearly something else now;
     - **unclear:** imagery can't tell (an office inside a larger building, a rural point with nothing visible).
+    - **not built** (power plants only): a planned or cancelled plant with nothing at the point.
+
+    The labels were made by Claude subagents, one per layer, each viewing all 50 images; we spot-checked some by
+    eye. For hospitals and schools, "closed" can come from HIFLD's own status where the building still stands.
     """)
     return
 
@@ -872,7 +879,7 @@ def _(candidates, crosswalk, layers):
     _labels_path = HERE / "hand_check.csv"
     hand_check = pd.read_csv(_labels_path, dtype={"hifld_id": str}) if _labels_path.exists() else pd.DataFrame()
     hand_check_table = (
-        hand_check.groupby(["layer", "label"]).size().unstack(fill_value=0).reindex(layers.index)
+        pd.crosstab(hand_check["layer"], hand_check["label"]).reindex(layers.index, fill_value=0)
         if len(hand_check)
         else pd.DataFrame()
     )
@@ -883,9 +890,11 @@ def _(candidates, crosswalk, layers):
 @app.cell(hide_code=True)
 def _():
     mo.md(r"""
-    **Stale or misplaced HIFLD records, estimated.** The hand-checked shares of *closed* and *misplaced*, applied
-    to each layer's HIFLD-only count, with a 95% Wilson interval from the sample of 50. Records that do match
-    can be misplaced too (within 250 m but on the wrong building), so this is a floor.
+    **Stale or misplaced HIFLD records, estimated.** The hand-checked shares of *closed*, *misplaced* and
+    *not built*, applied to each layer's HIFLD-only count, with a 95% Wilson interval from the sample of 50. Records
+    that do match can be misplaced too (within 250 m but on the wrong building), so this is a floor. The same
+    sample gives the other side: the share that plainly *exists* but is in neither OSM nor Overture, applied to the
+    same pool, is the number of real facilities we could propose adding.
     """)
     return
 
@@ -903,17 +912,21 @@ def _(hand_check_table, trouble):
     _rows = []
     for _layer, _labels in hand_check_table.iterrows():
         _n = int(_labels.sum())
-        _bad = int(_labels.get("closed", 0) + _labels.get("misplaced", 0))
+        _bad = int(sum(_labels.get(k, 0) for k in ["closed", "misplaced", "not built"]))
         _low, _high = wilson(_bad, _n)
         _pool = int(trouble.loc[_layer, "hifld_only"])
         _rows.append(
             {
                 "layer": _layer,
                 "checked": _n,
-                "closed or misplaced": _bad,
+                "closed, misplaced or not built": _bad,
                 "HIFLD-only records": _pool,
                 "estimated stale or misplaced": round(_pool * _bad / _n) if _n else None,
                 "95% range": f"{round(_pool * _low):,}–{round(_pool * _high):,}" if _n else "",
+                "exists, missing from both": int(_labels.get("exists, unmatched", 0)),
+                "estimated real facilities to contribute": round(_pool * _labels.get("exists, unmatched", 0) / _n)
+                if _n
+                else None,
             }
         )
     stale_estimate = pd.DataFrame(_rows).set_index("layer") if _rows else pd.DataFrame()
@@ -977,6 +990,8 @@ def _(crosswalk):
         _keep = (_out[f"{_p}_distance_m"] <= 250) | (_out[f"{_p}_name_score"] >= 85)
         _out.loc[~_keep, [f"{_p}_id", f"{_p}_name", f"{_p}_distance_m", f"{_p}_name_score"]] = None
     _out.to_csv(OUT / "crosswalk.csv.gz", index=False, compression="gzip")
+    # The full file is ~20 MB and stays out of git; the hospitals slice is committed as a sample.
+    _out[_out["layer"] == "Hospitals"].to_csv(OUT / "crosswalk_hospitals.csv", index=False)
     confidence_table = pd.crosstab(_out["layer"], _out["confidence"])[["high", "medium", "low", "none"]]
     confidence_table.to_csv(OUT / "confidence.csv")
     mo.ui.table(confidence_table, selection=None)
@@ -985,7 +1000,7 @@ def _(crosswalk):
 
 @app.cell
 def _(layers, match_rates):
-    _fig, _ax = plt.subplots(figsize=(9, 4))
+    _fig, _ax = plt.subplots(figsize=(9, 5))
     _y = np.arange(len(layers.index))
     for _offset, (_column, _label, _colour) in enumerate(
         [
@@ -1000,7 +1015,7 @@ def _(layers, match_rates):
     _ax.invert_yaxis()
     _ax.set_xlim(0, 100)
     _ax.set_xlabel("% of HIFLD records")
-    _ax.legend(loc="lower right", fontsize=8)
+    _ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.15), ncol=2, fontsize=8, frameon=False)
     _ax.set_title("HIFLD Next records matched to Overture and OSM")
     _fig.tight_layout()
     _fig.savefig(OUT / "match_rates.png", dpi=120)

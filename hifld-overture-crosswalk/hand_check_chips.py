@@ -10,6 +10,7 @@ import os
 import time
 import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import geopandas as gpd
@@ -34,7 +35,7 @@ def tile_xy(lon: float, lat: float, zoom: int) -> tuple[int, int]:
     return int((lon + 180) / 360 * n), int(y)
 
 
-def fetch_tile(url: str, attempts: int = 4) -> bytes:
+def fetch_tile(url: str, attempts: int = 6) -> bytes:
     """Fetch one tile, retrying a dropped connection up to `attempts` times with backoff."""
     request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (hifld-overture-crosswalk spike)"})
     for attempt in range(attempts):
@@ -55,9 +56,11 @@ def mosaic(lon: float, lat: float, zoom: int, radius: int) -> tuple[np.ndarray, 
     cx, cy = tile_xy(lon, lat, zoom)
     size = 2 * radius + 1
     image = Image.new("RGB", (256 * size, 256 * size))
-    for dx in range(-radius, radius + 1):
-        for dy in range(-radius, radius + 1):
-            tile = Image.open(io.BytesIO(fetch_tile(TILES.format(z=zoom, x=cx + dx, y=cy + dy)))).convert("RGB")
+    offsets = [(dx, dy) for dx in range(-radius, radius + 1) for dy in range(-radius, radius + 1)]
+    urls = [TILES.format(z=zoom, x=cx + dx, y=cy + dy) for dx, dy in offsets]
+    with ThreadPoolExecutor(max_workers=len(urls)) as pool:
+        for (dx, dy), data in zip(offsets, pool.map(fetch_tile, urls), strict=True):
+            tile = Image.open(io.BytesIO(data)).convert("RGB")
             image.paste(tile, ((dx + radius) * 256, (dy + radius) * 256))
     span = 2 * HALF_WORLD / 2**zoom
     left = -HALF_WORLD + (cx - radius) * span
