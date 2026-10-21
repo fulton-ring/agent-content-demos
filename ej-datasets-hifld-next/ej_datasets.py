@@ -970,26 +970,29 @@ def _(diffs, mo, pl):
 @app.cell
 def _(mo):
     mo.md(r"""
-    The map shows what the new Census vintage does to one headline number: the change in
-    EJScreen's demographic index (the average of the low-income and people-of-color shares)
-    between EPA's 2024 release and PEDP's v3.2024.0, for Louisiana's block groups.
+    The map shows what the new Census vintage does to one input of the indexes: the share
+    of people with low income, in percentage points, from EPA's 2024 release (ACS 2018-2022)
+    to PEDP's v3.2024.0 (ACS 2020-2024), for Louisiana's block groups. Block-group ACS
+    estimates have wide margins of error, so much of the speckle is sampling noise rather
+    than change on the ground. (The demographic index itself is an average of z-scores
+    shifted to be non-negative, so its raw values don't compare across vintages.)
     """)
     return
 
 
 @app.cell
 def _(OUT_DIR, ejam_gdf, epa, gpd, pl, plt):
-    _la = ejam_gdf[ejam_gdf["st"] == "LA"][["geoid", "demog_index", "geometry"]]
-    _before = epa.select("geoid", pl.col("demogidx_2").alias("epa_2024")).to_pandas()
+    _la = ejam_gdf[ejam_gdf["st"] == "LA"][["geoid", "pctlowinc", "geometry"]]
+    _before = epa.select("geoid", pl.col("lowincpct").alias("epa_2024")).to_pandas()
     _la = gpd.GeoDataFrame(_la.merge(_before, on="geoid"), geometry="geometry", crs=4326)
-    _la["change"] = _la["demog_index"].astype(float) - _la["epa_2024"]
+    _la["change"] = 100 * (_la["pctlowinc"].astype(float) - _la["epa_2024"])
     _fig, _ax = plt.subplots(figsize=(8, 6))
     _la.to_crs(3452).plot(
-        column="change", cmap="RdBu_r", vmin=-0.3, vmax=0.3, legend=True, ax=_ax, linewidth=0
+        column="change", cmap="RdBu_r", vmin=-20, vmax=20, legend=True, ax=_ax, linewidth=0
     )
     _ax.set_axis_off()
-    _ax.set_title("Demographic index, PEDP ACS 2020-24 minus EPA ACS 2018-22 (Louisiana)")
-    _fig.savefig(OUT_DIR / "map_demog_index_change_la.png", dpi=120, bbox_inches="tight")
+    _ax.set_title("% low income, ACS 2020-24 minus ACS 2018-22, points (Louisiana)")
+    _fig.savefig(OUT_DIR / "map_lowinc_change_la.png", dpi=120, bbox_inches="tight")
     _fig
     return
 
