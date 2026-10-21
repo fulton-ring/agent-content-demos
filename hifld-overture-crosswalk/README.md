@@ -86,6 +86,12 @@ all still in the layers (`output/trouble_flags.csv`). 1,162 schools, 1,466 polic
 same-kind feature within 250 m but a name match 250 m–2 km away, a sign one side has the point in the wrong place.
 `output/duplicate_pairs.csv` lists same-name records within 50 m of each other (112 hospital pairs, 358 school pairs).
 
+**By facility type** (`output/match_by_type.csv`, `facility_type` in the crosswalk): not everything in a HIFLD
+layer is what OSM or Overture calls that kind of facility. General acute care hospitals get a high-confidence
+match 88% of the time and are HIFLD-only 3% of the time; military records 62% and 19% (many are base outpatient
+clinics, "Medical Groups"), psychiatric 72% and 9%. Special-jurisdiction police (campus, transit, parks) are
+HIFLD-only 63% of the time, against 25% for local police departments.
+
 **The other direction** (`output/other_only.csv`): OSM has 4,572 fire stations, 2,739 police and 1,072 hospitals
 with no HIFLD record nearby. Overture's counts are much larger (36,927 "hospitals") because its business listings
 call clinics hospitals; see the notebook before using them.
@@ -113,6 +119,9 @@ police records are real stations the open maps lack, not HIFLD errors.
   alternative programs. The estimates count only clear labels, so they're floors. The labels were made by Claude
   subagents viewing every image; we spot-checked some. 14 of the 15 "closed" hospitals rest on HIFLD's own
   `CLOSED` status with the building still standing.
+- **Wrong kind of facility.** HIFLD's `TYPE` is HIFLD's own label, so a nursing home or surgery centre filed as a
+  hospital still says "hospital". Names flag a few (13 surgery centres); catching the rest needs an outside list
+  such as CMS's Provider of Services file, which this spike doesn't use.
 - **Matched isn't verified.** A record within 250 m can still be on the wrong building; we didn't sample matches.
 - **Overture places categories are noisy** (clinics as hospitals, private schools as schools), so Overture-only
   counts are ceilings. OSM-only schools (52,418) include private schools, which HIFLD's layer leaves out.

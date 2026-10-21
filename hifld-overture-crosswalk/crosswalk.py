@@ -209,6 +209,7 @@ def _(hifld_files, layers):
                 "city": _raw["CITY"].astype(str),
                 "state": _raw["STATE"],
                 "status": _raw["STATUS"].astype(str) if "STATUS" in _raw else "",
+                "facility_type": _raw["TYPE"].astype(str) if "TYPE" in _raw else "",
                 "source_date": _raw.get("SOURCEDATE", _raw.get("SOURCE_DATE", _raw.get("LOADDATE")))
                 .astype(str)
                 .str[:10],
@@ -219,6 +220,10 @@ def _(hifld_files, layers):
         _frames.append(_frame)
     _all = pd.concat(_frames, ignore_index=True)
     hifld = _all[_all["state"].isin(STATES)].reset_index(drop=True)
+    # Public Schools' TYPE is the NCES school-type code.
+    _school_types = {"1": "REGULAR", "2": "SPECIAL EDUCATION", "3": "CAREER AND TECHNICAL", "4": "ALTERNATIVE"}
+    _schools = hifld["layer"] == "Public schools"
+    hifld.loc[_schools, "facility_type"] = hifld.loc[_schools, "facility_type"].map(_school_types)
     hifld["lon"] = hifld.geometry.x
     hifld["lat"] = hifld.geometry.y
     hifld_counts = pd.DataFrame(
@@ -572,7 +577,8 @@ def _(hifld, pairs):
     _best = _ranked.drop_duplicates(["layer", "hifld_id", "side"])
     _nearest = pairs.sort_values(["distance_m", "id"]).drop_duplicates(["layer", "hifld_id", "side"])
     matches = hifld[
-        ["layer", "hifld_id", "name", "address", "city", "state", "status", "source_date", "lon", "lat"]
+        ["layer", "hifld_id", "name", "facility_type", "address", "city", "state", "status", "source_date"]
+        + ["lon", "lat"]
     ].copy()
     for _side, _prefix in [("Overture", "overture"), ("OSM", "osm")]:
         _b = _best[_best["side"] == _side].set_index(["layer", "hifld_id"])
@@ -965,6 +971,7 @@ def _(crosswalk):
         "layer",
         "hifld_id",
         "name",
+        "facility_type",
         "state",
         "lon",
         "lat",
@@ -997,6 +1004,37 @@ def _(crosswalk):
     confidence_table.to_csv(OUT / "confidence.csv")
     mo.ui.table(confidence_table, selection=None)
     return (confidence_table,)
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    **Match by facility type.** HIFLD's `TYPE` field says what kind of facility each record is. Not every record
+    in the Hospitals layer is what OSM or Overture would call a hospital: military records include base clinics,
+    and psychiatric, rehabilitation and long-term care facilities are often mapped as clinics or care homes. Those
+    match less often, which is a category mismatch as much as a missing feature. Fire and EMS Stations has no type.
+    """)
+    return
+
+
+@app.cell
+def _(confidence_table, crosswalk):
+    assert len(confidence_table)  # runs after the cell that sets crosswalk["confidence"]
+    _typed = crosswalk[crosswalk["facility_type"].astype(str) != ""]
+    by_type = (
+        _typed.groupby(["layer", "facility_type"])
+        .agg(
+            records=("hifld_id", "size"),
+            high_confidence_pct=("confidence", lambda c: round(100 * (c == "high").mean(), 1)),
+            hifld_only=("hifld_only", "sum"),
+            hifld_only_pct=("hifld_only", lambda c: round(100 * c.mean(), 1)),
+        )
+        .reset_index()
+        .sort_values(["layer", "records"], ascending=[True, False])
+    )
+    by_type.to_csv(OUT / "match_by_type.csv", index=False)
+    mo.ui.table(by_type, selection=None)
+    return (by_type,)
 
 
 @app.cell
