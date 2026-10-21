@@ -81,7 +81,7 @@ solar and wind farms aren't buildings). `output/crosswalk_hospitals.csv` is comm
 | Public schools | 477 (237–892) | ~680 |
 | Power plants | 2,557 (1,832–3,313) | ~1,800 |
 
-HIFLD's own status flags 946 power plants retired or cancelled and 403 hospitals closed (or closed in Overture),
+HIFLD's own status flags 946 power plants retired or cancelled and 404 hospitals closed (or closed in Overture),
 all still in the layers (`output/trouble_flags.csv`). 1,162 schools, 1,466 police and 1,378 fire records have no
 same-kind feature within 250 m but a name match 250 m–2 km away, a sign one side has the point in the wrong place.
 `output/duplicate_pairs.csv` lists same-name records within 50 m of each other (112 hospital pairs, 358 school pairs).
