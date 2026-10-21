@@ -673,6 +673,7 @@ def _(mo):
 def _(
     LineString,
     Point,
+    box,
     bridges,
     dem,
     dem_transform,
@@ -701,6 +702,12 @@ def _(
             _keep.append(_i)
             _seen.append(_p)
     crossings = crossings.loc[_keep].reset_index(drop=True)
+    # Road segments run past the DEM's edge; keep crossings whose 40 m creek-bed check fits inside it.
+    _x0, _y1 = dem_transform * (0, 0)
+    _x1, _y0 = dem_transform * (dem.shape[1], dem.shape[0])
+    _inside = crossings.within(box(_x0, _y0, _x1, _y1).buffer(-50))
+    print(f"dropped {int((~_inside).sum())} crossings within 50 m of the DEM edge")
+    crossings = crossings[_inside].reset_index(drop=True)
 
     _inv = ~dem_transform
 
