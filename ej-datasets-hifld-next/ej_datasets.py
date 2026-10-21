@@ -21,9 +21,11 @@ def _():
     import geopandas as gpd
     import httpx
     import marimo as mo
+    import matplotlib.pyplot as plt
     import pandas as pd
     import polars as pl
     import pyarrow.feather as feather
+    import pyarrow.parquet as pq
     import pyogrio
     import pystac
     import rdata
@@ -42,6 +44,8 @@ def _():
         os,
         pd,
         pl,
+        plt,
+        pq,
         pyogrio,
         pystac,
         rdata,
@@ -97,9 +101,11 @@ def _(mo):
     - CEJST v2.0 comes from the **EDGI copy on Zenodo**, which publishes MD5s and
       the tool's codebook. (The Harvard Dataverse copy has the same CSV but no checksums.)
     - Geometry comes from Census **cartographic boundary files** of the matching vintage for
-      block groups (2022 for EPA, 2024 for EJAM, plus 2022 places and county subdivisions
-      for the four island territories) and from **TIGER/Line 2010 tracts** for CEJST,
-      which uses 2010 tracts.
+      block groups (2022 for EPA, 2024 for EJAM). The four island territories aren't
+      divided into block groups: EPA used 2022 Census places for American Samoa, Guam
+      and the Northern Mariana Islands, and estates for the Virgin Islands, which only
+      TIGER/Line publishes. CEJST uses 2010 tracts, which come from **TIGER/Line 2010**.
+      The cartographic files leave out block groups that are all water.
     """)
     return
 
@@ -109,6 +115,8 @@ def _(Path, os, time):
     t_start = time.perf_counter()
     DATA_DIR = Path(os.environ.get("EJ_DATA_DIR", "data"))
     OUT_DIR = Path(os.environ.get("EJ_OUT_DIR", "outputs"))
+    # Vector tiles take about six minutes per block-group dataset, so they are opt-in.
+    MAKE_PMTILES = os.environ.get("EJ_PMTILES") == "1"
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -172,7 +180,7 @@ def _(Path, os, time):
                 "file": f"cb_{_year}_us_bg_500k.zip",
             }
         )
-    for _layer in ["60_place", "66_place", "69_place", "78_cousub"]:
+    for _layer in ["60_place", "66_place", "69_place"]:
         sources.append(
             {
                 "key": f"cb_2022_{_layer}",
@@ -180,6 +188,14 @@ def _(Path, os, time):
                 "file": f"cb_2022_{_layer}_500k.zip",
             }
         )
+    # The Virgin Islands' 416 estates have no cartographic file, only TIGER/Line.
+    sources.append(
+        {
+            "key": "tl_2022_78_estate",
+            "url": f"{GENZ}/TIGER2022/ESTATE/tl_2022_78_estate.zip",
+            "file": "tl_2022_78_estate.zip",
+        }
+    )
     for _st in TRACT_STATES:
         sources.append(
             {
@@ -188,7 +204,7 @@ def _(Path, os, time):
                 "file": f"tl_2010_{_st}_tract10.zip",
             }
         )
-    return DATA_DIR, OUT_DIR, ZENODO_CEJST, sources, t_start
+    return DATA_DIR, MAKE_PMTILES, OUT_DIR, ZENODO_CEJST, sources, t_start
 
 
 @app.cell
@@ -343,7 +359,7 @@ def _(mo):
     Every dataset gets the same shape: a text `geoid` first, then the source's columns
     renamed to lower snake case, then geometry. Block-group IDs are 12 digits; EPA's CSV
     stored them as numbers, so 11-digit ones get their leading zero back. The four island
-    territories use Census place (7-digit) and county-subdivision (10-digit) IDs instead,
+    territories use Census place (7-digit) and estate (10-digit) IDs instead,
     which EPA and EJAM both keep as they are. CEJST tract IDs are 11 digits.
 
     The column descriptions and units for the STAC record come from each source's own
@@ -473,7 +489,7 @@ def _(gpd, manifest, pd):
         assert shapes["geoid"].is_unique, "duplicate IDs in the boundary files"
         return shapes
 
-    territories = ["cb_2022_60_place", "cb_2022_66_place", "cb_2022_69_place", "cb_2022_78_cousub"]
+    territories = ["cb_2022_60_place", "cb_2022_66_place", "cb_2022_69_place", "tl_2022_78_estate"]
     bg_2022 = read_shapes(["cb_2022_bg", *territories], "GEOID", "ALAND")
     bg_2024 = read_shapes(["cb_2024_bg", *territories], "GEOID", "ALAND")
     tracts_2010 = read_shapes(
@@ -526,17 +542,18 @@ def _(mo):
     ## 5. Write GeoParquet and a STAC record
 
     Each dataset is written as one GeoParquet file (zstd, with a bounding-box column so
-    readers can skip row groups), a small PMTiles vector-tile file of a few headline columns
-    for maps, and a STAC 1.1 Collection shaped like a HIFLD Next dataset version: title,
-    description, providers, licence, extent, a version, every column with type, description,
-    unit and null count (STAC's table extension), and assets with size and SHA-256 (the file
-    extension). The source files are linked as `derived_from` with their own hashes.
+    readers can skip row groups), optionally (`EJ_PMTILES=1`) a PMTiles vector-tile file of
+    a few headline columns for maps, and a STAC 1.1 Collection shaped like a HIFLD Next
+    dataset version: title, description, providers, licence, extent, a version, every column
+    with type, description, unit and null count (STAC's table extension), and assets with
+    size and SHA-256 (the file extension). The source files are linked as `derived_from`
+    with their own hashes.
     """)
     return
 
 
 @app.cell
-def _(OUT_DIR, hashlib, json, pl, pyogrio, pystac):
+def _(MAKE_PMTILES, OUT_DIR, hashlib, json, pq, pyogrio, pystac, time):
     def sha256_of(path: str) -> str:
         digest = hashlib.sha256()
         with open(path, "rb") as f:
@@ -553,26 +570,31 @@ def _(OUT_DIR, hashlib, json, pl, pyogrio, pystac):
         slug = spec["slug"]
         parquet_name, tiles_name = f"{slug}.parquet", f"{slug}.pmtiles"
         gdf.to_parquet(OUT_DIR / parquet_name, compression="zstd", write_covering_bbox=True)
-        tiles = gdf[[*spec["tile_columns"], "geometry"]]
-        numeric = {c: "float64" for c in spec["tile_columns"][1:]}
-        tiles = tiles[tiles.geometry.notna()].astype(numeric)
-        pyogrio.write_dataframe(
-            tiles,
-            OUT_DIR / tiles_name,
-            driver="PMTiles",
-            layer=slug,
-            dataset_options={"MINZOOM": 2, "MAXZOOM": 10},
-        )
+        tiles_seconds = None
+        if MAKE_PMTILES:
+            started = time.perf_counter()
+            tiles = gdf[[*spec["tile_columns"], "geometry"]]
+            numeric = {c: "float64" for c in spec["tile_columns"][1:]}
+            tiles = tiles[tiles.geometry.notna()].astype(numeric)
+            pyogrio.write_dataframe(
+                tiles,
+                OUT_DIR / tiles_name,
+                driver="PMTiles",
+                layer=slug,
+                dataset_options={"MINZOOM": 2, "MAXZOOM": 10},
+            )
+            tiles_seconds = round(time.perf_counter() - started)
         columns = [
             {
-                "name": name,
-                "type": str(dtype),
-                "description": docs.get(name, {}).get("description") or name,
-                "unit": docs.get(name, {}).get("unit"),
-                "source_name": docs.get(name, {}).get("source_name"),
-                "null_count": int(gdf[name].isna().sum()),
+                "name": field.name,
+                "type": "geometry" if field.name == "geometry" else str(field.type),
+                "description": docs.get(field.name, {}).get("description") or field.name,
+                "unit": docs.get(field.name, {}).get("unit"),
+                "source_name": docs.get(field.name, {}).get("source_name"),
+                "null_count": int(gdf[field.name].isna().sum()),
             }
-            for name, dtype in gdf.dtypes.items()
+            for field in pq.read_schema(OUT_DIR / parquet_name)
+            if field.name in gdf.columns
         ]
         collection = pystac.Collection(
             id=f"ej-screening/{slug}/{spec['version']}",
@@ -605,7 +627,7 @@ def _(OUT_DIR, hashlib, json, pl, pyogrio, pystac):
                 "hifld:feature_count": len(gdf),
                 "hifld:feature_id_column": "geoid",
                 "hifld:geometry_column": "geometry",
-                "hifld:geometry_type": "MultiPolygon",
+                "hifld:geometry_type": "/".join(sorted(gdf.geometry.dropna().geom_type.unique())),
                 "hifld:spatial_status": "spatial",
                 "hifld:quality": {
                     "null_geometry_count": int(gdf.geometry.isna().sum()),
@@ -623,16 +645,17 @@ def _(OUT_DIR, hashlib, json, pl, pyogrio, pystac):
                 extra_fields=file_fields(parquet_name),
             ),
         )
-        collection.add_asset(
-            "pmtiles",
-            pystac.Asset(
-                href=f"./{tiles_name}",
-                media_type="application/vnd.pmtiles",
-                roles=["visual"],
-                title=f"{tiles_name} ({', '.join(spec['tile_columns'][1:])})",
-                extra_fields=file_fields(tiles_name),
-            ),
-        )
+        if MAKE_PMTILES:
+            collection.add_asset(
+                "pmtiles",
+                pystac.Asset(
+                    href=f"./{tiles_name}",
+                    media_type="application/vnd.pmtiles",
+                    roles=["visual"],
+                    title=f"{tiles_name} ({', '.join(spec['tile_columns'][1:])})",
+                    extra_fields=file_fields(tiles_name),
+                ),
+            )
         for source in sources:
             collection.add_link(
                 pystac.Link(
@@ -653,7 +676,10 @@ def _(OUT_DIR, hashlib, json, pl, pyogrio, pystac):
             "rows": len(gdf),
             "columns": gdf.shape[1],
             "geoparquet_mb": round((OUT_DIR / parquet_name).stat().st_size / 1e6, 1),
-            "pmtiles_mb": round((OUT_DIR / tiles_name).stat().st_size / 1e6, 1),
+            "pmtiles_mb": round((OUT_DIR / tiles_name).stat().st_size / 1e6, 1)
+            if MAKE_PMTILES
+            else None,
+            "pmtiles_seconds": tiles_seconds,
             "stac": str(stac_path),
         }
 
@@ -675,7 +701,7 @@ def _(
     write_dataset,
 ):
     _t = time.perf_counter()
-    _bg_shapes = [manifest[k] for k in manifest if k.startswith("cb_2022_")]
+    _bg_shapes = [manifest[k] for k in manifest if k.startswith(("cb_2022_", "tl_2022_"))]
     _specs = [
         (
             epa_gdf,
@@ -813,7 +839,7 @@ def _(
             validate("epa-ejscreen-2024-block-groups", epa_raw_ids, epa_names, "arealand"),
             validate(
                 "pedp-ejam-acs2024-block-groups",
-                ejam_raw.select(ejam_names),
+                ejam_raw.select(list(ejam_names)),
                 ejam_names,
                 "arealand",
             ),
@@ -920,6 +946,45 @@ def _(OUT_DIR, compare, ejam_2022_raw, ejam_raw, epa, pl):
 @app.cell
 def _(diffs, pl):
     diffs.filter(pl.col("comparison") == "v3.2022.3 vs EPA 2024").sort("share_equal").head(15)
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    The map shows what the new Census vintage does to one headline number: the change in
+    EJScreen's demographic index (the average of the low-income and people-of-color shares)
+    between EPA's 2024 release and PEDP's v3.2024.0, for Louisiana's block groups.
+    """)
+    return
+
+
+@app.cell
+def _(OUT_DIR, ejam_gdf, epa, gpd, pl, plt):
+    _la = ejam_gdf[ejam_gdf["st"] == "LA"][["geoid", "demog_index", "geometry"]]
+    _before = epa.select("geoid", pl.col("demogidx_2").alias("epa_2024")).to_pandas()
+    _la = gpd.GeoDataFrame(_la.merge(_before, on="geoid"), geometry="geometry", crs=4326)
+    _la["change"] = _la["demog_index"].astype(float) - _la["epa_2024"]
+    _fig, _ax = plt.subplots(figsize=(8, 6))
+    _la.to_crs(3452).plot(
+        column="change", cmap="RdBu_r", vmin=-0.3, vmax=0.3, legend=True, ax=_ax, linewidth=0
+    )
+    _ax.set_axis_off()
+    _ax.set_title("Demographic index, PEDP ACS 2020-24 minus EPA ACS 2018-22 (Louisiana)")
+    _fig.savefig(OUT_DIR / "map_demog_index_change_la.png", dpi=120, bbox_inches="tight")
+    _fig
+    return
+
+
+@app.cell
+def _(OUT_DIR, gpd, outputs):
+    # Washington, DC alone, small enough to commit as a sample of each file.
+    (OUT_DIR / "samples").mkdir(exist_ok=True)
+    for _slug in outputs["dataset"]:
+        _gdf = gpd.read_parquet(OUT_DIR / f"{_slug}.parquet")
+        _gdf[_gdf["geoid"].str.startswith("11")].to_parquet(
+            OUT_DIR / "samples" / f"{_slug}.dc.parquet", compression="zstd"
+        )
     return
 
 
