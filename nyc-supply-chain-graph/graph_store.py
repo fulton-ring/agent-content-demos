@@ -635,7 +635,7 @@ def _():
     ## 7. Recommendation
 
     **No graph database, for this map.** The graph is 34 nodes and 32 links; the 275,864 lots hang off it one link
-    each. Every store returns #62's answers, and the per-parcel query is a few milliseconds in all of them, so speed
+    each. Every store returns #62's answers, and the per-parcel query takes well under 0.1 s in all of them, so speed
     doesn't decide it. What decides it:
 
     - **The question is always the same and the answers are few.** There are only as many distinct upstream lists as
