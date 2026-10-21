@@ -122,9 +122,11 @@ not from the published run.
   close. Real orders of any size would move these thin books.
 - **A simple model pipeline.** One deterministic AIFS run per snapshot, 6-hourly output and
   a normal error curve. The AIFS ensemble, hourly models (HRRR) and later runs are not used.
-- **Not the NYS Mesonet.** Its Manhattan station would be the obvious second local sensor,
-  but its archive isn't open to anonymous download, so it isn't here. The airport ASOS
-  stations (KLGA, KJFK) are not used either.
+- **Not the NYS Mesonet.** Its Manhattan station would be the obvious second local sensor.
+  The history is reachable through the API behind its website, but that host's robots.txt
+  disallows automated access, and the Mesonet's data policy makes the data free only for
+  personal use and bars redistribution; other users license it. So it isn't here. The
+  airport ASOS stations (KLGA, KJFK) are not used either.
 
 ## What an article could argue from
 

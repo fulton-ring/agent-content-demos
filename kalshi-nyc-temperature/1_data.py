@@ -414,8 +414,9 @@ def _(mo):
         Climate Report (CLI) has the official Central Park high for each day; it is what the
         bias correction learns from. The ASOS 1-minute record from the same sensor gives the
         temperature through the day, so at 2 pm we know the high so far and how the afternoon
-        compares with the model. We tried the NYS Mesonet too: its Manhattan station is close
-        by, but its archive is not open to anonymous download, so it is not used here.
+        compares with the model. The NYS Mesonet's Manhattan station is close by, but its
+        terms allow free use only for personal use and its API disallows automated access,
+        so it is not used here.
         """
     )
     return
