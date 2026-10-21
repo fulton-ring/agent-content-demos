@@ -125,8 +125,7 @@ not from the published run.
 - **Not the NYS Mesonet.** Its Manhattan station would be the obvious second local sensor.
   The history is reachable through the API behind its website, but that host's robots.txt
   disallows automated access, and the Mesonet's data policy makes the data free only for
-  personal use and bars redistribution; other users license it. So it isn't here. The
-  airport ASOS stations (KLGA, KJFK) are not used either.
+  personal use and bars redistribution; others license it. Airport ASOS isn't used either.
 
 ## What an article could argue from
 
