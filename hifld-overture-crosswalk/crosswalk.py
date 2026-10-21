@@ -247,8 +247,8 @@ def _():
         # An empty key makes DuckDB read the public bucket anonymously instead of using any AWS credentials around.
         con.sql("CREATE SECRET overture (TYPE s3, KEY_ID '', SECRET '', REGION 'us-west-2')")
         # Reading S3 is bound by request latency, not CPU, so more threads than cores means more reads in flight.
-        con.sql("SET threads = 16")
-        con.sql("SET memory_limit = '6GB'")
+        con.sql("SET threads = 10")
+        con.sql("SET memory_limit = '4GB'")
         con.sql("SET preserve_insertion_order = false")
         return con
 
