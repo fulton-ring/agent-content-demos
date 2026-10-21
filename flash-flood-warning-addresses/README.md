@@ -70,7 +70,7 @@ Every layer predates the storm.
 
 None of the misses sits in a closed depression of 0.3 m or more, so the ponding explanation isn't supported here. 8 of the 12 survey points are within 6 m of a road centerline (`results/observed_places.csv`), including all 4 with no candidate. What the surveyors marked most was water in the streets, which a list of buildings can't hold.
 
-**Ties.** Ten town candidates have exactly 0 m in OWP's 10 m HAND, which is where the church and the creek-side cluster sit. They share rank 5.5, so the 10 m ranking's lead at the top comes from cells too coarse to separate them.
+**Ties.** Ten town candidates have exactly 0 m in OWP's 10 m HAND, which is where the church and the creek-side cluster sit. They share rank 5.5, so the 10 m ranking's lead at the top comes from cells too coarse to separate them. In the area ranking, 47 candidates tie at 0 m and share rank 24, so the 10 m ranking's 3 area places in the top 25 come entirely from that tie. The church ranks exactly 25th by 1 m HAND, so the town's top-50 count is the sturdier figure.
 
 **Road–stream crossings.**
 
@@ -93,6 +93,7 @@ None of the misses sits in a closed depression of 0.3 m or more, so the ponding 
 ## What didn't work
 
 - **pysheds.** It left pits after resolving flats, so 34% of the area and 13% of the town's candidates got no HAND. We replaced it with WhiteboxTools' `whitebox-workflows` wheel; the standalone WhiteboxTools binary download is blocked here.
+- **WhiteboxTools HAND** is still missing for 23% of the study area's cells (none in town). 75 of the area's 2,247 candidates have no 1 m value and rank last.
 - **OWP's own bucket** is Requester Pays. The CIROH mirror serves the same files anonymously. Release 4.9.9.0 stores HAND as int16 millimetres, which we checked against the 2024 float copy.
 - **NHDPlus HR map service.** It timed out, so we used the NHD HR HU8 file. It has the same flowlines without stream order.
 - **Storm report coordinates** are rounded to about 1 km, too coarse to score against. Named places are geocoded from their addresses instead.
