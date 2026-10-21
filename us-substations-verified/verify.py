@@ -238,7 +238,7 @@ def _(mo):
 
 
 @app.cell
-def _(DATA_DIR, duckdb):
+def _(DATA_DIR, Path, duckdb):
     overture_release = "2026-09-23.0"
     overture_path = DATA_DIR / f"overture-substations-us-{overture_release}.parquet"
     if not overture_path.exists():
@@ -253,12 +253,14 @@ def _(DATA_DIR, duckdb):
                        sources[1].record_id AS osm_record, ST_AsWKB(geometry) AS wkb
                 FROM read_parquet(
                     's3://overturemaps-us-west-2/release/{overture_release}/theme=base/type=infrastructure/*')
-                WHERE subtype = 'power' AND class = 'substation' AND (
-                    (bbox.xmin > -125.5 AND bbox.xmax < -66.0 AND bbox.ymin > 24.0 AND bbox.ymax < 49.5)
-                    OR (bbox.xmin > -180 AND bbox.xmax < -129 AND bbox.ymin > 51 AND bbox.ymax < 72)
-                    OR (bbox.xmin > -161 AND bbox.xmax < -154 AND bbox.ymin > 18.5 AND bbox.ymax < 22.5))
-            ) TO '{overture_path}' (FORMAT parquet)
+                WHERE subtype = 'power' AND class = 'substation'
+                  -- One box from the Aleutians to Maine and Hawaii to Alaska's north coast: a single range lets
+                  -- DuckDB skip the rest of the world's row groups. Canada and Mexico are dropped below.
+                  AND bbox.xmin > -180 AND bbox.xmax < -66.0 AND bbox.ymin > 18.5 AND bbox.ymax < 72
+            ) TO '{overture_path}.part' (FORMAT parquet)
         """)
+        # Rename only once the query finishes, so an interrupted run doesn't leave a file later runs would trust.
+        Path(f"{overture_path}.part").rename(overture_path)
     return overture_path, overture_release
 
 
@@ -479,14 +481,15 @@ def _(mo):
 
     One row per substation: every derived substation, and every OSM substation with no derived substation
     within 1 km. A derived substation with an OSM substation within 1 km is **both**; its name falls back to
-    the OSM name when HIFLD's is a placeholder, and its voltage is the higher of the two. `outputs/` gets
-    GeoParquet and CSV; `DATA_DICTIONARY.md` explains each column and the licences.
+    the OSM name when HIFLD's is a placeholder, and its voltage is the higher of the two.
+    `dataset/` gets GeoParquet and CSV (ODbL, because it contains OSM features) and a HIFLD-only CSV with no
+    OSM-derived fields (public domain); `DATA_DICTIONARY.md` explains each column and the licences.
     """)
     return
 
 
 @app.cell
-def _(OUTPUT_DIR, counties, derived_m, gpd, np, osm_m, pd):
+def _(Path, counties, derived_m, gpd, np, os, osm_m, pd):
     _placeholder = derived_m["name"].fillna("UNKNOWN").str.match("UNKNOWN|NOT AVAILABLE")
     _osm_by_id = osm_m.set_index("id")
     _matched = derived_m["m_to_osm"] <= 1000
@@ -526,10 +529,18 @@ def _(OUTPUT_DIR, counties, derived_m, gpd, np, osm_m, pd):
         columns={"STUSPS": "state", "restricted": "county_restricted"}
     )
     assert substations["id"].is_unique and substations["fips"].notna().all()
-    substations.to_parquet(OUTPUT_DIR / "us_substations.parquet")
-    substations.assign(lon=substations.geometry.x.round(6), lat=substations.geometry.y.round(6)).drop(
-        columns="geometry"
-    ).to_csv(OUTPUT_DIR / "us_substations.csv", index=False)
+    _dataset_dir = Path(os.environ.get("DATASET_DIR", "dataset"))
+    _dataset_dir.mkdir(exist_ok=True)
+    substations.to_parquet(_dataset_dir / "us_substations.parquet")
+    _lonlat = {"lon": substations.geometry.x.round(6), "lat": substations.geometry.y.round(6)}
+    substations.assign(**_lonlat).drop(columns="geometry").to_csv(_dataset_dir / "us_substations.csv", index=False)
+    # The HIFLD-only file carries no OSM-derived field (no OSM name, voltage, match or distance), so it stays
+    # public domain; see DATA_DICTIONARY.md.
+    _hifld_only = substations[substations["source"] != "osm"].assign(**_lonlat)
+    _hifld_only = _hifld_only.assign(name=_hifld_only["id"].map(derived_m.set_index("id")["name"]))
+    _hifld_only[["id", "name", "hifld_kv", "fips", "state", "county_restricted", "lon", "lat"]].to_csv(
+        _dataset_dir / "us_substations_hifld_only.csv", index=False
+    )
     print(substations["source"].value_counts().to_string())
     print(f"{len(substations):,} rows; 230 kV+ by max_kv: {int((substations['max_kv'] >= 230).sum()):,}")
     return (substations,)
@@ -542,7 +553,8 @@ def _(mo):
 
     A static MapLibre page, `map/index.html`, reads two GeoJSON files written here: counties shaded by
     restriction and substations coloured by voltage. Clicking a substation shows its name, voltage and source.
-    Coordinates are rounded to about 1 m and county outlines simplified to 200 m to keep the files small.
+    Substation coordinates are rounded to about 1 m and county outlines simplified to 500 m to keep the files
+    small; the map is for looking, and `dataset/` is the data.
     """)
     return
 
@@ -552,13 +564,29 @@ def _(Path, counties, json, os, sabin_edition, substations):
     _map_dir = Path(os.environ.get("MAP_DIR", "map"))
     _map_dir.mkdir(exist_ok=True)
     _c = counties[["fips", "NAME", "STUSPS", "restricted", "geometry"]].copy()
-    _c["geometry"] = _c.geometry.simplify(200)
+    _c["geometry"] = _c.geometry.simplify(500)
     _c = _c.to_crs(4326).rename(columns={"NAME": "name", "STUSPS": "state"})
     _c["restricted"] = _c["restricted"].astype(int)
-    (_map_dir / "counties.geojson").write_text(_c.to_json(drop_id=True, coord_precision=4))
-    _s = substations[["name", "max_kv", "source", "geometry"]].copy()
-    _s["max_kv"] = _s["max_kv"].round(0)
-    (_map_dir / "substations.geojson").write_text(_s.to_json(drop_id=True, coord_precision=5, na="drop"))
+    _c.to_file(_map_dir / "counties.geojson", driver="GeoJSON", COORDINATE_PRECISION=3)
+    _names = substations["name"].fillna("").mask(substations["name"].fillna("").str.match("UNKNOWN|NOT AVAILABLE"), "")
+    # Substations as compact GeoJSON: n = name, k = max kV (left out when unknown), s = source (b, d or o).
+    _features = [
+        {
+            "type": "Feature",
+            "geometry": {"type": "Point", "coordinates": [round(_p.x, 5), round(_p.y, 5)]},
+            "properties": {"n": _n, "s": _src[0]} | ({} if _kv != _kv else {"k": int(round(_kv))}),
+        }
+        for _p, _n, _kv, _src in zip(
+            substations.geometry,
+            substations["name"].fillna(""),
+            substations["max_kv"],
+            substations["source"],
+            strict=True,
+        )
+    ]
+    (_map_dir / "substations.geojson").write_text(
+        json.dumps({"type": "FeatureCollection", "features": _features}, separators=(",", ":"))
+    )
     (_map_dir / "meta.json").write_text(json.dumps({"sabin_edition": sabin_edition}))
     print({p.name: f"{p.stat().st_size / 1e6:.1f} MB" for p in sorted(_map_dir.glob("*.geojson"))})
     return
