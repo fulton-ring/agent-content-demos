@@ -52,7 +52,7 @@ committed; the third-party copy the coastal notebook uses also gives 49. Of the 
 
 **Hurricane.** Between 615 and 643 of the 2,219 counties sit at FEMA's floor of 1, depending on the scenario. Of
 the rest, 95-97% are between 1.9 and 2.1 in three scenarios and 32% in late century, higher
-warming. Our central multipliers have medians of 1.01-1.06.
+warming. Our central multipliers have medians of 1.02-1.06.
 
 **The map** has a hazard and scenario picker, shows FEMA's value, ours or the ratio, and has a
 popup with both values (and our range for hurricane). Two toggles outline the coastal flags and
@@ -75,7 +75,7 @@ Paste this into the Astro page, with the commit the article should freeze on:
 - The script loads Leaflet 1.9.4 from jsDelivr if the page hasn't, and reads
   `../data/counties.geojson` next to itself. `data-src` points it elsewhere, for example a copy
   on the Astro site.
-- [`map/embed-example.html`](map/embed-example.html) is a full page, and
+- [`map/embed-example.html`](map/embed-example.html) is a full page (replace `@COMMIT` in its script URL with a commit hash first), and
   [`screenshots/embed_jsdelivr.png`](screenshots/embed_jsdelivr.png) shows it working.
 - jsDelivr serves `.js` and `.geojson` from GitHub, but serves `.html` as plain text, so it
   can't host `map/index.html` for an iframe. To get an iframe URL, enable GitHub Pages on this
