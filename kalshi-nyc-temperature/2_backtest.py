@@ -57,10 +57,12 @@ def _(mo):
         """
         ## The answer key
 
-        Each day settles on one whole-degree high. We check that the bracket Kalshi paid out
-        on is the one that contains its settled value, and see how often Kalshi's settled
-        value differs from the NWS Daily Climate Report, since Kalshi switched its source to
-        The Weather Company in August 2026.
+        The answer is the bracket Kalshi paid out on. Kalshi also publishes the settled high
+        (`expiration_value`), though the archive leaves it blank on some days. We check that
+        the paid bracket contains the settled high where there is one, fill the blanks from
+        the NWS Daily Climate Report when it falls in the paid bracket, and count how often
+        the two sources disagree, since Kalshi switched from the NWS report to The Weather
+        Company in August 2026.
         """
     )
     return
@@ -75,25 +77,33 @@ def _(cli, markets, np, obs, pd):
             return high < cap
         return floor <= high <= cap
 
-    markets["won"] = [
-        in_bracket(m.settled_high, m.strike_type, m.floor, m.cap) for m in markets.itertuples()
-    ]
-    _agree = (markets.won == (markets.result == "yes")).mean()
+    markets["won"] = markets.result == "yes"
+    _known = markets[markets.settled_high.notna()]
+    _rule = [in_bracket(m.settled_high, m.strike_type, m.floor, m.cap) for m in _known.itertuples()]
+    _agree = (_known.won == _rule).mean()
     assert _agree > 0.99, f"bracket rule disagrees with Kalshi on {1 - _agree:.1%} of brackets"
-    days = markets.groupby("date").agg(
-        settled_high=("settled_high", "first"), source=("source", "first")
-    )
-    days = days[days.settled_high.notna() & (markets.groupby("date").size() >= 2)]
+    _paid = markets[markets.won].set_index("date")
+    assert _paid.index.is_unique, "more than one paid bracket on a day"
+    days = _paid[["settled_high", "source"]].copy()
     days["cli_high"] = cli.reindex(days.index)
-    _diff = days.settled_high - days.cli_high
+    _cli_in_paid = [
+        in_bracket(c, m.strike_type, m.floor, m.cap)
+        for c, m in zip(days.cli_high, _paid.itertuples(), strict=True)
+    ]
+    _fill = days.settled_high.isna() & np.array(_cli_in_paid)
+    print(
+        f"{days.settled_high.isna().sum()} days have no settled high; {_fill.sum()} filled from CLI"
+    )
+    days.loc[_fill, "settled_high"] = days.cli_high[_fill]
+    _diff = (days.settled_high - days.cli_high)[~_fill]
     answer_key = pd.DataFrame(
         {
             "days": days.groupby("source").size(),
-            "differs_from_CLI": (_diff != 0).groupby(days.source).sum(),
+            "settled_high_differs_from_CLI": (_diff != 0).groupby(days.source[~_fill]).sum(),
         }
     )
     print(f"Kalshi's payouts match its settled value on {_agree:.2%} of brackets")
-    print(f"Mean |settled - CLI| = {np.abs(_diff).mean():.2f} °F")
+    print(f"Mean |settled - CLI| = {np.abs(_diff).mean():.2f} °F where both exist")
     _max_1min = obs.max_1min.round().reindex(days.index).dropna()
     _above = (_max_1min > days.settled_high.reindex(_max_1min.index)).mean()
     print(f"Central Park's 1-minute max reads above the settled high on {_above:.0%} of days")
@@ -123,6 +133,8 @@ def _(days, markets, prices):
     _ok = book.groupby(["date", "snapshot"]).mid.transform(lambda s: s.notna().all())
     book = book[_ok].copy()
     book["p_market"] = book.mid / book.groupby(["date", "snapshot"]).mid.transform("sum")
+    _spread = (book.yes_ask - book.yes_bid).median()
+    print(f"Median quoted spread: {_spread * 100:.0f} cents")
     book.groupby("snapshot").date.nunique().rename("days with a full book")
     return (book,)
 
@@ -228,6 +240,47 @@ def _(SNAPSHOTS, aifs, cli, days, dt, nbm, np, obs, pd):
     forecasts = pd.DataFrame(_rows)
     forecasts.groupby("snapshot").size().rename("days with every model")
     return forecasts, hist
+
+
+@app.cell
+def _(mo):
+    mo.md(
+        """
+        How far off is each forecast of the high, before any probabilities? Error is the
+        settled high minus the forecast centre, so a positive mean means the forecast ran cold.
+        """
+    )
+    return
+
+
+@app.cell
+def _(RESULTS, days, forecasts, pd):
+    _f = forecasts.merge(days.settled_high, left_on="date", right_index=True)
+    _rows = []
+    for _snap, _g in _f.groupby("snapshot", sort=False):
+        for _name, _col in [
+            ("AIFS raw", "aifs_raw"),
+            ("AIFS corrected", "aifs_corr"),
+            ("NBM", "nbm"),
+            ("AIFS + 2 pm sensors", "sensor"),
+        ]:
+            if f"{_col}_mu" not in _g or _g[f"{_col}_mu"].isna().all():
+                continue
+            _err = (_g.settled_high - _g[f"{_col}_mu"]).dropna()
+            _rows.append(
+                {
+                    "snapshot": _snap,
+                    "forecast": _name,
+                    "days": len(_err),
+                    "mean_error": _err.mean(),
+                    "mean_abs_error": _err.abs().mean(),
+                    "misses_over_3F": (_err.abs() > 3).mean(),
+                }
+            )
+    errors = pd.DataFrame(_rows)
+    errors.to_csv(RESULTS / "errors.csv", index=False)
+    errors.round(2)
+    return
 
 
 @app.cell
@@ -422,6 +475,8 @@ def _(np, pd, scored):
             "staked": (CONTRACTS * t.price).sum(),
             "fees": t.price.map(fee).sum(),
             "pnl": t.pnl.sum(),
+            # Rough: treats trades as independent, though trades on one day are not.
+            "pnl_ci95": 1.96 * t.pnl.std() * len(t) ** 0.5 if len(t) > 1 else np.nan,
             "max_drawdown": (cum.cummax().clip(lower=0) - cum).max() if len(t) else 0.0,
         }
 
