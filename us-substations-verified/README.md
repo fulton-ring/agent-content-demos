@@ -56,7 +56,20 @@ Most OSM substations are mapped as areas, so a derived point inside the fence is
 The derived set misses about one in six OSM 230 kV+ substations, mostly ones no HIFLD line ends at (the last
 column). The HIFLD lines layer is older than OSM and leaves out some lines (see `hifld-grid-gaps/`).
 
-**Hand check.** HC_SENTENCE
+**Hand check.** We labelled a random 50 (seed 76) of the 180 derived 230 kV+ points with no OSM substation
+within 1 km on Esri aerial imagery ([`hand_check.csv`](hand_check.csv), one line each on what we saw):
+
+| Label | Points | What it is |
+|---|---:|---|
+| substation | 7 | a switchyard OSM hasn't mapped, including two 500 kV yards (Anderson, TN; Pleasant Hill, MS) |
+| plant | 13 | a power plant's switchyard or powerhouse, mostly hydro dams (Grand Coulee, Bath County) |
+| tap | 15 | the line branches, turns or continues as another segment; no yard |
+| error | 13 | nothing there: 7 lines ending in wind farm fields, 1 at the demolished Breed plant, the rest in empty land |
+| unclear | 2 | a building compound with no visible switchyard |
+
+So 40% of the unconfirmed points are real grid nodes and 56% aren't. Scaled to all 180, about 100 of the 6,469
+derived 230 kV+ substations (1.6%) aren't substations: too few to move the headline, and set (a) below drops
+all 180 anyway.
 
 **The county headline**, holds a 230 kV+ substation, main restriction definition, 432 restricted against
 2,712 unrestricted counties (`outputs/headline_rerun.csv`):
@@ -91,7 +104,12 @@ coloured by voltage (230 kV and up shown first; a menu shows all), filters by so
 voltage and source. The URL keeps the view (`#zoom/lat/lon`), so an article can link straight to a place.
 The basemap is OpenFreeMap (free, no key). Screenshot: `map_screenshot.png`.
 
-MAP_URL_SENTENCE
+**Map URL.** GitHub Pages isn't switched on for this repo, so there's no clean public URL yet. Today the map
+opens at [raw.githack.com](https://raw.githack.com/fulton-ring/agent-content-demos/spike/us-substations-verified/us-substations-verified/map/index.html)
+after a "one more step" click-through, which rules it out for embedding. Once a founder turns on Pages
+(Settings → Pages → Deploy from a branch → `main`, `/ (root)`) and this PR merges, the map is at
+`https://fulton-ring.github.io/agent-content-demos/us-substations-verified/map/`, with no build step. Locally:
+`cd map && python3 -m http.server`, then open <http://localhost:8000>.
 
 We chose a static page over a HIFLD Next layer because HIFLD Next has no substations layer to link to, and a
 page in this repo shows the derived/OSM source of each point, which is the thing this spike checked.
@@ -102,7 +120,7 @@ page in this repo shows the derived/OSM source of each point, which is the thing
   can't skip row groups with an `OR` of ranges. One box from the Aleutians to Maine takes about 5 minutes,
   and Canada and Mexico are dropped by the county join.
 - **A first map was 18 MB.** Compact GeoJSON (short keys, 1 m coordinates, counties simplified to 500 m) brought
-  it to about 12 MB, under 3 MB gzipped as served. Vector tiles (PMTiles) would be smaller but need a build step.
+  it to about 12 MB, 1.8 MB gzipped. Vector tiles (PMTiles) would be smaller but need a build step.
 - **Matching is by distance only**, not by name: HIFLD names are placeholders for half the derived points, and
   OSM names are often missing. A derived point within 1 km of an OSM substation could be a tap beside it.
 
@@ -119,6 +137,6 @@ page in this repo shows the derived/OSM source of each point, which is the thing
 
 Overture's GeoParquet (OSM with tags, versioned) over Overpass, which failed in `hifld-grid-gaps/`. GeoPandas'
 nearest join for matching, statsmodels for the CMH test, and MapLibre GL with OpenFreeMap tiles for the map,
-rather than kepler.gl (a 5 MB+ export with the data inlined) or a HIFLD Next layer (none exists). OSMF's
+rather than a kepler.gl export or a HIFLD Next layer (none exists). OSMF's
 licence guidelines for the ODbL question. It's one marimo notebook, `verify.py`, plus `hand_check_chips.py`
 (adapted from `hifld-grid-gaps/`) for the imagery.
