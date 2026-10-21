@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>US Substations Verified</title>
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.css">
+<script src="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.js"></script>
+<style>
+  html, body, #map { margin: 0; height: 100%; }
+  body { font: 13px/1.4 system-ui, sans-serif; color: #1f2937; background: #fff; }
+  .panel { position: absolute; top: 10px; left: 10px; max-width: 280px; background: rgba(255,255,255,.95);
+           padding: 10px 12px; border-radius: 6px; box-shadow: 0 1px 4px rgba(0,0,0,.25); }
+  .panel summary { cursor: pointer; }
+  .panel h1 { display: inline; font-size: 14px; }
+  .panel p { margin: 4px 0; color: #4b5563; }
+  .row { display: flex; align-items: center; gap: 6px; margin: 2px 0; }
+  .dot { flex: none; width: 10px; height: 10px; border-radius: 50%; display: inline-block; border: 1px solid #fff; box-shadow: 0 0 0 1px #9ca3af; }
+  .swatch { flex: none; width: 14px; height: 10px; display: inline-block; border: 1px solid #9ca3af; }
+  fieldset { border: 0; padding: 0; margin: 6px 0 0; }
+  legend { font-weight: 600; margin-bottom: 2px; }
+  select { font: inherit; }
+  @media (max-width: 480px) { .panel { max-width: calc(100% - 64px); } }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<details class="panel" id="panel" open>
+  <summary><h1>US substations and county renewable restrictions</h1></summary>
+  <p>Substations derived from HIFLD Next transmission lines and from OpenStreetMap. Click a dot for details.</p>
+  <fieldset>
+    <legend>Counties</legend>
+    <div class="row"><span class="swatch" style="background:#f4a582"></span><span>County-level wind or solar restriction (<span id="edition">Sabin Center</span>)</span></div>
+  </fieldset>
+  <fieldset>
+    <legend>Substations, highest voltage</legend>
+    <div class="row"><span class="dot" style="background:#67001f"></span>345 kV and up</div>
+    <div class="row"><span class="dot" style="background:#d6604d"></span>230–344 kV</div>
+    <div class="row"><span class="dot" style="background:#4393c3"></span>115–229 kV</div>
+    <div class="row"><span class="dot" style="background:#92c5de"></span>under 115 kV</div>
+    <div class="row"><span class="dot" style="background:#bdbdbd"></span>no voltage recorded</div>
+  </fieldset>
+  <fieldset>
+    <legend>Show</legend>
+    <div class="row"><label>Voltage <select id="minkv">
+      <option value="0">all</option><option value="115">115 kV and up</option>
+      <option value="230" selected>230 kV and up</option><option value="345">345 kV and up</option>
+    </select></label></div>
+    <div class="row"><label><input type="checkbox" class="src" value="b" checked> in both sources</label></div>
+    <div class="row"><label><input type="checkbox" class="src" value="d" checked> HIFLD-derived only</label></div>
+    <div class="row"><label><input type="checkbox" class="src" value="o" checked> OpenStreetMap only</label></div>
+  </fieldset>
+</details>
+<script>
+const map = new maplibregl.Map({
+  container: "map",
+  style: "https://tiles.openfreemap.org/styles/positron",
+  bounds: [[-125, 24], [-66, 50]],
+  hash: true,
+  attributionControl: { compact: true, customAttribution:
+    "Substations: HIFLD Next; © OpenStreetMap contributors (ODbL) via Overture Maps · Restrictions: Sabin Center for Climate Change Law · Counties: US Census" },
+});
+map.addControl(new maplibregl.NavigationControl(), "top-right");
+// Start with the legend folded on a phone, so the map is visible.
+if (window.matchMedia("(max-width: 480px)").matches) document.getElementById("panel").open = false;
+
+// Properties: n = name, k = highest voltage in kV (absent when unknown, read as -1), s = source.
+const kv = ["to-number", ["coalesce", ["get", "k"], -1]];
+const kvColor = ["case", ["<", kv, 0], "#bdbdbd",
+  [">=", kv, 345], "#67001f", [">=", kv, 230], "#d6604d", [">=", kv, 115], "#4393c3", "#92c5de"];
+
+function substationFilter() {
+  const minkv = Number(document.getElementById("minkv").value);
+  const sources = [...document.querySelectorAll(".src:checked")].map((el) => el.value);
+  return ["all", [">=", kv, minkv === 0 ? -1 : minkv], ["in", ["get", "s"], ["literal", sources]]];
+}
+
+map.on("load", async () => {
+  try {
+    const meta = await (await fetch("meta.json")).json();
+    document.getElementById("edition").textContent = `Sabin Center, ${meta.sabin_edition}`;
+  } catch (err) { console.warn("meta.json not loaded", err); }
+  map.addSource("counties", { type: "geojson", data: "counties.geojson" });
+  map.addLayer({ id: "counties-fill", type: "fill", source: "counties",
+    paint: { "fill-color": ["case", ["==", ["get", "restricted"], 1], "#f4a582", "#ffffff"],
+             "fill-opacity": ["case", ["==", ["get", "restricted"], 1], 0.55, 0] } });
+  map.addLayer({ id: "counties-line", type: "line", source: "counties",
+    paint: { "line-color": "#9ca3af", "line-width": 0.3 } });
+  map.addSource("substations", { type: "geojson", data: "substations.geojson" });
+  map.addLayer({ id: "substations", type: "circle", source: "substations", filter: substationFilter(),
+    paint: { "circle-color": kvColor, "circle-stroke-color": "#fff", "circle-stroke-width": 0.5,
+             "circle-radius": ["interpolate", ["linear"], ["zoom"], 3, 2, 8, 4, 12, 7] } });
+
+  for (const el of document.querySelectorAll("#minkv, .src")) {
+    el.addEventListener("change", () => map.setFilter("substations", substationFilter()));
+  }
+  map.on("click", "substations", (e) => {
+    const p = e.features[0].properties;
+    const source = { b: "HIFLD-derived, OpenStreetMap substation within 1 km", d: "HIFLD-derived only", o: "OpenStreetMap only" }[p.s];
+    const box = document.createElement("div");
+    for (const [label, value] of [["", p.n || "(no name)"], ["Voltage: ", p.k ? `${p.k} kV` : "not recorded"], ["Source: ", source]]) {
+      const line = document.createElement("div");
+      line.textContent = label + value;
+      if (!label) line.style.fontWeight = "600";
+      box.appendChild(line);
+    }
+    new maplibregl.Popup().setLngLat(e.lngLat).setDOMContent(box).addTo(map);
+  });
+  map.on("mouseenter", "substations", () => { map.getCanvas().style.cursor = "pointer"; });
+  map.on("mouseleave", "substations", () => { map.getCanvas().style.cursor = ""; });
+});
+</script>
+</body>
+</html>
