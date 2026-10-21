@@ -34,7 +34,8 @@ CREATE OR REPLACE TEMP TABLE documented_rows AS FROM GRAPH_TABLE (supply
     MATCH p = ANY SHORTEST (u:nodes)-[e:documented]->{1,12}(f:nodes WHERE {first})
     COLUMNS (f.name AS first, u.name AS upstream));
 SELECT first, upstream, links + 1 AS hops, d.first IS NOT NULL AS direct, doc.first IS NOT NULL AS documented
-FROM reach_rows LEFT JOIN direct_rows d USING (first, upstream) LEFT JOIN documented_rows doc USING (first, upstream)
+FROM reach_rows LEFT JOIN direct_rows d USING (first, upstream)
+    LEFT JOIN documented_rows doc USING (first, upstream)
 ```
 
 ## LadybugDB (Kùzu fork)

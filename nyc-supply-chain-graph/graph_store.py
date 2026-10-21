@@ -27,7 +27,7 @@ with app.setup:
     SPIKE_62 = Path(os.environ.get("SUPPLY_CHAIN_SPIKE_DIR", HERE.parent / "nyc-supply-chain-risk"))
     for _dir in (DATA, OUT, APP_DATA):
         _dir.mkdir(parents=True, exist_ok=True)
-    # Neo4j runs only when a server is given, for example `docker run -p 7687:7687 neo4j:2026.08.0-community`.
+    # Neo4j runs only when a server is given, for example `docker run -p 7687:7687 neo4j:2026.08-community`.
     NEO4J_URI = os.environ.get("NEO4J_URI", "")
     REPEATS = 20  # each parcel query is timed this many times and the median kept
 
@@ -136,8 +136,8 @@ def _():
 @app.cell
 def _(lots, spike):
     _status = spike["parcel_status"].dropna(subset=["served_by"])
-    answer_key = spike["upstream"].merge(_status[["name", "served_by"]], left_on="parcel", right_on="name")
-    answer_key = answer_key[["parcel", "served_by", "upstream", "hops", "path", "chain_documented", "rank"]]
+    answer_key = spike["upstream"].merge(_status[["name", "bbl", "served_by"]], left_on="parcel", right_on="name")
+    answer_key = answer_key[["parcel", "bbl", "served_by", "upstream", "hops", "path", "chain_documented", "rank"]]
     # The parcels given by BBL are the ones the per-parcel query looks up; the Canarsie point has no BBL.
     sample_bbls = [b for b in _status["bbl"].dropna() if b in set(lots["bbl"])]
     _node_hazards = spike["node_hazards"]
@@ -710,7 +710,9 @@ def _(answer_key, duckdb_con, duckdb_row, links, lots, rank_rows, spike):
     _app_check = pd.DataFrame(_app_rows).sort_values(["parcel", "rank"]).reset_index(drop=True)
     _key = answer_key[["parcel", "upstream", "rank"]].sort_values(["parcel", "rank"]).reset_index(drop=True)
     app_matches_62 = _app_check.equals(_key)
+    # The app's browser test (app/tests) reads the answer key from here.
     answer_key.to_csv(OUT / "answer_key.csv", index=False)
+    answer_key.to_json(OUT / "answer_key.json", orient="records", indent=1)
     duckdb_con.close()
     mo.md(
         f"Wrote `graph.json` ({(APP_DATA / 'graph.json').stat().st_size / 1e3:.0f} kB) and `lots.json` "
