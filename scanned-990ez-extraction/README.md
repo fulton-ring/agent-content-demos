@@ -27,7 +27,7 @@ Three marimo notebooks, each top to bottom. Open one with `uv run marimo edit 1_
 ./run.sh
 ```
 
-You need [uv](https://docs.astral.sh/uv/) and `OPENROUTER_API_KEY`. `run.sh` runs the three notebooks as scripts, in order, so the numbers come from the code you read. They hand results on through `output/` (set `EZ_OUTPUT_DIR` to write elsewhere). A run took 9 minutes and cost $2.07 in model calls; the notebook stops if spending passes $10. Model answers are saved under `output/answers/` and reused on a re-run; delete that folder to call the models again. It writes `output/results.json` and the crops in `screenshots/`.
+You need [uv](https://docs.astral.sh/uv/) and `OPENROUTER_API_KEY`. `run.sh` runs the three notebooks as scripts, in order, so the numbers come from the code you read. They hand results on through `output/` (set `EZ_OUTPUT_DIR` to write elsewhere). A run took 9 minutes and cost $2.07 in model calls; the notebook stops if spending passes $10. Model answers are saved under `output/answers/` and reused on a re-run; delete that folder to call the models again. It writes `output/results.json` and replaces the crops in `screenshots/`, so a re-run shows up in `git status`.
 
 ## The data
 
@@ -43,7 +43,7 @@ All public, fetched at run time, none committed.
 
 From a clean run of `./run.sh` in a fresh clone on 2026-10-20.
 
-**Downloads.** 187 of 220 scans downloaded (33 failures, 15%: ProPublica lists no image for that tax period). On 2 of the 187, page 1 was another schedule; both models said so, and those pages aren't scored. That leaves **4,070 fields on 185 pages**. Neither model failed to answer on any page.
+**Downloads.** 187 of 220 scans downloaded (33 failures, 15%: ProPublica lists no image for that tax period). On 2 of the 187, page 1 was another schedule; both models said so, and those pages aren't scored. That leaves **4,070 fields on 185 pages**. Neither model returned an error on any page, though an answer can be nearly empty: in one re-run Gemini returned only the tax period for `680226732_201612`, and empty boxes score as 0.
 
 | | Gemini 3.8 Flash alone | Qwen 3.8 27B alone | The pair, review on disagreement |
 |---|---|---|---|
@@ -62,7 +62,7 @@ From a clean run of `./run.sh` in a fresh clone on 2026-10-20.
 
 `3_results.py` breaks error down by field. The EIN, the tax year and the totals (lines 9, 17, 18 and 21) carry most of the errors.
 
-**Run to run.** An earlier run the same day, with the same code, had Gemini wrong on 38 fields (0.93%), Qwen on 60, 77 sent to review and 10 wrong accepted (the same IRS-mark EINs plus one more). The method's numbers hold; the exact counts move by a few.
+**Run to run.** An earlier run the same day, with the same code, had Gemini wrong on 38 fields (0.93%), Qwen on 60, 77 sent to review and 10 wrong accepted (the same IRS-mark EINs plus one more). A third run, by the Research manager on 2026-10-21 ($1.47, 11 minutes), had Gemini wrong on 30 (0.74%), Qwen on 110 (2.70%), 112 fields (2.8%) and 69 pages (37%) sent to review, and 12 wrong accepted (0.30%). So the open model varies a lot between runs: across the three, 77 to 112 fields (1.9% to 2.8%) and 23% to 37% of pages went to review, and 9 to 12 wrong values were accepted. What held every time: Gemini's own confidence caught none of its errors, disagreement caught 18 of Gemini's, and SOI differed from the scan on the same 57 fields. A re-run also meets new fields that need checking on the scan; until they are added to `adjudications.json`, SOI is taken as right for them, so the accepted-wrong count is conservative.
 
 ## What it doesn't show
 
