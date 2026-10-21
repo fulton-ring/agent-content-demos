@@ -230,8 +230,8 @@ def _(mo):
     ## 2. The answer key
 
     The NWS Louisville flood survey KMZ has one point per surveyed flood location. The points
-    carry times and an event id but no depths. Its 22 points form two clusters: 12 in
-    Lanesville and 10 in downtown Corydon. One of the Corydon points is tagged
+    carry times and an event id but no depths. Its 21 points form two clusters: 12 in
+    Lanesville and 9 in downtown Corydon. One of the Corydon points is tagged
     `Lanesville2026`, so we go by location: a town's survey points are the ones inside its
     study box.
 
@@ -358,7 +358,7 @@ def _(Polygon, arcgis, cache, fetch, gpd, json, pd, site, unary_union, warning):
         "https://services2.arcgis.com/FiaPA4ga0iQKduv3/ArcGIS/rest/services/USA_Structures_View/FeatureServer/0"
     )
     _addresses = "https://gisdata.in.gov/server/rest/services/Hosted/Address_Points_of_Indiana_2025/FeatureServer/0"
-    for _fips in ["18043", "21111"]:
+    for _fips in ["18061", "18043", "21111"]:
         fetch(
             f"https://www2.census.gov/geo/tiger/TIGER2025/ROADS/tl_2025_{_fips}_roads.zip", cache / f"roads_{_fips}.zip"
         )
@@ -952,6 +952,38 @@ def _(
 @app.cell
 def _(mo):
     mo.md(r"""
+    ### Why the 1 m and 10 m rankings disagree
+
+    The two HAND products measure height above different streams. Our 1 m HAND uses every kept
+    NHD High Resolution flowline, most of them small unnamed channels. OWP builds its HAND on
+    the National Water Model's coarser network. For each ranking's top 25 in town, we count how
+    many sit nearest a named creek and show the median of the *other* product's HAND.
+    """)
+
+
+@app.cell
+def _(candidates, np, pd, streams):
+    _town = candidates[candidates.in_town]
+    _named = streams[streams.gnis_name.notna()]
+    _rows = {}
+    for _m, _other in [("hand_1m", "hand_owp_10m"), ("hand_owp_10m", "hand_1m")]:
+        _top = _town[_town[_m].rank(method="average") <= 25]
+        _to_named = np.array([_named.distance(g).min() for g in _top.geometry])
+        _to_any = np.array([streams.distance(g).min() for g in _top.geometry])
+        _rows[f"top 25 by {_m}"] = {
+            "nearest stream is a named creek": int((_to_named <= _to_any).sum()),
+            "median 1 m HAND (m)": round(float(_top.hand_1m.median()), 1),
+            "median 10 m OWP HAND (m)": round(float(_top.hand_owp_10m.median()), 1),
+        }
+    network = pd.DataFrame(_rows)
+    print(f"{int(streams.gnis_name.isna().sum())} of {len(streams)} kept flowlines in the study area are unnamed")
+    network
+    return (network,)
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
     ## 10. Map
 
     Left: the warning polygon and the study area. Right: the town's structures, with the 100
@@ -1051,6 +1083,7 @@ def _(
     gpd,
     inside,
     json,
+    network,
     np,
     observed,
     owp_layers,
@@ -1090,6 +1123,7 @@ def _(
         "town_crossings_blocked_in_dem": int(_tx.blocked_in_dem.sum()),
         "scores": scores.replace({np.nan: None}).to_dict(orient="records"),
         "outcomes_1m_hand_town": places["1 m HAND outcome (town)"].value_counts().to_dict(),
+        "top_25_town_by_hand": network.to_dict(),
         "methods": list(METHODS.values()),
         "run_seconds": round(time.time() - started),
         "cost_usd": 0,
