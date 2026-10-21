@@ -52,7 +52,7 @@ All numbers come from `outputs/summary.json`, `outputs/validation.csv` and `outp
 - The 231 EPA-named columns inside EJAM's `v3.2024.0` table are empty in every row and are dropped.
 - CEJST v2.0 is still on 2010 tracts and ACS 2015–2019; no newer CEJST exists.
 
-**Run time.** On 4 CPUs, the first run from a clean checkout with vector tiles took 29.5 minutes: 18 s of downloads, about 11 minutes parsing EJAM's two R files, under a minute writing the GeoParquet files and STAC records, and about 18 minutes building the three PMTiles files (5–6 minutes each). A rerun with the downloads and parsed files cached took 20 minutes, almost all of it vector tiles.
+**Run time.** On 4 CPUs, the first run from a clean checkout with vector tiles took 29.4 minutes: 18 s of downloads, about 11 minutes parsing EJAM's two R files, under a minute writing the GeoParquet files and STAC records, and about 18 minutes building the three PMTiles files (5–6 minutes each). A rerun with the downloads and parsed files cached took 20 minutes, almost all of it vector tiles.
 
 ![Change in percent low income by block group, Louisiana](outputs/map_lowinc_change_la.png)
 
