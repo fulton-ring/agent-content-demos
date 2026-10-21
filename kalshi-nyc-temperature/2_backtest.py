@@ -67,7 +67,7 @@ def _(mo):
 
 
 @app.cell
-def _(cli, markets, np, pd):
+def _(cli, markets, np, obs, pd):
     def in_bracket(high: float, strike_type: str, floor: float, cap: float) -> bool:
         if strike_type == "greater":
             return high > floor
@@ -94,6 +94,9 @@ def _(cli, markets, np, pd):
     )
     print(f"Kalshi's payouts match its settled value on {_agree:.2%} of brackets")
     print(f"Mean |settled - CLI| = {np.abs(_diff).mean():.2f} °F")
+    _max_1min = obs.max_1min.round().reindex(days.index).dropna()
+    _above = (_max_1min > days.settled_high.reindex(_max_1min.index)).mean()
+    print(f"Central Park's 1-minute max reads above the settled high on {_above:.0%} of days")
     answer_key
     return days, in_bracket
 
@@ -133,8 +136,9 @@ def _(mo):
         A forecast of the high becomes bracket probabilities by assuming the error is normal:
         a centre `mu` and a spread `sigma`, integrated over each whole degree.
 
-        - **AIFS raw.** `mu` is the warmest 6-hourly AIFS temperature over the day; `sigma` is
-          the root-mean-square error of that number over the last 30 days. No shift.
+        - **AIFS raw.** `mu` is the warmest 6-hourly temperature over the day from the latest
+          AIFS run at the snapshot; `sigma` is the root-mean-square error of that number over
+          the last 30 days. No shift.
         - **AIFS corrected.** Learns from the Central Park record. `mu` adds the average miss
           over the last 30 days (observed high minus AIFS), and `sigma` is the spread of those
           misses. Only days already reported by the snapshot are used: two days back for the
@@ -144,27 +148,24 @@ def _(mo):
         - **AIFS + 2 pm sensors** (2 pm snapshot only). By 2 pm we know two things from the
           Central Park 1-minute record: the high so far, which the final high can't go below,
           and how warm it is now compared with what AIFS said for this hour. We shift `mu` by
-          that afternoon anomaly (net of its own 30-day average) and floor the distribution at
-          the high so far.
+          that afternoon anomaly, correct it like the others, and floor the distribution
+          one degree below the high so far, because the 1-minute record often reads a degree
+          above the official high.
         """
     )
     return
 
 
 @app.cell
-def _(SNAPSHOTS, aifs, cli, days, dt, nbm, obs, pd):
+def _(SNAPSHOTS, aifs, cli, days, dt, nbm, np, obs, pd):
     WINDOW = 30
-    _peak = aifs.groupby(["date", "run_offset"]).t2m_f.max().unstack()
-    _t18 = aifs[(aifs.run_offset == 0) & (aifs.step == 18)].set_index("date").t2m_f
-    hist = pd.DataFrame(
-        {
-            "aifs_d1": _peak[-1],
-            "aifs_d0": _peak[0],
-            "aifs_2pm": _t18,
-            "cli_high": cli,
-        }
+    # One AIFS forecast of the high per snapshot: the warmest 6-hourly value from its run.
+    hist = aifs.groupby(["date", "snapshot"]).t2m_f.max().unstack()
+    hist["aifs_2pm"] = (
+        aifs[(aifs.snapshot == "D 14:00") & (aifs.valid_hour == 18)].set_index("date").t2m_f
     )
-    hist = hist.join(obs[["temp_2pm", "max_by_2pm"]])
+    hist["cli_high"] = cli
+    hist = hist.join(obs[["temp_2pm", "max_by_2pm", "minutes_by_2pm"]])
 
     def latest_nbm(day: dt.date, issued_before: pd.Timestamp) -> pd.Series | None:
         runs = nbm[(nbm.date == day) & (nbm.runtime <= issued_before)]
@@ -193,7 +194,7 @@ def _(SNAPSHOTS, aifs, cli, days, dt, nbm, obs, pd):
     for _day in days.index:
         for _snap in SNAPSHOTS:
             _lag = 2 if _snap.startswith("D-1") else 1
-            _f = hist.aifs_d1 if _lag == 2 else hist.aifs_d0
+            _f = hist[_snap]
             _err = trailing(hist.cli_high - _f, _day, _lag)
             _n = nbm_at[nbm_at.snapshot == _snap].set_index("date")
             _nerr = trailing(hist.cli_high - _n.nbm_max.reindex(hist.index), _day, _lag)
@@ -212,14 +213,17 @@ def _(SNAPSHOTS, aifs, cli, days, dt, nbm, obs, pd):
                 "nbm_corr_sd": _nerr.std() if len(_nerr) >= 10 else _n.nbm_sd[_day],
             }
             if _snap == "D 14:00":
-                # Afternoon anomaly: Central Park at 2 pm minus AIFS at 2 pm, net of its usual gap.
-                _gap = hist.temp_2pm - hist.aifs_2pm
-                _usual = trailing(_gap, _day, 1).mean()
-                _pred = hist.aifs_d0 + (_gap - _usual)
+                # Shift the AIFS high by how much warmer Central Park is at 2 pm than AIFS
+                # said; the 30-day correction then removes the usual size of that gap.
+                _pred = _f + (hist.temp_2pm - hist.aifs_2pm)
                 _perr = trailing(hist.cli_high - _pred, _day, 1)
                 _row["sensor_mu"] = _pred[_day] + _perr.mean()
                 _row["sensor_sd"] = _perr.std()
-                _row["sensor_floor"] = hist.max_by_2pm.get(_day)
+                # The 1-minute record often reads a degree above the official high (see the
+                # answer key), so the floor is one degree below it, and only on days where
+                # at least 10 of the 14 hours before 2 pm were recorded.
+                _complete = hist.minutes_by_2pm.get(_day, 0) >= 600
+                _row["sensor_floor"] = hist.max_by_2pm.get(_day) - 1 if _complete else np.nan
             _rows.append(_row)
     forecasts = pd.DataFrame(_rows)
     forecasts.groupby("snapshot").size().rename("days with every model")
@@ -361,6 +365,7 @@ def _(RESULTS, SNAPSHOTS, np, plt, scored):
         _ax.set_xlabel("forecast probability")
     _axes[0].set_ylabel("share that won")
     _axes[0].legend(fontsize=8)
+    _axes[2].legend(fontsize=8)
     _fig.tight_layout()
     _fig.savefig(RESULTS / "calibration.png", dpi=120)
     _fig
@@ -490,7 +495,7 @@ def _(RESULTS, daily_scores, days, forecasts, hist, obs, scored):
     bad_days = _worst[["Market", "AIFS corrected", "NBM"]].rename(columns=lambda c: f"log_loss {c}")
     bad_days["settled_high"] = days.settled_high.reindex(bad_days.index)
     bad_days["aifs_corr_mu"] = _f.aifs_corr_mu.reindex(bad_days.index).round(1)
-    bad_days["aifs_raw"] = hist.aifs_d0.reindex(bad_days.index).round(1)
+    bad_days["aifs_raw"] = hist["D 08:00"].reindex(bad_days.index).round(1)
     bad_days["nbm_mu"] = _f.nbm_mu.reindex(bad_days.index)
     bad_days["market_favourite"] = _fav.ticker.str.split("-").str[-1].reindex(bad_days.index)
     bad_days["hour_of_max"] = obs.hour_of_max.reindex(bad_days.index)

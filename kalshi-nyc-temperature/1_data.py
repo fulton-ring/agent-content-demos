@@ -276,10 +276,11 @@ def _(mo):
         warmest of the 6-hourly values over the day. That under-reads the true peak, which is
         exactly the kind of steady bias a local correction should remove.
 
-        For each day D we keep two runs, both started at 00 UTC: the one from the day before
-        (used at the 4 pm D-1 snapshot) and the one from day D (used on the day). Each GRIB
-        file has an index, so we download only the 2 m temperature field, about 0.5 MB of an
-        80 MB file, and read the four grid points around Central Park.
+        For each day D and snapshot we use the latest run a trader could have seen. A run
+        lands on AWS about 5.5 hours after it starts, so the 4 pm D-1 snapshot uses the
+        12 UTC run of D-1, 8 am uses the 06 UTC run of D, and 2 pm uses the 12 UTC run of D.
+        Each GRIB file has an index, so we download only the 2 m temperature field, about
+        0.5 MB of an 80 MB file, and read the four grid points around Central Park.
         """
     )
     return
@@ -289,9 +290,12 @@ def _(mo):
 def _(CACHE, END, LAT, LON, MODEL_START, ThreadPoolExecutor, dt, eccodes, get, json, pd):
     AIFS = "https://ecmwf-forecasts.s3.eu-central-1.amazonaws.com"
 
-    def aifs_point(run: dt.date, step: int) -> float:
+    def aifs_point(run: dt.date, hour: int, step: int) -> float:
         """2 m temperature (°F) at Central Park from one AIFS run and forecast step."""
-        stem = f"{AIFS}/{run:%Y%m%d}/00z/aifs-single/0p25/oper/{run:%Y%m%d}000000-{step}h-oper-fc"
+        stem = (
+            f"{AIFS}/{run:%Y%m%d}/{hour:02d}z/aifs-single/0p25/oper/"
+            f"{run:%Y%m%d}{hour:02d}0000-{step}h-oper-fc"
+        )
         index = [json.loads(line) for line in get(stem + ".index").text.splitlines()]
         field = next(i for i in index if i["param"] == "2t")
         byte_range = f"bytes={field['_offset']}-{field['_offset'] + field['_length'] - 1}"
@@ -305,24 +309,30 @@ def _(CACHE, END, LAT, LON, MODEL_START, ThreadPoolExecutor, dt, eccodes, get, j
         kelvin = sum(w * p["value"] for w, p in zip(weights, near, strict=True)) / sum(weights)
         return (kelvin - 273.15) * 9 / 5 + 32
 
-    # Steps from 00 UTC on run day: D-1 runs cover day D at 30-48 h, D runs at 6-24 h.
-    # 12, 18 and 24 h from 00 UTC are 8 am, 2 pm and 8 pm New York daylight time.
-    STEPS = {-1: (30, 36, 42, 48), 0: (6, 12, 18, 24)}
+    # The run each snapshot can see (runs land about 5.5 hours after they start), and the
+    # times on day D we read from it, in hours after 00 UTC on D. 6, 12, 18 and 24 UTC are
+    # 2 am, 8 am, 2 pm and 8 pm New York daylight time.
+    RUNS = {
+        "D-1 16:00": (-1, 12, (6, 12, 18, 24)),
+        "D 08:00": (0, 6, (6, 12, 18, 24)),
+        "D 14:00": (0, 12, (12, 18, 24)),
+    }
 
     def aifs_day(day: dt.date) -> list[dict]:
         path = CACHE / "aifs" / f"{day:%Y%m%d}.json"
         if path.exists():
             return json.loads(path.read_text())
         rows = []
-        for offset, steps in STEPS.items():
+        for snapshot, (offset, hour, valid_hours) in RUNS.items():
             run = day + dt.timedelta(days=offset)
-            for step in steps:
+            for valid in valid_hours:
+                step = valid - offset * 24 - hour
                 rows.append(
                     {
                         "date": str(day),
-                        "run_offset": offset,
-                        "step": step,
-                        "t2m_f": aifs_point(run, step),
+                        "snapshot": snapshot,
+                        "valid_hour": valid,
+                        "t2m_f": aifs_point(run, hour, step),
                     }
                 )
         path.write_text(json.dumps(rows))
@@ -453,6 +463,7 @@ def _(CACHE, END, ET, IEM, MODEL_START, dt, get, pd):
     obs_day = pd.DataFrame(
         {
             "max_by_2pm": _before_2pm.groupby("date").tmpf.max(),
+            "minutes_by_2pm": _before_2pm.groupby("date").tmpf.count(),
             "temp_2pm": obs[(obs.time.dt.hour == 13) & (obs.time.dt.minute >= 50)]
             .groupby("date")
             .tmpf.mean(),
