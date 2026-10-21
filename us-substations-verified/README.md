@@ -64,7 +64,7 @@ within 1 km on Esri aerial imagery ([`hand_check.csv`](hand_check.csv), one line
 | substation | 7 | a switchyard OSM hasn't mapped, including two 500 kV yards (Anderson, TN; Pleasant Hill, MS) |
 | plant | 13 | a power plant's switchyard or powerhouse, mostly hydro dams (Grand Coulee, Bath County) |
 | tap | 15 | the line branches, turns or continues as another segment; no yard |
-| error | 13 | nothing there: 7 lines ending in wind farm fields, 1 at the demolished Breed plant, the rest in empty land |
+| error | 13 | nothing there: 7 lines ending in wind farm fields, 1 at the demolished Breed plant, 2 stopping 1.1–1.4 km short of an OSM substation, 3 in empty land |
 | unclear | 2 | a building compound with no visible switchyard |
 
 So 40% of the unconfirmed points are real grid nodes and 56% aren't. Scaled to all 180, about 100 of the 6,469
@@ -126,7 +126,7 @@ page in this repo shows the derived/OSM source of each point, which is the thing
 
 ## What this doesn't show
 
-- **OSM isn't ground truth.** It's volunteer-mapped; the hand check is the only ground truth here, and it
+- **OSM isn't ground truth or independent.** It's volunteer-mapped, and some US substations were imported into OSM from the old HIFLD layer, so part of the 97% match is a shared origin. The hand check is the only ground truth here, and it
   covers 50 points.
 - **Spare capacity, or cause.** As in the county spike: a substation isn't room on the grid, and nothing here
   says why counties restrict.
