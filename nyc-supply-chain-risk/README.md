@@ -19,7 +19,7 @@ PARCELS=my_parcels.csv ./run.sh    # your own parcels: CSV with name and bbl, or
 ```
 
 To read them as notebooks: `uv run marimo edit supply_chain_risk.py`, then `lifelines.py`. A clean run takes 6 to 17
-minutes (power 3 to 13, lifelines about 4), mostly retrying FEMA's flood map server, which drops about half its
+minutes (power 3 to 13, lifelines 4 to 7; 8.7 in total on a clean checkout), mostly retrying FEMA's flood map server, which drops about half its
 connections. If it gives up, run it again: every answer is cached in `data/` as it arrives.
 
 ## The data
