@@ -567,10 +567,10 @@ def _(candidates, hifld_points, layers, name_score, normalise):
 
 @app.cell
 def _(hifld, pairs):
-    # Best candidate per record and side: nearest name match if any, else nearest.
-    _ranked = pairs.sort_values(["name_match", "distance_m"], ascending=[False, True])
+    # Best candidate per record and side: nearest name match if any, else nearest (ties broken by ID).
+    _ranked = pairs.sort_values(["name_match", "distance_m", "id"], ascending=[False, True, True])
     _best = _ranked.drop_duplicates(["layer", "hifld_id", "side"])
-    _nearest = pairs.sort_values("distance_m").drop_duplicates(["layer", "hifld_id", "side"])
+    _nearest = pairs.sort_values(["distance_m", "id"]).drop_duplicates(["layer", "hifld_id", "side"])
     matches = hifld[
         ["layer", "hifld_id", "name", "address", "city", "state", "status", "source_date", "lon", "lat"]
     ].copy()
@@ -599,7 +599,7 @@ def _(building_candidates, hifld, matches):
     _dy = np.maximum.reduce([_b["bymin"] - _b["lat"], np.zeros(len(_b)), _b["lat"] - _b["bymax"]]) * 110_540
     _b["building_distance_m"] = np.hypot(_dx, _dy).round(1)
     _b["box_area_m2"] = (_b["bxmax"] - _b["bxmin"]) * _kx * (_b["bymax"] - _b["bymin"]) * 110_540
-    _best = _b.sort_values(["building_distance_m", "box_area_m2"]).drop_duplicates(["layer", "hifld_id"])
+    _best = _b.sort_values(["building_distance_m", "box_area_m2", "building_id"]).drop_duplicates(["layer", "hifld_id"])
     _best = _best[_best["building_distance_m"] <= 50]
     # OSM-sourced buildings carry the OSM element as record_id, for example "w123456@7" (way 123456, version 7).
     _record = _best["building_record"].fillna("").str.extract(r"^([nwr])(\d+)@")
@@ -824,6 +824,7 @@ def _(crosswalk, layers):
     crosswalk["missing_from_osm"] = _not_in("osm")
     crosswalk["missing_from_overture"] = _not_in("overture")
     contribute = crosswalk.groupby("layer")[["missing_from_osm", "missing_from_overture"]].sum().loc[layers.index]
+    contribute.to_csv(OUT / "missing_from.csv")
     mo.ui.table(contribute, selection=None)
     return (contribute,)
 
