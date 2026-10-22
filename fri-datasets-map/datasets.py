@@ -304,44 +304,80 @@ def _(mo):
     `hurloss-public-rebuild/` built an open layer instead: FEMA's documented equations with no
     factor of 2, on two public storm catalogues, with Knutson et al.'s projected changes. Its
     range spans both catalogues and every published Knutson percentile. Its comparison table
-    covers the 2,219 counties where FEMA published a hurricane multiplier; we add a flag for
-    FEMA's ~2.0 band (1.9 to 2.1). Between 615 and 643 of them sit at FEMA's floor of 1; of the
-    rest, 95-97% are in the band in three scenarios, and about a third in late century, higher
+    covers the 2,219 counties where FEMA rated hurricane loss today.
+
+    That table floors FEMA's value at 1 for its own comparison, so it shows 1 where FEMA's
+    datasheet has 0, the code FEMA uses for "No Rating" (`HRCN_<scenario>_DELTAR`). We take
+    `fema_hm` straight from the datasheet instead, keep the table's value as `fema_hm_floored`,
+    and flag the No Rating counties: between 614 and 640 of the 2,219, depending on the
+    scenario. We also flag FEMA's ~2.0 band (1.9 to 2.1). Of the rated counties above 1,
+    95-97% are in the band in three scenarios, and about a third in late century, higher
     warming, where FEMA's values spread upward.
     """)
     return
 
 
 @app.cell
-def _(hurloss_results, pd):
+def _(hurloss_results, key, pd):
     _table = pd.read_csv(
         hurloss_results / "layer" / "fri_comparison_by_county.csv", dtype={"STCOFIPS": str}
     )
-    hurricane = _table.rename(columns={"STCOFIPS": "fips"})[
+    hurricane = _table.rename(columns={"STCOFIPS": "fips", "fema_hm": "fema_hm_floored"})
+    _scenarios = hurricane["scenario"].unique()
+    _sheet = pd.DataFrame(
+        {
+            "fema_hm": key[[f"HRCN_{s}_HM" for s in _scenarios]]
+            .set_axis(_scenarios, axis=1)
+            .stack(),
+            "fema_no_rating": key[[f"HRCN_{s}_DELTAR" for s in _scenarios]]
+            .set_axis(_scenarios, axis=1)
+            .stack()
+            .eq("No Rating"),
+        }
+    ).rename_axis(["fips", "scenario"])
+    hurricane = hurricane.join(_sheet, on=["fips", "scenario"], validate="one_to_one")
+    assert (hurricane["fema_no_rating"] == (hurricane["fema_hm"] == 0)).all(), (
+        "FEMA's 0 should mean No Rating, and only that"
+    )
+    _gap = (hurricane["fema_hm_floored"] - hurricane["fema_hm"].clip(lower=1)).abs()
+    assert (_gap <= 5e-6 + 1e-12).all(), (
+        "the hurloss table should differ from the datasheet only by the floor at 1"
+        " and rounding to 5 decimals"
+    )
+    hurricane = hurricane.assign(
+        fema_within_our_range=hurricane["fema_within_our_range"].where(
+            ~hurricane["fema_no_rating"]
+        ),
+        fema_in_2_band=hurricane["fema_hm"].between(1.9, 2.1),
+    )[
         [
             "fips",
             "state",
             "county",
             "scenario",
             "fema_hm",
+            "fema_no_rating",
+            "fema_hm_floored",
             "our_hm",
             "our_hm_low",
             "our_hm_high",
             "our_covered",
             "fema_within_our_range",
+            "fema_in_2_band",
         ]
     ]
-    hurricane = hurricane.assign(fema_in_2_band=hurricane["fema_hm"].between(1.9, 2.1))
     assert hurricane["fips"].nunique() == 2219, "the comparison should cover 2,219 counties"
     hurricane.assign(
-        above_floor=hurricane["fema_hm"] > 1,
-        in_band_above_floor=hurricane["fema_in_2_band"].where(hurricane["fema_hm"] > 1),
+        above_1=hurricane["fema_hm"] > 1,
+        in_band_above_1=hurricane["fema_in_2_band"].where(hurricane["fema_hm"] > 1),
     ).groupby("scenario", sort=False).agg(
         counties=("fips", "count"),
-        fema_median=("fema_hm", "median"),
+        fema_no_rating=("fema_no_rating", "sum"),
+        fema_at_1=("fema_hm", lambda hm: (hm == 1).sum()),
+        fema_above_1=("above_1", "sum"),
+        fema_median_rated=("fema_hm", lambda hm: hm[hm > 0].median()),
         ours_median=("our_hm", "median"),
-        fema_above_floor=("above_floor", "sum"),
-        fema_in_2_band_above_floor=("in_band_above_floor", "mean"),
+        fema_in_2_band_above_1=("in_band_above_1", "mean"),
         fema_within_our_range=("fema_within_our_range", "mean"),
     ).round(3)
     return (hurricane,)

@@ -21,7 +21,7 @@ the licence.
 |---|---|
 | [`data/multipliers_by_county.csv`](data/multipliers_by_county.csv) | FEMA's and our multipliers for drought, wildfire, extreme heat (LOCA2 and NEX, 95th and 99th) and coastal flooding: 3,231 counties × 7 × 4 scenarios, with the held-out flag |
 | [`data/coastal_flags.csv`](data/coastal_flags.csv) | The 120 coastal zeros and 17 values below 1, with NRI v1.18.1 losses |
-| [`data/hurricane_by_county.csv`](data/hurricane_by_county.csv) | FEMA's hurricane multipliers next to our open layer (central and range), 2,219 counties |
+| [`data/hurricane_by_county.csv`](data/hurricane_by_county.csv) | FEMA's hurricane multipliers as published (0 = No Rating) next to our open layer (central and range), 2,219 counties |
 | [`data/baseline_scores.csv`](data/baseline_scores.csv) | The constant baseline per hazard, against the rebuild and the Draft job's figures |
 | [`data/counties.parquet`](data/counties.parquet) | All of it, one row per county, with Census 2020 shapes (GeoParquet) |
 | [`map/`](map/) | The map: [`map/src/fri-map.ts`](map/src/fri-map.ts), built to `map/dist/fri-map.js`, reading `map/data/counties.geojson` |
@@ -50,16 +50,22 @@ county service. That is one county off the 70 / 50 reported on #42, whose code i
 committed; the third-party copy the coastal notebook uses also gives 49. Of the 17 below 1,
 8 had v1.18.1 loss.
 
-**Hurricane.** Between 615 and 643 of the 2,219 counties sit at FEMA's floor of 1, depending on the scenario. Of
-the rest, 95-97% are between 1.9 and 2.1 in three scenarios and 32% in late century, higher
-warming. Our central multipliers have medians of 1.02-1.06.
+**Hurricane.** FEMA gives 640 of the 2,219 counties a multiplier of 0, "No Rating", in three
+scenarios and 614 in late century, higher warming (`fema_no_rating`; the map's popup says No
+Rating). The hurloss table shows these as 1, floored for its own comparison; that value is kept
+as `fema_hm_floored`. Of the counties above 1, 95-97% are between 1.9 and 2.1 in three
+scenarios and 32% in late century, higher warming. Our central multipliers have medians of
+1.015-1.065.
 
 **The map** has a hazard and scenario picker, shows FEMA's value, ours or the ratio, and has a
-popup with both values (and our range for hurricane). Two toggles outline the coastal flags and
+popup with both values (and our range for hurricane). Where FEMA's multiplier is 0, FEMA's
+code for No Rating (coastal flooding and hurricane), the popup says "No Rating". Two toggles outline the coastal flags and
 FEMA's 1.9-2.1 hurricane band and fade every other county. Served from jsDelivr, it was ready
 2.7 s after page load in headless Chromium. The data file is 5.0 MB, about 1 MB compressed.
 
 ![Coastal zeros and values below 1 highlighted](screenshots/coastal_zeros.png)
+
+![A hurricane No Rating county's popup](screenshots/hurricane_no_rating_popup.png)
 
 ## Embed it
 

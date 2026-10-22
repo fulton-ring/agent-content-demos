@@ -34,7 +34,7 @@ def _():
     from rasterio.warp import transform_bounds
     from rasterio.windows import Window, from_bounds
     from scipy import ndimage
-    from shapely.geometry import LineString, Point, Polygon, box, shape
+    from shapely.geometry import LineString, MultiPoint, Point, Polygon, box, shape
     from shapely.ops import linemerge, unary_union
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
@@ -42,9 +42,7 @@ def _():
     started = time.time()
     default_cache = Path.home() / ".cache" / "flash-flood-warning-addresses"
     cache = Path(os.environ.get("FFW_CACHE", default_cache))
-    results = Path(os.environ.get("FFW_RESULTS", Path(mo.notebook_dir() or ".") / "results"))
     cache.mkdir(parents=True, exist_ok=True)
-    results.mkdir(parents=True, exist_ok=True)
     UTM = "EPSG:26916"  # NAD83 / UTM 16N, the CRS of the 1 m DEM; all distances are in metres
     return (
         Affine,
@@ -52,6 +50,7 @@ def _():
         Path,
         disjoint_bounds,
         LineString,
+        MultiPoint,
         Point,
         Polygon,
         UTM,
@@ -69,13 +68,13 @@ def _():
         mo,
         ndimage,
         np,
+        os,
         pd,
         plt,
         rasterio,
         rasterize,
         re,
         requests,
-        results,
         shape,
         started,
         time,
@@ -112,7 +111,49 @@ def _(mo):
     not its overall accuracy.
 
     Every input is public and is downloaded when the notebook runs. Each one predates the storm.
+
+    **Two towns.** Lanesville has only 11 distinct observed spots, so one cluster of survey points
+    moves its totals by three. Corydon, 13 km west and inside the same polygon, is a second test:
+    Little Indian Creek carried Lanesville's runoff into its downtown. The notebook runs one
+    town at a time, chosen with `FFW_SITE` (`lanesville` by default, or `corydon`), and
+    `run.sh` runs both.
     """)
+
+
+@app.cell
+def _(Path, cache, mo, os):
+    SITES = {
+        "lanesville": {
+            "name": "Lanesville",
+            "geoid": "1842048",  # Census place "Lanesville town", Indiana
+            "area": (-86.02, 38.21, -85.94, 38.27),  # study box, lon/lat
+            # Named flood places: an Indiana address-point query each. A query that matches
+            # several points (a whole street) makes one place made of all of them.
+            "named": [
+                ("Methodist church", "add_number=2575 AND UPPER(st_name) LIKE '%JOHNS CHURCH%'"),
+                ("School track and ball field", "add_number=2725 AND UPPER(st_name) LIKE '%CRESTVIEW%'"),
+            ],
+        },
+        "corydon": {
+            "name": "Corydon",
+            "geoid": "1815256",  # Census place "Corydon town", Indiana
+            "area": (-86.165, 38.19, -86.085, 38.255),
+            "named": [
+                ("The Alibi Bar", "add_number=115 AND UPPER(st_name) LIKE '%POPLAR%'"),
+                ("Hey Elmer Print and Design", "add_number=133 AND UPPER(st_name) LIKE '%CHESTNUT%'"),
+                ("Summit Springs subdivision", "UPPER(st_name)='CRESCENT HILL'"),
+            ],
+        },
+    }
+    SITE = os.environ.get("FFW_SITE", "lanesville")
+    assert SITE in SITES, f"FFW_SITE must be one of {list(SITES)}"
+    site = SITES[SITE]
+    site_cache = cache / SITE  # rasters cut to this site's study box
+    results = Path(os.environ.get("FFW_RESULTS", Path(mo.notebook_dir() or ".") / "results")) / SITE
+    site_cache.mkdir(parents=True, exist_ok=True)
+    results.mkdir(parents=True, exist_ok=True)
+    mo.md(f"**Site: {site['name']}.** Results go to `{results}`.")
+    return SITE, results, site, site_cache
 
 
 @app.cell
@@ -189,12 +230,14 @@ def _(mo):
     ## 2. The answer key
 
     The NWS Louisville flood survey KMZ has one point per surveyed flood location. The points
-    carry times and an event id but no depths. Thirteen points are tagged `Lanesville2026`.
-    One of them sits in Corydon, 13 km west, so we drop it and keep the 12 that are in
-    Lanesville.
+    carry times and an event id but no depths. Its 21 points form two clusters: 12 in
+    Lanesville and 9 in downtown Corydon. One of the Corydon points is tagged
+    `Lanesville2026`, so we go by location: a town's survey points are the ones inside its
+    study box.
 
-    We add the named places from local storm reports and news, geocoded to Indiana address
-    points:
+    We add named places from local storm reports and news, geocoded to Indiana address points.
+
+    **Lanesville:**
 
     - Lanesville United Methodist Church, 2575 St Johns Church Rd NE. The LSR says it "shifted
       off its foundation", and WLKY says its fellowship hall did.
@@ -203,11 +246,23 @@ def _(mo):
       both.
     - State Road 62, "blocked at the Floyd County line" (WDRB). No location was reported, so we
       use where TIGER's SR 62 crosses the county line. That point is computed, not observed.
+
+    **Corydon:**
+
+    - The Alibi Bar, 115 E Poplar St, and Hey Elmer Print and Design, 133 E Chestnut St. WDRB
+      and WAVE name both as flooded downtown businesses.
+    - The Summit Springs subdivision. The LSR reads "Flooding in Summit Springs subdivision in
+      Corydon, IN", at a point rounded to 0.01°. Real estate listings place Summit Springs on
+      Crescent Hill Dr NE, just north of the town limits, and the Harrison Township Fire
+      Department reported rescues "in the Crescent Hill Drive subdivision". The report doesn't
+      say which houses flooded, so the place is all 83 address points on that street. It
+      counts as found if any of them is. That is generous, and the random baseline below
+      allows for it.
     """)
 
 
 @app.cell
-def _(Point, arcgis, cache, fetch, gpd, pd, re, zipfile):
+def _(MultiPoint, Point, SITE, arcgis, cache, fetch, gpd, pd, re, site, zipfile):
     fetch(
         "https://www.weather.gov/source/lmk/DamageKMZ/2026/flood_survey06092026.kmz",
         cache / "survey.kmz",
@@ -220,51 +275,56 @@ def _(Point, arcgis, cache, fetch, gpd, pd, re, zipfile):
         _lon, _lat = map(float, re.search(r"<coordinates>(.*?)</coordinates>", _pm).group(1).split(",")[:2])
         _rows.append({"event_id": _attrs["event_id"].strip(), "time": _attrs["Event Date"], "lon": _lon, "lat": _lat})
     survey = gpd.GeoDataFrame(_rows, geometry=[Point(r["lon"], r["lat"]) for r in _rows], crs="EPSG:4326")
-    tagged = survey[survey.event_id == "Lanesville2026"]
-    # The Lanesville town limits run from about -85.996 to -85.972; anything west of -86.05 is Corydon.
-    survey_lanesville = tagged[tagged.lon > -86.05]
-    print(f"{len(survey)} survey points; {len(tagged)} tagged Lanesville2026; {len(survey_lanesville)} in Lanesville")
+    _w, _s, _e, _n = site["area"]
+    survey_site = survey[survey.lon.between(_w, _e) & survey.lat.between(_s, _n)]
+    print(f"{len(survey)} survey points; {len(survey_site)} in the {site['name']} study box")
+    print(survey_site.event_id.value_counts().to_string())
 
     _addr = "https://gisdata.in.gov/server/rest/services/Hosted/Address_Points_of_Indiana_2025/FeatureServer/0"
     _named = []
-    for _label, _where in [
-        ("Methodist church", "add_number=2575 AND UPPER(st_name) LIKE '%JOHNS CHURCH%' AND county_fips='18061'"),
-        (
-            "School track and ball field",
-            "add_number=2725 AND UPPER(st_name) LIKE '%CRESTVIEW%' AND county_fips='18061'",
-        ),
-    ]:
+    for _label, _where in site["named"]:
         _hit = arcgis(
-            _addr, {"where": _where, "outFields": "geofulladdress,latitude,longitude", "returnGeometry": "false"}
+            _addr,
+            {
+                "where": f"{_where} AND county_fips='18061'",
+                "outFields": "geofulladdress,latitude,longitude",
+                "returnGeometry": "false",
+            },
+        )["features"]
+        assert 1 <= len(_hit) < 1000, f"{_label}: expected address points, got {len(_hit)}"
+        _pts = [Point(f["attributes"]["longitude"], f["attributes"]["latitude"]) for f in _hit]
+        _named.append(
+            {
+                "place": _label,
+                "source": _hit[0]["attributes"]["geofulladdress"]
+                + (f" and {len(_hit) - 1} more" if len(_hit) > 1 else ""),
+                "geometry": _pts[0] if len(_pts) == 1 else MultiPoint(_pts),
+            }
         )
-        assert len(_hit["features"]) == 1, f"{_label}: expected one address point"
-        _a = _hit["features"][0]["attributes"]
-        _named.append({"place": _label, "source": _a["geofulladdress"], "lon": _a["longitude"], "lat": _a["latitude"]})
 
-    fetch("https://www2.census.gov/geo/tiger/TIGER2025/ROADS/tl_2025_18061_roads.zip", cache / "roads_18061.zip")
-    fetch("https://www2.census.gov/geo/tiger/TIGER2025/COUNTY/tl_2025_us_county.zip", cache / "counties.zip")
-    _counties = gpd.read_file(cache / "counties.zip", where="STATEFP='18' AND COUNTYFP IN ('043','061')")
-    _line = (
-        _counties[_counties.COUNTYFP == "061"]
-        .boundary.iloc[0]
-        .intersection(_counties[_counties.COUNTYFP == "043"].boundary.iloc[0])
-    )
-    _harrison_roads = gpd.read_file(cache / "roads_18061.zip").to_crs(_counties.crs)
-    _sr62 = _harrison_roads[_harrison_roads.FULLNAME.isin(["State Rd 62", "Hwy 62 NE", "Hwy 62 NW"])]
-    _hits = _sr62.union_all().intersection(_line)
-    _cross = min(getattr(_hits, "geoms", [_hits]), key=lambda p: p.distance(Point(-85.98, 38.24)))
-    _named.append(
-        {"place": "SR 62 at Floyd County line", "source": "computed from TIGER 2025", "lon": _cross.x, "lat": _cross.y}
-    )
+    if SITE == "lanesville":  # SR 62's closure point was never reported; use the county-line crossing
+        fetch("https://www2.census.gov/geo/tiger/TIGER2025/ROADS/tl_2025_18061_roads.zip", cache / "roads_18061.zip")
+        fetch("https://www2.census.gov/geo/tiger/TIGER2025/COUNTY/tl_2025_us_county.zip", cache / "counties.zip")
+        _counties = gpd.read_file(cache / "counties.zip", where="STATEFP='18' AND COUNTYFP IN ('043','061')")
+        _line = (
+            _counties[_counties.COUNTYFP == "061"]
+            .boundary.iloc[0]
+            .intersection(_counties[_counties.COUNTYFP == "043"].boundary.iloc[0])
+        )
+        _harrison_roads = gpd.read_file(cache / "roads_18061.zip").to_crs(_counties.crs)
+        _sr62 = _harrison_roads[_harrison_roads.FULLNAME.isin(["State Rd 62", "Hwy 62 NE", "Hwy 62 NW"])]
+        _hits = _sr62.union_all().intersection(_line)
+        _cross = min(getattr(_hits, "geoms", [_hits]), key=lambda p: p.distance(Point(-85.98, 38.24)))
+        _named.append({"place": "SR 62 at Floyd County line", "source": "computed from TIGER 2025", "geometry": _cross})
     named = pd.DataFrame(_named)
 
     _obs = [
-        {"place": f"Survey {r.time[11:16]} UTC", "kind": "survey", "lon": r.lon, "lat": r.lat}
-        for r in survey_lanesville.itertuples()
-    ] + [{"place": r.place, "kind": "named", "lon": r.lon, "lat": r.lat} for r in named.itertuples()]
-    observed = gpd.GeoDataFrame(_obs, geometry=[Point(o["lon"], o["lat"]) for o in _obs], crs="EPSG:4326")
-    named
-    return observed, survey, survey_lanesville, tagged
+        {"place": f"Survey {r.time[11:16]} UTC", "kind": "survey", "geometry": r.geometry}
+        for r in survey_site.itertuples()
+    ] + [{"place": r.place, "kind": "named", "geometry": r.geometry} for r in named.itertuples()]
+    observed = gpd.GeoDataFrame(_obs, geometry="geometry", crs="EPSG:4326")
+    named[["place", "source"]]
+    return observed, survey, survey_site
 
 
 @app.cell
@@ -273,27 +333,32 @@ def _(mo):
     ## 3. What sits inside the warning
 
     We count structures (FEMA/ORNL USA Structures), Indiana address points (IGIO's 2025
-    release) and TIGER 2025 road segments inside the polygon, and inside Lanesville's Census
-    town boundary. The structure and address counts come from the services' own spatial
-    queries. Indiana's address layer stops at the state line, so it leaves out the Jefferson
-    County, Kentucky part of the warning, which is most of Louisville.
+    release) and TIGER 2025 road segments inside the polygon, and inside the town's Census
+    boundary. Corydon's boundary has two parts, the town and a small detached piece east of it.
+    The structure and address counts come from the services' own spatial queries. Indiana's
+    address layer stops at the state line, so it leaves out the Jefferson County, Kentucky part
+    of the warning, which is most of Louisville.
     """)
 
 
 @app.cell
-def _(Polygon, arcgis, cache, fetch, gpd, json, pd, warning):
+def _(Polygon, arcgis, cache, fetch, gpd, json, pd, site, unary_union, warning):
     _place = arcgis(
         "https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/Places_CouSub_ConCity_SubMCD/MapServer/4",
-        {"where": "GEOID='1842048'", "outFields": "NAME", "outSR": "4326"},
+        {"where": f"GEOID='{site['geoid']}'", "outFields": "NAME", "outSR": "4326"},
     )
-    assert len(_place["features"]) == 1, "expected one Lanesville boundary"
-    town = Polygon(_place["features"][0]["geometry"]["rings"][0])
+    assert len(_place["features"]) == 1, f"expected one {site['name']} boundary"
+    # ArcGIS rings run clockwise for outer boundaries and counter-clockwise for holes.
+    _rings = [Polygon(r) for r in _place["features"][0]["geometry"]["rings"]]
+    town = unary_union([r for r in _rings if not r.exterior.is_ccw]).difference(
+        unary_union([r for r in _rings if r.exterior.is_ccw])
+    )
 
     _structures = (
         "https://services2.arcgis.com/FiaPA4ga0iQKduv3/ArcGIS/rest/services/USA_Structures_View/FeatureServer/0"
     )
     _addresses = "https://gisdata.in.gov/server/rest/services/Hosted/Address_Points_of_Indiana_2025/FeatureServer/0"
-    for _fips in ["18043", "21111"]:
+    for _fips in ["18061", "18043", "21111"]:
         fetch(
             f"https://www2.census.gov/geo/tiger/TIGER2025/ROADS/tl_2025_{_fips}_roads.zip", cache / f"roads_{_fips}.zip"
         )
@@ -302,7 +367,8 @@ def _(Polygon, arcgis, cache, fetch, gpd, json, pd, warning):
     )
 
     def _count(layer: str, area: Polygon) -> int:
-        _geom = json.dumps({"rings": [list(area.exterior.coords)], "spatialReference": {"wkid": 4326}})
+        _parts = getattr(area, "geoms", [area])
+        _geom = json.dumps({"rings": [list(p.exterior.coords) for p in _parts], "spatialReference": {"wkid": 4326}})
         _body = arcgis(
             layer,
             {
@@ -324,7 +390,7 @@ def _(Polygon, arcgis, cache, fetch, gpd, json, pd, warning):
                 "address points (Indiana only)": _count(_addresses, poly),
                 "road segments": int(_roads.intersects(poly).sum()),
             }
-            for area, poly in [("whole warning", _warning_poly), ("Lanesville town", town)]
+            for area, poly in [("whole warning", _warning_poly), (f"{site['name']} town", town)]
         }
     )
     inside
@@ -336,9 +402,11 @@ def _(mo):
     mo.md(r"""
     ## 4. The study area and its layers
 
-    We rank everything in a 7 × 6.7 km box around Lanesville: the town plus its surroundings,
-    including SR 62 out to the county line. We also rank inside the town limits alone. The
-    layers:
+    We rank everything in a box about 7 km across around the town: the town plus its
+    surroundings, including SR 62 out to the county line for Lanesville and the Summit Springs
+    subdivision for Corydon. We also rank inside the town limits alone. Both towns are in the
+    same HUC8 watershed, 05140104 (Blue-Sinking), so they share one NHD file and one set of OWP
+    rasters. The layers:
 
     - **Structures:** USA Structures footprints, which come from imagery (production date 2020).
     - **Streams:** NHD High Resolution flowlines for HUC8 05140104 (2023). Indiana's NHD is
@@ -351,8 +419,8 @@ def _(mo):
 
 
 @app.cell
-def _(UTM, arcgis, box, cache, fetch, gpd, pd, shape, zipfile):
-    AREA = (-86.02, 38.21, -85.94, 38.27)
+def _(UTM, arcgis, box, cache, fetch, gpd, pd, shape, site, zipfile):
+    AREA = site["area"]
     _env = {
         "geometry": ",".join(map(str, AREA)),
         "geometryType": "esriGeometryEnvelope",
@@ -413,6 +481,9 @@ def _(UTM, arcgis, box, cache, fetch, gpd, pd, shape, zipfile):
 
     roads = gpd.read_file(cache / "roads_18061.zip", bbox=AREA).to_crs(UTM)
     area_utm = gpd.GeoSeries([box(*AREA)], crs="EPSG:4326").to_crs(UTM).iloc[0]
+    _x0, _y0, _x1, _y1 = area_utm.bounds
+    area_label = f"{site['name']} area ({(_x1 - _x0) / 1000:.0f} x {(_y1 - _y0) / 1000:.1f} km)"
+    print(area_label)
     print(
         pd.Series(
             {
@@ -425,7 +496,7 @@ def _(UTM, arcgis, box, cache, fetch, gpd, pd, shape, zipfile):
             }
         ).to_string()
     )
-    return AREA, area_utm, bridges, roads, streams, structures
+    return AREA, area_label, area_utm, bridges, roads, streams, structures
 
 
 @app.cell
@@ -436,7 +507,8 @@ def _(mo):
     The 3DEP 1 m DEM here comes from Indiana's 2017 statewide QL2 lidar. It's a bare-earth
     model: buildings and bridge decks are removed, but road fill over culverts stays.
 
-    We read the four tiles over the study area straight from USGS's cloud-optimized GeoTIFFs.
+    We read the tiles over the study area straight from USGS's cloud-optimized GeoTIFFs. The
+    tiles are 10 km squares named by their UTM corner, so the names follow from the box.
     WhiteboxTools (the `whitebox-workflows` wheel) then conditions the DEM in three steps:
 
     1. `burn_streams_at_roads` cuts the NHD streams through road embankments, standing in for
@@ -457,25 +529,29 @@ def _(mo):
 def _(
     AREA,
     UTM,
-    cache,
     log,
+    math,
     merge,
     np,
     rasterio,
     rasterize,
     roads,
+    site_cache,
     streams,
     transform_bounds,
     wbw,
 ):
-    _dem_path, _out = cache / "dem_1m.tif", {n: cache / f"{n}.tif" for n in ["hand", "above_creek", "sink"]}
+    _dem_path, _out = site_cache / "dem_1m.tif", {n: site_cache / f"{n}.tif" for n in ["hand", "above_creek", "sink"]}
     if not all(p.exists() for p in _out.values()):
         _base = (
             "/vsicurl/https://prd-tnm.s3.amazonaws.com/StagedProducts/Elevation/1m/Projects/"
             "IN_Indiana_Statewide_LiDAR_2017_B17/TIFF/USGS_1M_16_{0}_IN_Indiana_Statewide_LiDAR_2017_B17.tif"
         )
-        _srcs = [rasterio.open(_base.format(t)) for t in ["x58y424", "x59y424", "x58y423", "x59y423"]]
         _bounds = transform_bounds("EPSG:4326", UTM, AREA[0] - 0.01, AREA[1] - 0.005, AREA[2] + 0.01, AREA[3] + 0.005)
+        # Tile xNNyMMM spans easting NN0 km to NN0+10 km, and northing MMM0 km down to MMM0-10 km.
+        _xs = range(math.floor(_bounds[0] / 1e4), math.floor(_bounds[2] / 1e4) + 1)
+        _ys = range(math.ceil(_bounds[1] / 1e4), math.ceil(_bounds[3] / 1e4) + 1)
+        _srcs = [rasterio.open(_base.format(f"x{x}y{y}")) for x in _xs for y in _ys]
         _arr, _tr = merge(_srcs, bounds=_bounds, res=1.0, nodata=-9999.0)
         _prof = {
             "driver": "GTiff",
@@ -492,23 +568,23 @@ def _(
         with rasterio.open(_dem_path, "w", **_prof) as _d:
             _d.write(_arr.astype("float32"))
         _mask = rasterize(streams.geometry, out_shape=_arr.shape[1:], transform=_tr, all_touched=True)
-        with rasterio.open(cache / "streams.tif", "w", **{**_prof, "nodata": 0}) as _d:
+        with rasterio.open(site_cache / "streams.tif", "w", **{**_prof, "nodata": 0}) as _d:
             _d.write(_mask.astype("float32"), 1)
         for _name, _gdf in [("streams", streams), ("roads", roads)]:
             _flat = _gdf[["geometry"]].explode(ignore_index=True)
             _flat["geometry"] = _flat.geometry.force_2d()
             _flat["FID"] = range(len(_flat))
-            _flat.to_file(cache / f"{_name}.shp")
+            _flat.to_file(site_cache / f"{_name}.shp")
         log.info("conditioning the 1 m DEM with WhiteboxTools")
         _wbe = wbw.WbEnvironment()
         _wbe.verbose = False
         _h = _wbe.hydrology
         _raw = _wbe.read_raster(str(_dem_path))
-        _stream_raster = _wbe.read_raster(str(cache / "streams.tif"))
+        _stream_raster = _wbe.read_raster(str(site_cache / "streams.tif"))
         _culverts = _h.burn_streams_at_roads(
             dem=_raw,
-            streams=_wbe.read_vector(str(cache / "streams.shp")),
-            roads=_wbe.read_vector(str(cache / "roads.shp")),
+            streams=_wbe.read_vector(str(site_cache / "streams.shp")),
+            roads=_wbe.read_vector(str(site_cache / "roads.shp")),
             road_width=30.0,
         )
         _drained = _h.breach_depressions_least_cost(dem=_culverts, max_dist=100, fill_deps=True)
@@ -541,7 +617,6 @@ def _(mo):
     branches are composited for mapping. This release stores HAND as int16 millimetres. We
     checked that against CIROH's 2024 float32 copy, which reads 5.28 m where 4.9.9.0 reads 4292,
     and divide by 1000.
-
     """)
 
 
@@ -598,6 +673,7 @@ def _(mo):
 def _(
     LineString,
     Point,
+    box,
     bridges,
     dem,
     dem_transform,
@@ -626,6 +702,12 @@ def _(
             _keep.append(_i)
             _seen.append(_p)
     crossings = crossings.loc[_keep].reset_index(drop=True)
+    # Road segments run past the DEM's edge; keep crossings whose 40 m creek-bed check fits inside it.
+    _x0, _y1 = dem_transform * (0, 0)
+    _x1, _y0 = dem_transform * (dem.shape[1], dem.shape[0])
+    _inside = crossings.within(box(_x0, _y0, _x1, _y1).buffer(-50))
+    print(f"dropped {int((~_inside).sum())} crossings within 50 m of the DEM edge")
+    crossings = crossings[_inside].reset_index(drop=True)
 
     _inv = ~dem_transform
 
@@ -752,8 +834,8 @@ def _(mo):
     crossing is within 30 m, it can't be found at all. We count how many places land in the top
     25, 50 and 100 and report the median rank, both for the whole study area and for the town
     alone. The town ranking scores only the places inside the town, which leaves out SR 62 at
-    the county line. Candidates with no value (outside the OWP raster's coverage, for example)
-    rank last.
+    the county line (Lanesville) and the Summit Springs subdivision (Corydon). Candidates with
+    no value (outside the OWP raster's coverage, for example) rank last.
 
     **Random order** is the baseline: the number of places expected in the top *K* if the
     candidates were shuffled. A place with *m* candidates within 30 m, out of *N*, is in the
@@ -762,13 +844,13 @@ def _(mo):
 
 
 @app.cell
-def _(METHODS, UTM, candidates, gpd, math, np, observed, pd, town):
+def _(METHODS, UTM, area_label, candidates, gpd, math, np, observed, pd, site, town):
     _obs = observed.to_crs(UTM)
     _town_utm = gpd.GeoSeries([town], crs="EPSG:4326").to_crs(UTM).iloc[0]
     _rows, ranks = [], {}
     for _scope, _cands, _in in [
-        ("Lanesville area (7 x 6.7 km)", candidates, np.ones(len(_obs), bool)),
-        ("Lanesville town", candidates[candidates.in_town], _obs.within(_town_utm).to_numpy()),
+        (area_label, candidates, np.ones(len(_obs), bool)),
+        (f"{site['name']} town", candidates[candidates.in_town], _obs.within(_town_utm).to_numpy()),
     ]:
         _near = [_cands.index[_cands.distance(p) <= 30] if i else [] for p, i in zip(_obs.geometry, _in, strict=True)]
         _n = len(_cands)
@@ -818,6 +900,7 @@ def _(mo):
 @app.cell
 def _(
     METHODS,
+    area_label,
     UTM,
     candidates,
     dem_transform,
@@ -828,16 +911,18 @@ def _(
     pd,
     ranks,
     roads,
+    site,
     stream_distance,
     town,
 ):
     _obs = observed.to_crs(UTM)
     _town_utm = gpd.GeoSeries([town], crs="EPSG:4326").to_crs(UTM).iloc[0]
     _inv = ~dem_transform
-    _rc = [tuple(int(v) for v in (_inv * (p.x, p.y))[::-1]) for p in _obs.geometry]
-    _scope = "Lanesville town"
+    # Raster measures are taken at a place's centre (for a whole street, the middle of its points).
+    _rc = [tuple(int(v) for v in (_inv * (p.centroid.x, p.centroid.y))[::-1]) for p in _obs.geometry]
+    _scope = f"{site['name']} town"
     places = pd.DataFrame({"place": _obs.place, "kind": _obs.kind, "in town": _obs.within(_town_utm)})
-    places["area rank, 1 m HAND"] = ranks[("Lanesville area (7 x 6.7 km)", "hand_1m")]
+    places["area rank, 1 m HAND"] = ranks[(area_label, "hand_1m")]
     for _m, _label in METHODS.items():
         places[f"town rank, {_label}"] = ranks[(_scope, _m)]
     _near = [candidates[candidates.in_town & (candidates.distance(p) <= 30)] for p in _obs.geometry]
@@ -867,11 +952,43 @@ def _(
 @app.cell
 def _(mo):
     mo.md(r"""
+    ### Why the 1 m and 10 m rankings disagree
+
+    The two HAND products measure height above different streams. Our 1 m HAND uses every kept
+    NHD High Resolution flowline, most of them small unnamed channels. OWP builds its HAND on
+    the National Water Model's coarser network. For each ranking's top 25 in town, we count how
+    many sit nearest a named creek and show the median of the *other* product's HAND.
+    """)
+
+
+@app.cell
+def _(candidates, np, pd, streams):
+    _town = candidates[candidates.in_town]
+    _named = streams[streams.gnis_name.notna()]
+    _rows = {}
+    for _m, _other in [("hand_1m", "hand_owp_10m"), ("hand_owp_10m", "hand_1m")]:
+        _top = _town[_town[_m].rank(method="average") <= 25]
+        _to_named = np.array([_named.distance(g).min() for g in _top.geometry])
+        _to_any = np.array([streams.distance(g).min() for g in _top.geometry])
+        _rows[f"top 25 by {_m}"] = {
+            "nearest stream is a named creek": int((_to_named <= _to_any).sum()),
+            "median 1 m HAND (m)": round(float(_top.hand_1m.median()), 1),
+            "median 10 m OWP HAND (m)": round(float(_top.hand_owp_10m.median()), 1),
+        }
+    network = pd.DataFrame(_rows)
+    print(f"{int(streams.gnis_name.isna().sum())} of {len(streams)} kept flowlines in the study area are unnamed")
+    network
+    return (network,)
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
     ## 10. Map
 
-    Left: the warning polygon and the Lanesville study area. Right: Lanesville's structures,
-    with the 100 that rank first by 1 m HAND in the town ranking shaded dark, the streams, and
-    the observed flood places.
+    Left: the warning polygon and the study area. Right: the town's structures, with the 100
+    that rank first by 1 m HAND in the town ranking shaded dark, the streams, and the observed
+    flood places. A named place made of a whole street is outlined in orange.
     """)
 
 
@@ -885,6 +1002,7 @@ def _(
     observed,
     plt,
     results,
+    site,
     streams,
     survey,
     town,
@@ -894,25 +1012,29 @@ def _(
     gpd.GeoSeries([warning], crs="EPSG:4326").plot(ax=_a0, facecolor="#fde2e2", edgecolor="#b91c1c")
     _a0.add_patch(plt.Rectangle((AREA[0], AREA[1]), AREA[2] - AREA[0], AREA[3] - AREA[1], fill=False, lw=1.5))
     survey.plot(ax=_a0, color="#1d4ed8", markersize=8)
-    _a0.annotate("Lanesville", (AREA[0], AREA[3]), xytext=(0, 4), textcoords="offset points")
+    _a0.annotate(site["name"], (AREA[0], AREA[3]), xytext=(0, 4), textcoords="offset points")
     _a0.annotate("Louisville", (-85.76, 38.25))
-    _a0.annotate("Corydon", (-86.13, 38.21), xytext=(0, 4), textcoords="offset points")
     _a0.set_title("LMK FF.W.0021, 10:22 AM EDT polygon")
 
     _town = gpd.GeoSeries([town], crs="EPSG:4326").to_crs(UTM)
-    _t = _town.buffer(500).total_bounds
+    _o = observed.to_crs(UTM)
+    _near_town = _o[_o.distance(_town.iloc[0]) < 1500]  # widen the view to take in places just outside town
+    _t = gpd.GeoSeries([_town.buffer(500).union_all(), _near_town.buffer(200).union_all()]).total_bounds
     _tc = candidates[candidates.in_town]
     _top = set(_tc.hand_1m.rank(method="min").loc[lambda s: s <= 100].index)
     _s = candidates[candidates.kind == "structure"]
     _s.plot(ax=_a1, color=["#7f1d1d" if i in _top else "#d6d3d1" for i in _s.index], linewidth=0)
     streams.clip(area_utm).plot(ax=_a1, color="#60a5fa", linewidth=0.8)
     _town.boundary.plot(ax=_a1, color="#444", linewidth=0.8, linestyle="--")
-    _o = observed.to_crs(UTM)
     _o[_o.kind == "survey"].plot(ax=_a1, color="#1d4ed8", markersize=40, marker="o", edgecolor="white", zorder=5)
-    _o[_o.kind == "named"].plot(ax=_a1, color="#f59e0b", markersize=80, marker="*", edgecolor="black", zorder=5)
+    _single = (_o.kind == "named") & (_o.geom_type == "Point")
+    _o[_single].plot(ax=_a1, color="#f59e0b", markersize=80, marker="*", edgecolor="black", zorder=5)
+    _street = _o[(_o.kind == "named") & ~_single]
+    if len(_street):
+        _street.convex_hull.buffer(30).boundary.plot(ax=_a1, color="#f59e0b", linewidth=2, zorder=5)
     _a1.set_xlim(_t[0], _t[2])
     _a1.set_ylim(_t[1], _t[3])
-    _a1.set_title("Lanesville: top 100 by 1 m HAND (dark red), survey points (blue), named places (star)")
+    _a1.set_title(f"{site['name']}: top 100 by 1 m HAND (dark red), survey points (blue), named places (orange)")
     for _ax in (_a0, _a1):
         _ax.set_xticks([])
         _ax.set_yticks([])
@@ -961,15 +1083,16 @@ def _(
     gpd,
     inside,
     json,
+    network,
     np,
     observed,
     owp_layers,
     places,
     results,
     scores,
+    site,
     started,
-    survey_lanesville,
-    tagged,
+    survey_site,
     time,
     town,
     warning_sqmi,
@@ -987,8 +1110,8 @@ def _(
         "warning_sq_mi": round(float(warning_sqmi), 1),
         "warning_named_locations": " ".join(warning_towns.split()),
         "inside_counts": inside.to_dict(),
-        "survey_points_tagged_lanesville": len(tagged),
-        "survey_points_in_lanesville": len(survey_lanesville),
+        "site": site["name"],
+        "survey_points_in_study_area": len(survey_site),
         "observed_places": len(observed),
         "observed_sites_30m_apart": len(_sites),
         "owp_branches_used": len(owp_layers),
@@ -1000,6 +1123,7 @@ def _(
         "town_crossings_blocked_in_dem": int(_tx.blocked_in_dem.sum()),
         "scores": scores.replace({np.nan: None}).to_dict(orient="records"),
         "outcomes_1m_hand_town": places["1 m HAND outcome (town)"].value_counts().to_dict(),
+        "top_25_town_by_hand": network.to_dict(),
         "methods": list(METHODS.values()),
         "run_seconds": round(time.time() - started),
         "cost_usd": 0,
