@@ -3,7 +3,7 @@
 Spike [#62](../nyc-supply-chain-risk/) mapped Brooklyn's power supply chain with FEMA's method. It keeps the graph in
 pandas and NetworkX inside a notebook. Issue [#65](https://github.com/fulton-ring/agent-content-demos/issues/65)
 asks two things. Would a graph database do it better? And can someone who doesn't run Python use it? This spike loads
-#62's graph and its 275,864 lots into four stores, checks every answer against #62's, and measures them. Then it builds
+#62's graph and its 275,864 lots into five stores, checks every answer against #62's, and measures them. Then it builds
 a small web app where you type an address or a BBL and see what powers the parcel.
 
 - [`graph_store.py`](graph_store.py), a marimo notebook read top to bottom: the comparison and the recommendation.

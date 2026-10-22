@@ -42,7 +42,7 @@ def _():
     each with its flood zone, National Risk Index ratings and a public source. It keeps the graph in pandas tables and
     NetworkX. Issue [#65](https://github.com/fulton-ring/agent-content-demos/issues/65) asks two things:
 
-    1. **Would a graph database do this better?** We load the same nodes, links and 275,864 lots into four stores and
+    1. **Would a graph database do this better?** We load the same nodes, links and 275,864 lots into five stores and
        time the load, the per-parcel query and a whole-borough query, check every answer against #62's, and compare
        how readable the queries are and what they cost.
     2. **Can someone who doesn't run Python use it?** The last cell writes the data for a small web app (in `app/`)
@@ -604,7 +604,7 @@ def _():
     mo.md(r"""
     ## 6. The comparison
 
-    All four run free on a laptop. The hosted versions are where the cost differs: Neo4j's free cloud tier
+    All five run free on a laptop. The hosted versions are where the cost differs: Neo4j's free cloud tier
     (AuraDB Free) stops at 200,000 nodes and 400,000 relationships, fewer nodes than Brooklyn's lots alone, while the
     flat tables are three Parquet files that a static web page can serve.
     """)
