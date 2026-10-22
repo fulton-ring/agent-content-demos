@@ -110,6 +110,9 @@ police records are real stations the open maps lack, not HIFLD errors.
 ## What didn't work, and what this doesn't show
 
 - **Overpass reset** again; QLever's SPARQL endpoint returned all of US OSM in under a minute per tag.
+- **QLever is live, not pinned.** These numbers come from its 2026-09-21 OSM planet. When QLever moves to a newer
+  planet, the HIFLD-only pools and the seeded hand-check sample will drift, and the estimates will still apply the
+  labels in `hand_check.csv`. Re-label before trusting a rerun on a newer planet.
 - **Reading Overture buildings is the cost.** The lower 48 is 180 million buildings, 24 GB. With 4 DuckDB threads
   it ran at 3 MB/s; with more threads than cores it ran at ~30 MB/s, but the first try ran out of memory, so it now
   goes in eight longitude strips. We read bounding boxes, not footprints (checked on CT above).
@@ -135,7 +138,9 @@ HIFLD Next republishes US government data (public domain). Overture places are
 [ODbL 1.0](https://opendatacommons.org/licenses/odbl/). A crosswalk that includes OSM IDs, Overture building or
 plant IDs, or distances measured to OSM shapes is, as in `us-substations-verified/`, a Derivative Database under
 OSMF's guidelines, so the full `crosswalk.csv.gz` would be published as ODbL with "© OpenStreetMap contributors"
-and Overture attribution. A file with only HIFLD ID → Overture *place* GERS ID, distance and name score could go
+and Overture attribution. The committed slice `output/crosswalk_hospitals.csv` is such a file: it is ODbL 1.0,
+© OpenStreetMap contributors and © Overture Maps Foundation, and anything built from it stays ODbL. The OSM names
+and distances in `hand_check.csv` and `output/hand_check_sample.csv` come from the same sources. A file with only HIFLD ID → Overture *place* GERS ID, distance and name score could go
 out under CDLA-Permissive 2.0 with attribution, no share-alike.
 
 ## What we looked at first
