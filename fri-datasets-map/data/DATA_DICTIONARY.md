@@ -7,7 +7,9 @@ public downloads.
 
 A **hazard multiplier (HM)** scales a county's NRI v1.19.0 expected annual loss (EAL) for a
 hazard to a projected future loss. FEMA floors published multipliers at 1, except for coastal
-flooding (which goes below 1) and a documented code of 0 for "no rating".
+flooding (which goes below 1) and a documented code of 0 for "No Rating". In the datasheet a
+multiplier is 0 exactly where its `<hazard>_<scenario>_DELTAR` rating is "No Rating"; that
+happens only for coastal flooding and hurricane. Every FEMA column here keeps that 0.
 
 **Scenarios** (`scenario`, and the middle part of wide column names):
 
@@ -41,7 +43,7 @@ One row per county, hazard and scenario: 3,231 counties × 7 hazards × 4 scenar
 | `fips`, `state`, `county` | County, as in FEMA's datasheet |
 | `hazard`, `hazard_name` | Hazard code and name (above) |
 | `scenario` | Scenario code (above) |
-| `fema_hm` | FEMA's published multiplier. Empty where FEMA published none |
+| `fema_hm` | FEMA's published multiplier. Empty where FEMA published none; 0 is FEMA's No Rating (coastal flooding only, in this file) |
 | `rebuilt_hm` | Our rebuilt multiplier. Contiguous US only (3,108 counties); empty elsewhere and where a pipeline left a county blank |
 | `held_out` | `True` for the 12 held-out states (AZ, CT, GA, IA, ME, MN, NE, NM, OH, RI, TX, WA), whose scores the agents never saw; `False` for training states; empty outside the contiguous US |
 
@@ -61,17 +63,21 @@ in all four scenarios (120) or between 0 and 1 in at least one (17).
 
 ## `hurricane_by_county.csv`
 
-One row per county and scenario for the 2,219 counties where FEMA published a hurricane
-multiplier, from `hurloss-public-rebuild/results/layer/fri_comparison_by_county.csv`.
+One row per county and scenario for the 2,219 counties FEMA rated for hurricane loss in NRI
+v1.19.0, from `hurloss-public-rebuild/results/layer/fri_comparison_by_county.csv`, with FEMA's
+values taken from the master datasheet. Between 614 and 640 of them per scenario have FEMA's
+"No Rating" (multiplier 0) for the future.
 
 | Column | Meaning |
 |---|---|
 | `fips`, `state`, `county`, `scenario` | County and scenario |
-| `fema_hm` | FEMA's published hurricane multiplier |
+| `fema_hm` | FEMA's published hurricane multiplier, `HRCN_<scenario>_HM` in the master datasheet, unrounded; 0 where FEMA has No Rating |
+| `fema_no_rating` | Whether FEMA's rating for the scenario (`HRCN_<scenario>_DELTAR`) is "No Rating"; true exactly where `fema_hm` is 0 |
+| `fema_hm_floored` | The value `hurloss-public-rebuild` compared against: `fema_hm` floored at 1 and rounded to 5 decimals. Not a FEMA value where `fema_no_rating` is true |
 | `our_hm` | Our central multiplier: FEMA's Eq. 11-12 with no factor of 2, averaged over two storm catalogues (STORM and observed tracks), Knutson et al. (2020) changes, frequency only |
 | `our_hm_low`, `our_hm_high` | Our range across both catalogues and every published Knutson percentile |
 | `our_covered` | Whether our catalogues put Category 1+ wind on the county; where not, our values are the floor of 1 |
-| `fema_within_our_range` | Whether FEMA's value lies between `our_hm_low` and `our_hm_high` |
+| `fema_within_our_range` | Whether FEMA's value lies between `our_hm_low` and `our_hm_high`; blank where FEMA has No Rating |
 | `fema_in_2_band` | Whether FEMA's value is between 1.9 and 2.1 |
 
 ## `baseline_scores.csv` and `baseline_by_column.csv`
@@ -94,8 +100,8 @@ left out), in NAD83 (EPSG:4269). Columns:
 - `fips` (index), `STATEABBRV`, `COUNTY`, `CFLD_EALT` (NRI v1.19.0 coastal flood EAL), `held_out`
 - `<hazard>_<scenario>_FEMA_HM` and `<hazard>_<scenario>_REBUILT_HM` for the seven hazards in
   `multipliers_by_county.csv`
-- `HRCN_<scenario>_FEMA_HM`, `HRCN_<scenario>_OUR_HM`, `HRCN_<scenario>_OUR_HM_LOW`,
-  `HRCN_<scenario>_OUR_HM_HIGH`
+- `HRCN_<scenario>_FEMA_HM` (as `fema_hm`: 0 is No Rating), `HRCN_<scenario>_OUR_HM`,
+  `HRCN_<scenario>_OUR_HM_LOW`, `HRCN_<scenario>_OUR_HM_HIGH`
 - `cfld_flag`, `cfld_had_loss_v1_18_1` (from `coastal_flags.csv`; empty for other counties)
 - `geometry`: Census 2020 cartographic boundary, 1:20,000,000
 

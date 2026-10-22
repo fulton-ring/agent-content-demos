@@ -107,6 +107,11 @@ function format(value: number | null | undefined): string {
   return value === null || value === undefined ? "no value" : value.toFixed(3);
 }
 
+// FEMA's datasheet codes "No Rating" as a multiplier of 0 (coastal flooding and hurricane).
+function formatFema(value: number | null | undefined): string {
+  return value === 0 ? "No Rating" : format(value);
+}
+
 function popupHtml(county: CountyProperties, choice: Choice, hazards: Record<string, string>) {
   const values = county.v[`${choice.hazard}_${choice.scenario}`] ?? [];
   const [fema, ours, low, high] = values;
@@ -114,7 +119,7 @@ function popupHtml(county: CountyProperties, choice: Choice, hazards: Record<str
   const rows = [
     `<b>${county.name}</b>`,
     `${hazards[choice.hazard]}, ${SCENARIOS[choice.scenario].toLowerCase()}`,
-    `FEMA: <b>${format(fema)}</b>`,
+    `FEMA: <b>${formatFema(fema)}</b>`,
     `${oursLabel}: <b>${format(ours)}</b>`,
   ];
   if (low !== undefined) rows.push(`Our range: ${format(low)} to ${format(high)}`);
@@ -135,7 +140,7 @@ function legendHtml(view: string): string {
     if (i === edges.length) return swatch(colour, `${edges[i - 1]} and up`);
     return swatch(colour, `${edges[i - 1]} to ${edges[i]}`);
   });
-  if (view !== "ratio") items.unshift(swatch(ZERO_COLOUR, "0 (FEMA's “no rating”)"));
+  if (view !== "ratio") items.unshift(swatch(ZERO_COLOUR, "0 (FEMA's “No Rating”)"));
   items.push(swatch(BLANK_COLOUR, "no value"));
   return `<b>${VIEWS[view]}</b>${items.join("")}`;
 }

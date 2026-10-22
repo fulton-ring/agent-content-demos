@@ -83,6 +83,10 @@ function isHighlighted(county, choice) {
 function format(value) {
     return value === null || value === undefined ? "no value" : value.toFixed(3);
 }
+// FEMA's datasheet codes "No Rating" as a multiplier of 0 (coastal flooding and hurricane).
+function formatFema(value) {
+    return value === 0 ? "No Rating" : format(value);
+}
 function popupHtml(county, choice, hazards) {
     const values = county.v[`${choice.hazard}_${choice.scenario}`] ?? [];
     const [fema, ours, low, high] = values;
@@ -90,7 +94,7 @@ function popupHtml(county, choice, hazards) {
     const rows = [
         `<b>${county.name}</b>`,
         `${hazards[choice.hazard]}, ${SCENARIOS[choice.scenario].toLowerCase()}`,
-        `FEMA: <b>${format(fema)}</b>`,
+        `FEMA: <b>${formatFema(fema)}</b>`,
         `${oursLabel}: <b>${format(ours)}</b>`,
     ];
     if (low !== undefined)
@@ -116,7 +120,7 @@ function legendHtml(view) {
         return swatch(colour, `${edges[i - 1]} to ${edges[i]}`);
     });
     if (view !== "ratio")
-        items.unshift(swatch(ZERO_COLOUR, "0 (FEMA's “no rating”)"));
+        items.unshift(swatch(ZERO_COLOUR, "0 (FEMA's “No Rating”)"));
     items.push(swatch(BLANK_COLOUR, "no value"));
     return `<b>${VIEWS[view]}</b>${items.join("")}`;
 }
