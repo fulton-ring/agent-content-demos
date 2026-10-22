@@ -18,8 +18,8 @@ This needs [uv](https://docs.astral.sh/uv/). It runs two [marimo](https://marimo
 notebooks as scripts and writes every table and figure to `results/`:
 
 - `1_data.py` downloads the public data into `~/.cache/kalshi-nyc-temperature` (or set
-  `KALSHI_NYC_CACHE`). **The first run takes about two hours**, almost all of it Kalshi's
-  rate limit on anonymous candlestick reads. Markets settled before Kalshi's archive cutoff
+  `KALSHI_NYC_CACHE`). **The first run takes two to three and a half hours**: about two for
+  Kalshi's rate limit on anonymous candlestick reads, plus up to 1.5 for the AIFS downloads on a busy machine. Markets settled before Kalshi's archive cutoff
   (late August 2026) need one call per bracket, about 1,800 calls, and the limit allowed
   only a few a minute. Later runs use the cache and take about a minute.
 - `2_backtest.py` builds the forecasts, scores them and paper-trades them (about 30 seconds).
@@ -87,12 +87,12 @@ still scores 0.53 ± 0.13 worse than the market.
 **3. Paper trading loses money after fees.** At a 5-cent edge threshold, corrected AIFS
 made 2,543 trades with a 39% hit rate and lost $107 (10 contracts a trade, $289 of it fees,
 maximum drawdown $356). The 95% interval on that P&L is ±$380, so it is indistinguishable
-from zero. NBM lost $948. The one slice that made money, corrected AIFS the day before
-(+$145 on 955 trades), is within its ±$237 interval and is the kind of result you find by
-looking at enough slices. At 2 pm every model loses: by then the market knows the morning.
+from zero. NBM lost $948. The slices that made money, such as corrected AIFS the day before
+(+$145 on 955 trades, ±$237) or corrected AIFS at a 20-cent threshold (+$160, ±$239), are
+within their intervals and are the kind of result you find by looking at enough slices. At 2 pm every model loses: by then the market knows the morning.
 
 **4. The days that went wrong** (`results/bad_days.csv`, worst 10 for corrected AIFS at
-8 am): in 9 of 10, AIFS ran 4 to 7°F cold. Three of those highs came at 11 pm or
+8 am): in 9 of 10, AIFS ran cold, in 8 of them by 4 to 7°F. Three of those highs came at 11 pm or
 midnight, which 6-hourly output and NOAA's 7 am to 7 pm window both miss. The market also scored badly (log loss above 2) on half of them.
 
 **5. Sensor data is not settlement data.** The Central Park 1-minute record reads above

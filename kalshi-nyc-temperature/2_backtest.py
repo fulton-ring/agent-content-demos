@@ -566,9 +566,10 @@ def _(mo):
         ## What this does and doesn't show
 
         It is one city, one market and one year, scored after the fact. The model side uses
-        a single 00 UTC AIFS run per day and a normal error curve; a better pipeline would use
-        later runs and the AIFS ensemble. The trading assumes every order fills at the quoted
-        price, with no slippage, depth limit or queue. The README sums up the numbers.
+        one deterministic AIFS run per snapshot and a normal error curve; a better pipeline
+        would use the AIFS ensemble and hourly models. The trading assumes every order fills
+        at the quoted price, with no slippage, depth limit or queue. The README sums up the
+        numbers.
         """
     )
     return
