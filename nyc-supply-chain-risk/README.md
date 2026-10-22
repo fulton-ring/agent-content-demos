@@ -2,36 +2,40 @@
 
 FEMA's [Supply Chain Resilience Guide](https://www.fema.gov/sites/default/files/2020-07/supply-chain-resilience-guide.pdf)
 (April 2019) asks emergency managers to map a supply chain's nodes, the infrastructure they depend on, and the hazards
-on each. This spike does that row by row from public data for one lifeline, electric power, in two marimo notebooks
-that read top to bottom:
+on each. This spike does that row by row from public data, in three marimo notebooks that read top to bottom:
 
-- [`supply_chain_risk.py`](supply_chain_risk.py), **Brooklyn** (issue [#62](https://github.com/fulton-ring/agent-content-demos/issues/62)):
+- [`supply_chain_risk.py`](supply_chain_risk.py), **Brooklyn power** (issue [#62](https://github.com/fulton-ring/agent-content-demos/issues/62)):
   add a parcel and get a ranked list of the facilities upstream of it, the flood and NRI risk on each, and the
   public source for every link.
-- [`citywide.py`](citywide.py), **all five boroughs** (issue [#64](https://github.com/fulton-ring/agent-content-demos/issues/64)):
+- [`lifelines.py`](lifelines.py), **Brooklyn's other lifelines** (issue [#63](https://github.com/fulton-ring/agent-content-demos/issues/63)):
+  water, wastewater, gas, fuel, food and telecom in the same tables, so a parcel lists upstream risks across lifelines.
+- [`citywide.py`](citywide.py), **power in all five boroughs** (issue [#64](https://github.com/fulton-ring/agent-content-demos/issues/64)):
   every tax lot traced to its network or feeder, area substation and first transmission station, with coverage
   against Con Edison's published counts. No hazards or parcel lists.
+
+[`common.py`](common.py) holds the downloads, source check and hazard lookups the two Brooklyn notebooks share.
 
 ## How to run it
 
 ```bash
-./run.sh                           # needs uv; runs both notebooks, writes output/ (Brooklyn) and output/citywide/
+./run.sh                           # needs uv; runs all three notebooks, writes output/ (Brooklyn) and output/citywide/
 ./run.sh citywide.py               # one notebook
 PARCELS=my_parcels.csv ./run.sh supply_chain_risk.py   # your own parcels: CSV with name and bbl, or name, lat, lon
 ```
 
-To read one as a notebook: `uv run marimo edit citywide.py`. Downloads (about 80 MB) are cached in `data/`.
+To read one as a notebook: `uv run marimo edit lifelines.py`. Downloads are cached in `data/`.
 
-- **Brooklyn** takes 3 to 13 minutes from a clean checkout, mostly retrying FEMA's flood map server, which drops
-  about half its connections. If it gives up, run it again: answers are cached as they arrive.
+- **Brooklyn power** takes 3 to 13 minutes from a clean checkout, mostly retrying FEMA's flood map server, which
+  drops about half its connections. If it gives up, run it again: answers are cached as they arrive.
+- **Lifelines** takes 4 to 13 more minutes and reads the power notebook's outputs, so it runs after it.
 - **Citywide** took 6 minutes from a clean checkout and about 2 minutes after that.
 
 ## The data
 
 All public, downloaded at run time, not committed. Every link that comes from a document carries the quoted passage,
 and the notebooks download the document and check that the passage is in it (`source_check.csv`). Brooklyn: 38
-passages verified; FEMA's guide returned HTTP 403, so its 7 quoted steps show as `unreachable`. Citywide: 78 of 78
-verified.
+passages verified; FEMA's guide returned HTTP 403, so its 7 quoted steps show as `unreachable`. Lifelines: 57 of 57.
+Citywide: 78 of 78 verified.
 
 | Source | What we use |
 |---|---|
@@ -44,6 +48,9 @@ verified.
 | FEMA National Flood Hazard Layer (effective), National Risk Index (tracts) | hazards on each node (Brooklyn) |
 | NYC MapPLUTO (Open Data `64uk-42ks`) | 857,347 NYC tax lots (275,864 in Brooklyn) |
 | Joint Utilities of NY 2024 reliability report | Con Edison's published counts per borough |
+| *Lifelines:* DEP drainage areas, NYS sewersheds (Hill and Larsen 2023), NYS gas utility territories (`i7nm-ih89`), Verizon copper retirement notices to the FCC (2016–2018) | which plant, gas utility and wire center serve each lot |
+| *Lifelines:* NYC Facilities Database, HIFLD Next POL terminals (EIA), NYC GeoSearch, MapPLUTO outlines | plant, terminal, wire center and market sites |
+| *Lifelines:* DEP tunnel EIS (2005), PSC Case 24-G-0248, FERC, DOE (2013), Columbia CGEP (2016), Food Flow study (2016), State Comptroller (2023), city Sandy report (2013) | the links and stressors above the first facility |
 
 ## Results: Brooklyn (run of 2026-10-19)
 
@@ -101,6 +108,40 @@ verified.
 
 ![NYC power dependencies](output/citywide/map.png)
 
+## Results: other lifelines in Brooklyn (`lifelines.py`, run of 2026-10-21)
+
+Same tables and passage check (`output/lifeline_source_check.csv`): **57 passages verified, 0 not found**; 6 links
+come from fields in the EIA terminal data and 3 are inferred. From `output/lifeline_coverage.csv`:
+
+| Lifeline | Facilities (placed) | Links documented / inferred | Brooklyn lots matched to a serving facility |
+|---|---:|---:|---|
+| Power (from #62) | 21 (18) | 29 / 3 | 97.3% documented, 2.7% inferred |
+| Wastewater | 6 (6) | 5 / 0 | **99.9% documented** (DEP drainage areas; the state's sewershed layer agrees on 99.1%) |
+| Natural gas | 8 (1) | 8 / 0 | **99.9% to the utility** (National Grid NY), none to a gate or main |
+| Telecom (Verizon wireline) | 17 (17) | 17 / 0 | **4.7% documented, 95.3% inferred** from the nearest documented lot |
+| Water supply | 6 (0) | 6 / 0 | none: the whole borough shares one documented chain |
+| Refined fuel | 11 (7) | 14 / 3 | none: documented only as far as "Brooklyn/Queens terminals" |
+| Food | 3 (2) | 1 / 0 | none: Hunts Point's share is documented only citywide |
+
+**Telecom is the surprise.** No wire-center boundary file is public, but Verizon's copper retirement notices list
+14,760 Brooklyn addresses under the wire center that serves them. 88% match a tax lot, giving 13,016 seed lots,
+and no lot is claimed by two wire centers. Giving each other lot the wire center of its nearest seed is right for
+**96.5%** of seeds in held-out tax blocks; the nearest wire center building alone is right for 90.3%.
+
+**Hazards.** On tax-lot footprints, 4 of Brooklyn's 5 treatment plants (Owls Head VE; Newtown Creek, 26th Ward,
+Red Hook AE), all 7 Brooklyn fuel terminals, Greenpoint LNG and Hunts Point are in FEMA's 1% flood zone. No wire
+center is. Coney Island's plant reads zone X, though DEP's 2013 resiliency plan rates its Sandy damage as major
+(we read this in the plan; the notebook doesn't check it, as the PDF is 205 MB).
+
+**Sample parcels** (`output/upstream_risks_all_lifelines.csv`, 190 rows). Brookdale Hospital adds to its 11 power
+facilities the 26th Ward plant (AE), National Grid's three city gates and Greenpoint LNG (AE), the Rockaway Avenue
+wire center, the water chain via Hillview and Tunnels 1 and 2, 7 fuel terminals (all AE or VE) and Hunts Point (AE).
+
+**Lifelines with no public service-area link:** water supply (no shaft, pressure-zone or trunk-main areas; DEP's
+own 2022 newsletter even contradicts its 2005 EIS on whether Tunnel 1 reaches Brooklyn); refined fuel (which
+terminal supplies which station is commercial); food (the 2016 study says "no outlet has a single source"); gas
+below the utility (which gate feeds which area); and telecom other than Verizon wireline (mobile, cable).
+
 ## What the spike shows
 
 The method holds for power, and it scales to the city. FEMA's steps map onto four tables. The lot-to-network step
@@ -110,6 +151,9 @@ step above the area substation. No dataset has it. It comes from rate-case testi
 NYISO no longer publishes, and a third of it is inferred. Even so, the citywide chain finds the same concentration
 that Brooklyn did: a few 138 kV stations, two of them on Brooklyn's flooded waterfront, sit first in line for a third
 of the city's lots.
+
+The other lifelines split in two. Wastewater, gas (to the utility) and Verizon telecom can be matched to a parcel
+from public data. Water supply, refined fuel and food can't: their sources name only the whole borough or city.
 
 ## What didn't work, and what this doesn't show
 
@@ -128,8 +172,11 @@ of the city's lots.
 - **No recovery times.** The guide's resilience gap needs restoration times and backup power; neither is public.
 - **Upstream stops one hop out** on the meshed 345 kV grid; past that every plant is upstream of everything.
 - Con Edison's map, the NYISO queue and PLUTO are unversioned, so later runs may shift slightly.
-- Other lifelines and a graph database or app are sub-issues
-  [#63](https://github.com/fulton-ring/agent-content-demos/issues/63) and
+- **Lifelines: half the chain is unplaced.** Gate stations, pipelines, tunnels and reservoirs have no operator-published
+  location, so they get no hazard rating.
+- **Lifelines: inferences.** PIPE_IN says a terminal takes pipeline product but not from which pipeline (3 Buckeye
+  links inferred). Telecom seeds are only the buildings Verizon moved to fiber in 2016–2018, and only Verizon wireline.
+- A graph database or app is sub-issue
   [#65](https://github.com/fulton-ring/agent-content-demos/issues/65).
 
 ## What we looked at first
@@ -138,9 +185,11 @@ of the city's lots.
 - A graph database: unnecessary at this size. NetworkX and pandas hold the tables.
 - HIFLD substations, NYISO Gold Book Table VI-1 and PSEG Long Island's hosting capacity map: not public.
 - Overpass for OSM failed in the `hifld-grid-gaps` spike; Overture's GeoParquet, read with DuckDB, works.
-- GeoPandas does the joins, pypdf and openpyxl read the documents. Our own logic is joins, name rules and the
-  500 ft feeder rule.
+- GeoPandas does the joins, pypdf and openpyxl read the documents. Our own logic is joins, name rules, the
+  500 ft feeder rule and the address parser for Verizon's notices.
+- For lifelines: HIFLD Next (no central offices; 1 Brooklyn cell tower; no Greenpoint LNG), FCC broadband data (login
+  needed, and it names providers, not offices), commercial wire-center boundaries (licensed).
 
-The notebooks are about 1,060 (Brooklyn) and 1,150 (citywide) lines, over the 1,000-line budget for one project.
-About a fifth is markdown. The links are written out one per line so each can be read against its passage.
-Section 1's document list and download helpers are repeated in the citywide notebook so it reads on its own.
+The Python is about 3,450 lines (Brooklyn power 880, lifelines 1,210, citywide 1,150, shared helpers 230), over the
+1,000-line budget because the folder now holds three parts. About a fifth is markdown, and most of the rest of
+`lifelines.py` and `citywide.py` is link tables, one quoted passage per row, so each can be read against its source.
