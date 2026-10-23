@@ -179,7 +179,7 @@ def _(mo):
     one. We work in 2010 block groups (dropping water-only ones) and move each 2020-only code to
     the 2010 block group holding most of its buildings.
 
-    Buildings come from the USACE National Structure Inventory (NSI), about 1.2 million points
+    Buildings come from the USACE National Structure Inventory (NSI), about 1.45 million points
     in Harris County. Each layer is scored by the share of a block group's NSI buildings it flags,
     so a block group's score doesn't depend on its size.
     """)
@@ -488,8 +488,10 @@ def _(mo):
     depression in the 3DEP 1/3 arc-second (about 10 m) DEM with WhiteboxTools and flags a building
     whose ground sits **0.3 m (1 ft) or more below the depression's spill level**.
 
-    Atlas 14 rainfall is meant to say which depressions fill. We sample NOAA's 100-year, 24-hour
-    depth across the county to see how much it varies.
+    Atlas 14 rainfall was meant to say which depressions fill. We sample NOAA's 100-year, 24-hour
+    depth across the county to see how much it varies. It turns out nearly flat across the county
+    and far below Harvey's totals, so it can't rank one depression above another, and the proxy
+    uses depth alone.
     """)
 
 
@@ -816,9 +818,9 @@ def _(KEYS, LAYERS, plt, results, scores):
         _ax.set_xlabel(_label)
         _ax.set_yticks(range(len(_keys)), _keys)
     _axes[0].invert_yaxis()
-    _axes[1].legend(fontsize=8, loc="lower right")
+    _fig.legend(*_axes[0].get_legend_handles_labels(), loc="lower center", ncol=4, fontsize=9)
     _fig.suptitle("Harris County block groups, Hurricane Harvey: each layer's share of flagged buildings vs damage")
-    _fig.tight_layout()
+    _fig.tight_layout(rect=(0, 0.09, 1, 1))
     _fig.savefig(results / "scores.png", dpi=130)
     _fig
     return
@@ -867,7 +869,7 @@ def _(KEYS, flags, pd, results, spearmanr):
 def _(KEYS, bg, block_groups, plt, results):
     _label, _rate, _keep = KEYS["ihp_per_unit"]
     _m = block_groups.set_index("bg").join(bg[["sfha", "hand_fim", "sink_30cm"]]).assign(key=_rate.where(_keep))
-    _fig, _axes = plt.subplots(1, 4, figsize=(18, 5))
+    _fig, _axes = plt.subplots(1, 4, figsize=(18, 4.2))
     for _ax, (_col, _title) in zip(
         _axes,
         [
@@ -926,6 +928,49 @@ def _(KEYS, LAYERS, bg, block_groups, pd, results):
     worst.round(3).to_csv(results / "worst_block_groups.csv", index=False)
     worst[worst.layer.isin(["FEMA SFHA", "OWP HAND-FIM, Harvey flows", "3DEP depression ≥ 0.3 m"])].round(2)
     return (worst,)
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    ## 10. What this shows, and what didn't work
+
+    **No open layer beats the SFHA here.** Read the scores table by its "minus SFHA" columns:
+    an interval entirely below zero means the layer ranks block groups worse than FEMA's map.
+
+    - **Static open layers carry almost no signal at block-group level.** Low HAND, at the SFHA's
+      share or any other cut-off in the sweep, barely tracks damage. Harris County is flat and
+      laced with small NWM channels, so "low above the nearest stream" is everywhere. The 3DEP
+      depression proxy is no better. Atlas 14 can't help it, since it varies little across the
+      county.
+    - **HAND only works once it knows the flow.** Driven by Harvey's simulated peak flows,
+      HAND-FIM ties the SFHA on river claims and loses on the rest. That is an event map drawn
+      with hindsight flows, not a hazard map anyone could have had in advance.
+    - **Its worst misses trace to the flows, not the terrain.** NWM simulated Buffalo Bayou
+      below Addicks and Barker at 12–18 times its gauged peak, because the model doesn't hold
+      water behind the dams. The false alarms along Buffalo Bayou follow from that. Where NWM
+      under-ran the gauges (Vince Bayou at 0.16×), HAND-FIM misses the flooded block groups
+      nearby.
+    - **The SFHA's own misses are places no 1% riverine map would catch:** neighbourhoods in
+      the Addicks reservoir pool, east Houston and the Clear Creek corridor. That is where an
+      open layer would have to earn its place.
+
+    **Refresh speed.** Harris County's FIRMs date from 2007, and 26% of today's buildings sit
+    on panels revised after Harvey (2019). The county-wide remap (MAAPnext) issued preliminary
+    data in February 2026, with appeals scheduled for 2027 and effective maps not expected
+    before 2028. The open inputs move faster:
+
+    | Layer | Source cadence | Rebuild cost |
+    |---|---|---|
+    | FEMA NFHL | Countywide restudy every 10–20 years; LOMRs in between | Engineering study, years |
+    | OWP HAND | New HAND-FIM releases each year (4.9.9.0, April 2026) | OWP's open pipeline, per HUC8 |
+    | NWM flows | Operational run every hour; here, the 1979–2023 retrospective | Seconds to read Harvey's peaks |
+    | 3DEP depressions | When new lidar reaches 3DEP (Harris tiles republished 2026) | About a minute on 4 CPUs |
+    | Atlas 14 | Texas volume 11, 2018; Atlas 15 in progress | None; a lookup |
+
+    Faster refresh doesn't help a layer that ranks damage worse, though. On this evidence an
+    open layer is a complement to the SFHA, mainly as an event map once flows are known.
+    """)
 
 
 @app.cell
