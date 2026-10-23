@@ -26,6 +26,7 @@ def _():
     import requests
     import whitebox_workflows as wbw
     import xarray as xr
+    from rasterio.coords import disjoint_bounds
     from rasterio.merge import merge
     from rasterio.transform import rowcol
     from rasterio.windows import Window, from_bounds
@@ -52,6 +53,7 @@ def _():
         Window,
         cache,
         date,
+        disjoint_bounds,
         from_bounds,
         gpd,
         json,
@@ -102,6 +104,18 @@ def _(mo):
 
 @app.cell
 def _(Path, json, log, requests, time):
+    def get(url: str, params: dict | None = None) -> requests.Response:
+        """GET with up to 5 attempts and backoff; FEMA's and NOAA's servers drop connections now and then."""
+        for attempt in range(5):
+            try:
+                r = requests.get(url, params=params, timeout=600)
+                r.raise_for_status()
+                return r
+            except requests.RequestException as e:
+                log.warning("attempt %d for %s failed: %s", attempt + 1, url, str(e)[:120])
+                time.sleep(2 ** (attempt + 1))
+        raise RuntimeError(f"GET failed: {url} {params}")
+
     def fetch(url: str, path: Path, params: dict | None = None) -> Path:
         """Download url to path once, with up to 4 attempts and backoff."""
         if path.exists():
@@ -151,7 +165,7 @@ def _(Path, json, log, requests, time):
         path.write_text(json.dumps(rows))
         return rows
 
-    return fetch, openfema
+    return fetch, get, openfema
 
 
 @app.cell
@@ -176,9 +190,8 @@ def _(ALBERS, COUNTY, cache, fetch, gpd):
     )
     block_groups = gpd.read_file(_zip).to_crs(ALBERS)
     block_groups = block_groups[block_groups.ALAND10 > 0][["GEOID10", "geometry"]].rename(columns={"GEOID10": "bg"})
-    county_shape = block_groups.union_all()
     print(f"{len(block_groups):,} block groups with land in Harris County")
-    return block_groups, county_shape
+    return (block_groups,)
 
 
 @app.cell
@@ -201,7 +214,7 @@ def _(mo):
     mo.md(r"""
     ## 2. Layer 1, the baseline: FEMA's SFHA
 
-    We pull Harris County's flood zones (`DFIRM_ID = 48201C`) from FEMA's NFHL service. A building
+    We download Harris County's NFHL extract (`48201C`) from FEMA's Map Service Center. A building
     is in the **SFHA** if a zone with `SFHA_TF = T` (A, AE, AO, VE) covers it, and in **SFHA + 0.2%**
     if it is in the SFHA or the shaded X zone. This is today's NFHL, not the one in force in August
     2017, so we also count the buildings on map panels that took effect after Harvey.
@@ -209,39 +222,15 @@ def _(mo):
 
 
 @app.cell
-def _(ALBERS, cache, gpd, pd, requests, structures):
-    _nfhl = "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer"
-
-    def _layer(layer: int, fields: str) -> gpd.GeoDataFrame:
-        _path = cache / f"nfhl_{layer}.parquet"
-        if _path.exists():
-            return gpd.read_parquet(_path)
-        _pages = []
-        for _offset in range(0, 100_000, 2000):  # 10,802 zones in Harris County, 2,000 per page
-            _r = requests.get(
-                f"{_nfhl}/{layer}/query",
-                params={
-                    "where": "DFIRM_ID='48201C'",
-                    "outFields": fields,
-                    "outSR": 5070,
-                    "resultOffset": _offset,
-                    "resultRecordCount": 2000,
-                    "f": "geojson",
-                },
-                timeout=600,
-            )
-            _r.raise_for_status()
-            _page = _r.json()
-            assert "features" in _page, f"NFHL error: {str(_page)[:300]}"
-            if not _page["features"]:
-                break
-            _pages.append(gpd.GeoDataFrame.from_features(_page["features"], crs=ALBERS))
-        _gdf = pd.concat(_pages, ignore_index=True)
-        _gdf.to_parquet(_path)
-        return _gdf
-
-    nfhl_zones = _layer(28, "FLD_ZONE,ZONE_SUBTY,SFHA_TF")
-    nfhl_panels = _layer(3, "FIRM_PAN,EFF_DATE")
+def _(ALBERS, COUNTY, cache, fetch, gpd, pd, structures):
+    # The Map Service Center redirects to the county's latest NFHL extract (48201C_<date>.zip).
+    _zip = fetch(
+        "https://msc.fema.gov/portal/downloadProduct",
+        cache / f"nfhl_{COUNTY}C.zip",
+        {"productTypeID": "NFHL", "productSubTypeID": "NFHL_COUNTY_DATA", "productID": f"NFHL_{COUNTY}C"},
+    )
+    nfhl_zones = gpd.read_file(f"zip://{_zip}!S_FLD_HAZ_AR.shp").to_crs(ALBERS)
+    nfhl_panels = gpd.read_file(f"zip://{_zip}!S_FIRM_PAN.shp").to_crs(ALBERS)
     _sfha = nfhl_zones[nfhl_zones.SFHA_TF == "T"]
     _x02 = nfhl_zones[nfhl_zones.ZONE_SUBTY.fillna("").str.contains("0.2")]
     _in_sfha = structures.sjoin(_sfha[["geometry"]], predicate="within").index.unique()
@@ -251,7 +240,7 @@ def _(ALBERS, cache, gpd, pd, requests, structures):
     nfhl_flags = pd.DataFrame(index=structures.index)
     nfhl_flags["sfha"] = structures.index.isin(_in_sfha)
     nfhl_flags["sfha_02"] = nfhl_flags.sfha | structures.index.isin(_in_x02)
-    nfhl_flags["panel_after_harvey"] = (pd.to_datetime(_panel.EFF_DATE, unit="ms") > "2017-08-25").reindex(
+    nfhl_flags["panel_after_harvey"] = (pd.to_datetime(_panel.EFF_DATE) > "2017-08-25").reindex(
         structures.index, fill_value=False
     )
     print(
@@ -273,7 +262,9 @@ def _(mo):
 
     We read it two ways:
 
-    - **HAND ≤ 1 m**, a static hazard layer: low ground next to a mapped stream.
+    - **Low HAND**, a static hazard layer: the buildings lowest above their stream, with the cut-off
+      set so it flags exactly as many buildings as the SFHA. The two layers then differ only in
+      *which* buildings they flag.
     - **HAND-FIM, Harvey flows**: what NWS's flood inundation mapping would have drawn. For each
       reach we take Harvey's peak flow from the National Water Model retrospective (v3.0, public on
       AWS), turn it into a stage with OWP's rating curve for that reach (`hydrotable`), and flag a
@@ -285,8 +276,8 @@ def _(mo):
 
 
 @app.cell
-def _(BBOX, cache, fetch, pd, requests):
-    _r = requests.get(
+def _(BBOX, cache, fetch, get, pd):
+    _r = get(
         "https://hydro.nationalmap.gov/arcgis/rest/services/wbd/MapServer/4/query",
         params={
             "geometry": ",".join(map(str, BBOX)),
@@ -296,15 +287,14 @@ def _(BBOX, cache, fetch, pd, requests):
             "returnGeometry": "false",
             "f": "json",
         },
-        timeout=120,
     )
-    _r.raise_for_status()
     hucs = sorted(f["attributes"]["huc8"] for f in _r.json()["features"])
     owp = "https://ciroh-owp-hand-fim.s3.us-east-2.amazonaws.com/hand_fim_4_9_9_0"
     hydrotable = pd.concat(
         [pd.read_parquet(fetch(f"{owp}/{h}/hydrotable.parquet", cache / "owp" / f"{h}.parquet")) for h in hucs]
     ).reset_index()
     hydrotable = hydrotable[["HUC", "branch_id", "HydroID", "feature_id", "stage", "discharge_cms", "LakeID"]]
+    hydrotable = hydrotable.astype({"HydroID": "int64", "feature_id": "int64"})  # stored as strings
     print(f"HUC8s touching the county: {', '.join(hucs)}; {hydrotable.feature_id.nunique():,} NWM reaches")
     return hucs, hydrotable, owp
 
@@ -340,7 +330,23 @@ def _(harvey_peaks, hydrotable, np, pd):
 
 
 @app.cell
-def _(Window, cache, fetch, from_bounds, harvey_stage, hucs, log, np, owp, pd, rasterio, rowcol, structures):
+def _(
+    Window,
+    cache,
+    disjoint_bounds,
+    fetch,
+    from_bounds,
+    harvey_stage,
+    hucs,
+    log,
+    nfhl_flags,
+    np,
+    owp,
+    pd,
+    rasterio,
+    rowcol,
+    structures,
+):
     _x, _y = structures.geometry.x.to_numpy(), structures.geometry.y.to_numpy()
     hand_min = np.full(len(structures), np.inf, dtype="float32")
     hand_fim = np.zeros(len(structures), dtype=bool)
@@ -361,6 +367,8 @@ def _(Window, cache, fetch, from_bounds, harvey_stage, hucs, log, np, owp, pd, r
                 rasterio.open(f"{_base}/rem_zeroed_masked_{_branch}.tif") as _hs,
                 rasterio.open(f"{_base}/gw_catchments_reaches_filtered_addedAttributes_{_branch}.tif") as _cs,
             ):
+                if disjoint_bounds(structures.total_bounds, _hs.bounds):
+                    continue
                 _win = from_bounds(*structures.total_bounds, _hs.transform).round_offsets().round_lengths()
                 _win = _win.intersection(Window(0, 0, _hs.width, _hs.height))
                 _t = _hs.window_transform(_win)
@@ -372,19 +380,24 @@ def _(Window, cache, fetch, from_bounds, harvey_stage, hucs, log, np, owp, pd, r
             _valid = (_hand != 32767) & (_catch > 0)
             _hand_m = np.where(_valid, _hand / 1000, np.inf)  # this release stores HAND in int16 millimetres
             _hydroid = _prefix * 10000 + _catch
-            _s = _stage.reindex(pd.MultiIndex.from_arrays([np.full(len(_hydroid), _branch), _hydroid])).to_numpy()
+            _s = _stage.reindex(pd.MultiIndex.from_arrays([np.full(len(_hydroid), _branch), _hydroid])).to_numpy(
+                dtype="float64"
+            )
             _idx = np.flatnonzero(_inside)
             hand_min[_idx] = np.minimum(hand_min[_idx], _hand_m)
-            hand_fim[_idx] |= _valid & (_hand_m <= np.nan_to_num(_s, nan=-1))
+            hand_fim[_idx] |= _valid & (_hand_m <= np.nan_to_num(_s, nan=-1.0))
             log.info("HUC %s branch %s: %d buildings covered", _huc, _branch, int(_valid.sum()))
+    # The static layer flags the same share of buildings as the SFHA, so the two differ only in *which* buildings.
+    hand_cut = float(np.quantile(hand_min, nfhl_flags.sfha.mean()))
     hand_flags = pd.DataFrame(
-        {"hand_m": hand_min, "hand_1m": hand_min <= 1.0, "hand_fim": hand_fim}, index=structures.index
+        {"hand_m": hand_min, "hand_low": hand_min <= hand_cut, "hand_fim": hand_fim}, index=structures.index
     )
     print(
-        f"HAND covers {np.isfinite(hand_min).mean():.0%} of buildings. HAND ≤ 1 m flags "
-        f"{hand_flags.hand_1m.mean():.1%}; HAND-FIM at Harvey flows flags {hand_flags.hand_fim.mean():.1%}."
+        f"HAND covers {np.isfinite(hand_min).mean():.0%} of buildings; {(hand_min <= 1).mean():.1%} sit 1 m or less "
+        f"above their stream. HAND ≤ {hand_cut:.2f} m flags the SFHA's share, {hand_flags.hand_low.mean():.1%}. "
+        f"HAND-FIM at Harvey flows flags {hand_flags.hand_fim.mean():.1%}."
     )
-    return (hand_flags,)
+    return hand_cut, hand_flags
 
 
 @app.cell
@@ -402,12 +415,12 @@ def _(mo):
 
 
 @app.cell
-def _(BBOX, json, np, requests):
+def _(BBOX, get, json, np):
     _lons, _lats = np.linspace(BBOX[0], BBOX[2], 4), np.linspace(BBOX[1], BBOX[3], 3)
     atlas14 = []
     for _lat in _lats:
         for _lon in _lons:
-            _r = requests.get(
+            _r = get(
                 "https://hdsc.nws.noaa.gov/cgi-bin/new/cgi_readH5.py",
                 params={
                     "lat": f"{_lat:.3f}",
@@ -417,9 +430,7 @@ def _(BBOX, json, np, requests):
                     "units": "english",
                     "series": "pds",
                 },
-                timeout=120,
             )
-            _r.raise_for_status()
             # NOAA returns a JavaScript literal; quantiles[duration][return period], row 9 = 24 h, column 6 = 100 yr.
             _q = json.loads(_r.text.split("quantiles = ")[1].split(";")[0].replace("'", '"'))
             atlas14.append(float(_q[9][6]))
@@ -473,7 +484,7 @@ def _(hand_flags, nfhl_flags, np, pd, rasterio, rowcol, sink_path, structures):
     flags["sink_m"] = np.where(_depth < 0, 0, _depth)
     flags["sink_30cm"] = flags.sink_m >= 0.3
     flags["hand_fim_or_sink"] = flags.hand_fim | flags.sink_30cm
-    flags["hand_1m_or_sink"] = flags.hand_1m | flags.sink_30cm
+    flags["hand_low_or_sink"] = flags.hand_low | flags.sink_30cm
     print(
         f"Depressions ≥ 0.3 m flag {flags.sink_30cm.mean():.1%} of buildings; "
         f"HAND-FIM or depression {flags.hand_fim_or_sink.mean():.1%}."
@@ -592,10 +603,10 @@ def _(block_groups, claims, flags, ihp, pd, policies):
     LAYERS = {
         "sfha": "FEMA SFHA",
         "sfha_02": "FEMA SFHA + 0.2%",
-        "hand_1m": "OWP HAND ≤ 1 m",
+        "hand_low": "OWP low HAND (SFHA's share)",
         "hand_fim": "OWP HAND-FIM, Harvey flows",
         "sink_30cm": "3DEP depression ≥ 0.3 m",
-        "hand_1m_or_sink": "HAND ≤ 1 m or depression",
+        "hand_low_or_sink": "Low HAND or depression",
         "hand_fim_or_sink": "HAND-FIM or depression",
     }
     _g = flags.groupby("bg")
@@ -758,7 +769,7 @@ def _(bg, flags, json, matched, results, started, time):
         "share_after_harvey_panels": round(float(flags.panel_after_harvey.mean()), 4),
         "share_flagged": {
             c: round(float(flags[c].mean()), 4)
-            for c in ["sfha", "sfha_02", "hand_1m", "hand_fim", "sink_30cm", "hand_fim_or_sink"]
+            for c in ["sfha", "sfha_02", "hand_low", "hand_fim", "sink_30cm", "hand_fim_or_sink"]
         },
         "records_matched_to_2010_block_groups": {k: round(float(v), 4) for k, v in matched.items()},
         "run_minutes": round((time.time() - started) / 60, 1),
