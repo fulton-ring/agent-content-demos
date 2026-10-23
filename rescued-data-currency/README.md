@@ -16,8 +16,7 @@ It needs [uv](https://docs.astral.sh/uv/) and internet access, and no key or acc
 `refresh.py` (a [marimo](https://marimo.io) notebook) as a script. The script reads
 `data/currency.csv`, fetches every copy, writes the CSV back with today's `date_checked`, and
 prints what changed since the last run and which rows a person has to check. The output is
-also saved to `results/last-run.txt`. To read the notebook with its tables: `uv run marimo edit
-refresh.py`. `CURRENCY_CSV` points it at another copy of the CSV.
+saved to `results/last-run.txt`. `uv run marimo edit refresh.py` opens the notebook with its tables.
 
 ## The data
 
@@ -125,7 +124,7 @@ day apart.
 - **CDC's Tracking API limits requests without a token.** After a few calls it answers
   `"code":429, "Server has serviced too many non-token requests"` with HTTP 200. The limit
   seems to be shared across this sandbox's outbound address. The Heat Tracker row failed in
-  four of our nine runs today and fell back to its last value, as designed. CDC issues free API tokens.
+  4 of our 11 runs today and fell back to its last value, as designed. CDC issues free API tokens.
   Adding one is the fix if this runs on a schedule.
 - **Some sites block scripts.** fema.gov, cdc.gov (but not atsdr.cdc.gov), transportation.gov
   and GitHub's API return 403 from this sandbox. We read FEMA through its ArcGIS layer. We
