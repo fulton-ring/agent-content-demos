@@ -11,7 +11,7 @@ FEMA's flood map (the NFHL, and its 1%-a-year Special Flood Hazard Area, the SFH
 ## How to run it
 
 ```bash
-./run.sh     # needs uv; about 25 minutes and 1.9 GB of downloads the first time, under 5 minutes after
+./run.sh     # needs uv; first run about 1.5 hours and 1.9 GB of downloads (mostly OpenFEMA); 5–8 minutes after
 ```
 
 `run.sh` runs `notebook.py` as a script, so every number below comes from code a reader can see. To read it with its outputs, run `uv run marimo edit notebook.py`. Downloads are cached in `$OFL_CACHE` (default `~/.cache/open-flood-layer-vs-nfhl`). Results go to `results/`.
@@ -68,7 +68,7 @@ The closest result: on river claims, HAND-FIM or depression minus the SFHA is ρ
 - *HAND-FIM false alarms:* the Buffalo Bayou corridor (29.75–29.78, −95.48 to −95.50), fully flagged because NWM's flows there are 12× too high.
 - *HAND-FIM misses:* south-east block groups (29.59–29.65, −95.20 to −95.23) near Vince and Berry Bayous, where NWM under-ran the flows.
 
-**Run time and cost:** 7.4 minutes with a warm cache. The first run adds about 15–20 minutes of downloads, mostly the 1.3 GB NSI GeoJSON and about 430 OpenFEMA pages. Cache: 1.9 GB. Cost: $0, since every source is free and nothing uses a paid service.
+**Run time and cost:** 5–8 minutes with a warm cache on a 4-CPU machine. From an empty cache, the clean-checkout run took about 1.5 hours across three restarts (two FEMA connection failures and one container restart), and resumed from the cache each time. Most of that time went on about 430 OpenFEMA queries, some of which take 70 seconds a page, plus the 1.3 GB NSI GeoJSON. Cache: 1.9 GB. Cost: $0, since every source is free and nothing uses a paid service.
 
 ## Refresh speed
 
