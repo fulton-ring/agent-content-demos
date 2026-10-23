@@ -70,8 +70,9 @@ a few lines of `re` and `requests`, and everything else is in the CSV.
 | Datasets dated by the script on their own (main copy) | **13 of 20** |
 | Datasets watched by a marker, dated by a person when it changes | **7 of 20** |
 | Datasets fully manual | **0 of 20** |
-| Copies read on the first run | **24 of 25** (the CDC Tracking API rate-limited the 25th, see below) |
-| Run time | **about 2 to 4 seconds** for all 25 copies |
+| Copies read on the first run | **25 of 25** (the CDC row fails in some runs, see below) |
+| Run time | **1.8 seconds** for all 25 copies (2 to 4 s across runs) |
+| Values changed from the article's 2026-10-17 check | **4 of 25** copies: 2 earlier, 1 newer, 1 new |
 | Stale, frozen at the last federal release | **7 of 20** (same as the article) |
 | Current data from the agency or a federal successor | **6 of 20** (same as the article) |
 
@@ -112,15 +113,19 @@ earlier than the article said, and the Heat Tracker has a date where the article
 
 ## Second run
 
-From a clean checkout, running `./run.sh` twice reports no changes on the second run, except
-when a live source has actually moved on. The Sea Ice Index adds a day every day, so it is the
-one row expected to change between runs a day apart. See the PR for the two runs' output.
+The first run, starting from the article's values, is saved in
+`results/first-run-from-article.txt`. Then, from a clean checkout of the branch, we ran
+`./run.sh` twice in a row. Both runs reported `Changed since the last run: 0` and nothing for
+a person to check (`results/clean-run-1.txt`, `results/clean-run-2.txt`). A row changes only
+when a source moves on. The Sea Ice Index adds a day every day, so it will show up in runs a
+day apart.
 
 ## What didn't work, and what it doesn't show
 
 - **CDC's Tracking API limits requests without a token.** After a few calls it answers
-  `"code":429, "Server has serviced too many non-token requests"` with HTTP 200, so the Heat
-  Tracker row sometimes fails and falls back to its last value. CDC issues free API tokens.
+  `"code":429, "Server has serviced too many non-token requests"` with HTTP 200. The limit
+  seems to be shared across this sandbox's outbound address. The Heat Tracker row failed in
+  four of our nine runs today and fell back to its last value, as designed. CDC issues free API tokens.
   Adding one is the fix if this runs on a schedule.
 - **Some sites block scripts.** fema.gov, cdc.gov (but not atsdr.cdc.gov), transportation.gov
   and GitHub's API return 403 from this sandbox. We read FEMA through its ArcGIS layer. We

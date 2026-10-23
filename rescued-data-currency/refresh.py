@@ -226,6 +226,8 @@ def _(TODAY, previous, readings):
 def _(mo, pd, previous, refreshed):
     def same_date(a: str, b: str) -> bool:
         """Equal at the coarser precision, so 2024-10 and 2024-10-09 count as the same."""
+        if not a or not b:
+            return a == b
         return a.startswith(b) or b.startswith(a)
 
     moved = [
