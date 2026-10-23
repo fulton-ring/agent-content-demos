@@ -116,15 +116,18 @@ The first run, starting from the article's values, is saved in
 `results/first-run-from-article.txt`. Then, from a clean checkout of the branch, we ran
 `./run.sh` twice in a row. Both runs reported `Changed since the last run: 0` and nothing for
 a person to check (`results/clean-run-1.txt`, `results/clean-run-2.txt`). A row changes only
-when a source moves on. The Sea Ice Index adds a day every day, so it will show up in runs a
-day apart.
+when a source moves on. The Sea Ice Index usually adds a day each day (not this week: on 2026-10-23 it still
+ended at 2026-10-17). To see the 4 changes from the
+article again, run with `CURRENCY_CSV` pointed at a copy of `data/article-2026-10-17.csv`;
+when CDC rate-limits the Heat Tracker row, a normal run counts it as not re-read and shows 3.
 
 ## What didn't work, and what it doesn't show
 
 - **CDC's Tracking API limits requests without a token.** After a few calls it answers
   `"code":429, "Server has serviced too many non-token requests"` with HTTP 200. The limit
   seems to be shared across this sandbox's outbound address. The Heat Tracker row failed in
-  4 of our 11 runs today and fell back to its last value, as designed. CDC issues free API tokens.
+  4 of our 11 runs, and in all 3 of a reviewer's runs the same day, and fell back to its
+  last value, as designed. CDC issues free API tokens.
   Adding one is the fix if this runs on a schedule.
 - **Some sites block scripts.** fema.gov, cdc.gov (but not atsdr.cdc.gov), transportation.gov
   and GitHub's API return 403 from this sandbox. We read FEMA through its ArcGIS layer. We
@@ -145,5 +148,4 @@ day apart.
 The script is fast and fails safely, so a monthly GitHub Actions workflow could run
 `./run.sh`, commit `data/currency.csv` when it changes, and open an issue listing the rows for
 a person. It would need a CDC Tracking API token as a repository secret, and an owner to work
-the list each month. Whether to commit to that is a founder's call, filed as a sub-issue of
-#110. The article shouldn't promise monthly updates until it exists.
+the list each month. Whether to commit to that is a founder's call, filed as #113. The article shouldn't promise monthly updates until it exists.
