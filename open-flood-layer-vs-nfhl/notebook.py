@@ -149,7 +149,7 @@ def _(Path, json, log, requests, time):
             params = {"$filter": filter_, "$select": select, "$top": 10000, "$skip": page * 10000}
             for attempt in range(5):
                 try:
-                    r = requests.get(f"https://www.fema.gov/api/open/{entity}", params=params, timeout=120)
+                    r = requests.get(f"https://www.fema.gov/api/open/{entity}", params=params, timeout=300)
                     r.raise_for_status()
                     batch = r.json()[entity.split("/")[-1]]
                     break
@@ -173,8 +173,11 @@ def _(mo):
     mo.md(r"""
     ## 1. Block groups and buildings
 
-    OpenFEMA tags claims, policies and aid registrations with a 12-digit 2010 census block group
-    (`censusGeoid`), so we use the 2010 TIGER block groups and drop water-only ones.
+    OpenFEMA tags claims, policies and aid registrations with a 12-digit census block group
+    (`censusGeoid`). Aid registrations say they use 2010 block groups. NFIP records turn out to mix
+    vintages: every one matches a 2010 or a 2020 block group, but about a sixth match only a 2020
+    one. We work in 2010 block groups (dropping water-only ones) and move each 2020-only code to
+    the 2010 block group holding most of its buildings.
 
     Buildings come from the USACE National Structure Inventory (NSI), about 1.2 million points
     in Harris County. Each layer is scored by the share of a block group's NSI buildings it flags,
@@ -190,23 +193,39 @@ def _(ALBERS, COUNTY, cache, fetch, gpd):
     )
     block_groups = gpd.read_file(_zip).to_crs(ALBERS)
     block_groups = block_groups[block_groups.ALAND10 > 0][["GEOID10", "geometry"]].rename(columns={"GEOID10": "bg"})
-    print(f"{len(block_groups):,} block groups with land in Harris County")
-    return (block_groups,)
+    _zip20 = fetch("https://www2.census.gov/geo/tiger/TIGER2020/BG/tl_2020_48_bg.zip", cache / "tl_2020_48_bg.zip")
+    block_groups_2020 = gpd.read_file(_zip20, where=f"COUNTYFP = '{COUNTY[2:]}'").to_crs(ALBERS)
+    block_groups_2020 = block_groups_2020[["GEOID", "geometry"]].rename(columns={"GEOID": "bg2020"})
+    print(f"{len(block_groups):,} 2010 block groups with land in Harris County; {len(block_groups_2020):,} in 2020")
+    return block_groups, block_groups_2020
 
 
 @app.cell
-def _(ALBERS, COUNTY, block_groups, cache, fetch, gpd):
-    _parquet = cache / "nsi_structures.parquet"
+def _(ALBERS, COUNTY, block_groups, block_groups_2020, cache, fetch, gpd, pd):
+    _parquet = cache / "nsi.parquet"
     if not _parquet.exists():
         _geojson = fetch(f"https://nsi.sec.usace.army.mil/nsiapi/structures?fips={COUNTY}", cache / "nsi.geojson")
-        _nsi = gpd.read_file(_geojson, columns=["fd_id", "st_damcat", "occtype", "firmzone"], engine="pyogrio")
+        _nsi = gpd.read_file(_geojson, columns=["fd_id", "st_damcat", "occtype", "resunits"], engine="pyogrio")
         _nsi.to_crs(ALBERS).to_parquet(_parquet)
     structures = gpd.read_parquet(_parquet)
     structures = structures.sjoin(block_groups, predicate="within", how="inner").drop(columns="index_right")
     structures = structures.reset_index(drop=True)
     structures["residential"] = structures.st_damcat == "RES"
-    print(f"{len(structures):,} NSI structures in a land block group, {structures.residential.mean():.0%} residential")
-    return (structures,)
+    _bg2020 = structures[["geometry"]].sjoin(block_groups_2020, predicate="within").bg2020
+    _bg2020 = _bg2020[~_bg2020.index.duplicated()]
+    # Each 2020 block group goes to the 2010 block group that holds most of its buildings.
+    _pairs = pd.DataFrame({"bg2020": _bg2020, "bg": structures.bg.reindex(_bg2020.index)})
+    _crosswalk = _pairs.groupby("bg2020").bg.agg(lambda b: b.value_counts().index[0])
+
+    def to_2010(geoid: pd.Series) -> pd.Series:
+        """2010 block group for each 12-digit OpenFEMA code; a code that isn't a 2010 one is read as 2020."""
+        return geoid.where(geoid.isin(block_groups.bg), geoid.map(_crosswalk))
+
+    print(
+        f"{len(structures):,} NSI structures in a land block group, {structures.residential.mean():.0%} residential, "
+        f"{structures.resunits.sum():,.0f} housing units"
+    )
+    return structures, to_2010
 
 
 @app.cell
@@ -315,6 +334,66 @@ def _(HARVEY, cache, hydrotable, np, pd, xr):
     harvey_peaks = pd.read_parquet(_path)
     print(f"Harvey peak flow for {len(harvey_peaks):,} reaches; median {harvey_peaks.peak_cms.median():.0f} m³/s")
     return (harvey_peaks,)
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    How good are those simulated flows? NWM links some reaches to USGS gauges, so we compare its
+    Harvey peak with each Harris County gauge's observed instantaneous peak.
+    """)
+
+
+@app.cell
+def _(BBOX, HARVEY, cache, get, np, pd, results, xr):
+    _path = cache / "nwm_vs_usgs.parquet"
+    if not _path.exists():
+        _ds = xr.open_zarr(
+            "https://noaa-nwm-retrospective-3-0-pds.s3.amazonaws.com/CONUS/zarr/chrtout.zarr",
+            storage_options={"client_kwargs": {"trust_env": True}},
+            consolidated=True,
+        )
+        _gage = np.char.strip(_ds.gage_id.values.astype(str))
+        _lat, _lon = _ds.latitude.values, _ds.longitude.values
+        _idx = np.flatnonzero(
+            (_gage != "") & (_lon >= BBOX[0]) & (_lon <= BBOX[2]) & (_lat >= BBOX[1]) & (_lat <= BBOX[3])
+        )
+        _nwm = _ds.streamflow.sel(time=slice(*HARVEY)).isel(feature_id=_idx).max("time").compute()
+        _sites = list(_gage[_idx])
+        _usgs = get(
+            "https://waterservices.usgs.gov/nwis/iv/",
+            {
+                "format": "json",
+                "sites": ",".join(_sites),
+                "startDT": HARVEY[0],
+                "endDT": HARVEY[1],
+                "parameterCd": "00060",
+            },
+        ).json()["value"]["timeSeries"]
+        _obs = {
+            t["sourceInfo"]["siteCode"][0]["value"]: (
+                t["sourceInfo"]["siteName"],
+                max((float(v["value"]) for v in t["values"][0]["value"]), default=np.nan) / 35.3147,
+            )
+            for t in _usgs
+        }
+        pd.DataFrame(
+            {
+                "site": _sites,
+                "name": [_obs.get(s, ("", np.nan))[0] for s in _sites],
+                "nwm_peak_cms": _nwm.values,
+                "usgs_peak_cms": [_obs.get(s, ("", np.nan))[1] for s in _sites],
+            }
+        ).to_parquet(_path)
+    gauges = pd.read_parquet(_path).dropna().query("usgs_peak_cms > 0")
+    gauges["nwm_over_usgs"] = gauges.nwm_peak_cms / gauges.usgs_peak_cms
+    print(
+        f"{len(gauges)} gauged reaches. NWM / observed Harvey peak: median {gauges.nwm_over_usgs.median():.2f}, "
+        f"{(gauges.nwm_over_usgs.between(0.5, 2)).mean():.0%} within a factor of 2."
+    )
+    gauges.sort_values("nwm_over_usgs", ascending=False).round(2).to_csv(results / "nwm_vs_usgs.csv", index=False)
+    gauges.sort_values("nwm_over_usgs", ascending=False).round(2)
+    return
 
 
 @app.cell
@@ -469,7 +548,7 @@ def _(BBOX, cache, log, merge, rasterio, wbw):
         _wbe = wbw.WbEnvironment()
         _wbe.verbose = False
         _depth = _wbe.hydrology.depth_in_sink(dem=_wbe.read_raster(str(_dem_path)), zero_background=True)
-        _wbe.write_raster(_depth, str(_sink_path), compress=True)
+        _wbe.write_raster(_depth, str(_sink_path))
     sink_path = _sink_path
     return (sink_path,)
 
@@ -480,7 +559,7 @@ def _(hand_flags, nfhl_flags, np, pd, rasterio, rowcol, sink_path, structures):
     with rasterio.open(sink_path) as _src:
         _row, _col = rowcol(_src.transform, _pts.x.to_numpy(), _pts.y.to_numpy())
         _depth = _src.read(1)[np.asarray(_row), np.asarray(_col)]
-    flags = pd.concat([structures[["bg", "residential"]], nfhl_flags, hand_flags], axis=1)
+    flags = pd.concat([structures[["bg", "resunits"]], nfhl_flags, hand_flags], axis=1)
     flags["sink_m"] = np.where(_depth < 0, 0, _depth)
     flags["sink_30cm"] = flags.sink_m >= 0.3
     flags["hand_fim_or_sink"] = flags.hand_fim | flags.sink_30cm
@@ -509,7 +588,7 @@ def _(mo):
 
 
 @app.cell
-def _(COUNTY, cache, openfema, pd):
+def _(COUNTY, cache, openfema, pd, to_2010):
     _rows = openfema(
         "v3/NfipClaims",
         f"startswith(censusGeoid,'{COUNTY}') and floodEvent eq 'Hurricane Harvey'",
@@ -518,7 +597,7 @@ def _(COUNTY, cache, openfema, pd):
     )
     _claims = pd.DataFrame(_rows)
     _claims = _claims[(_claims.amountPaidOnBuildingClaim.fillna(0) + _claims.amountPaidOnContentsClaim.fillna(0)) > 0]
-    claims = _claims.assign(bg=_claims.censusGeoid.str[:12])
+    claims = _claims.assign(bg=to_2010(_claims.censusGeoid.str[:12]))
     print(
         f"{len(_rows):,} Harvey claims in Harris County, {len(claims):,} paid. "
         f"By cause: {claims.causeOfDamage.value_counts().to_dict()}"
@@ -527,7 +606,7 @@ def _(COUNTY, cache, openfema, pd):
 
 
 @app.cell
-def _(COUNTY, cache, date, openfema, pd, timedelta):
+def _(COUNTY, cache, date, openfema, pd, timedelta, to_2010):
     _frames = []
     _start = date(2016, 8, 26)
     for _i in range(0, 366, 3):
@@ -547,7 +626,7 @@ def _(COUNTY, cache, date, openfema, pd, timedelta):
     _in_force = (pd.to_datetime(_p.policyTerminationDate, utc=True) > "2017-08-25") & (
         _cancel.isna() | (_cancel > "2017-08-25")
     )
-    policies = _p[_in_force].assign(bg=lambda d: d.censusGeoid.str[:12])
+    policies = _p[_in_force].assign(bg=lambda d: to_2010(d.censusGeoid.str[:12]))
     print(f"{len(policies):,} NFIP policies in force in Harris County on 2017-08-25")
     return (policies,)
 
@@ -592,9 +671,10 @@ def _(mo):
 
     Each layer becomes the share of a block group's buildings it flags. Each answer key becomes a
     rate: paid claims per policy (all causes, river and rainfall), paid claims per NSI building,
-    and flood-damage registrations per NSI residential building. A rate needs a denominator big
-    enough to mean something, so per-policy keys use block groups with at least 25 policies and
-    per-building keys those with at least 50 buildings.
+    and flood-damage registrations per NSI housing unit (renters register too, so an apartment
+    building counts once per unit). A rate needs a denominator big enough to mean something, so
+    per-policy keys use block groups with at least 25 policies and the others those with at least
+    50 buildings or housing units.
     """)
 
 
@@ -610,7 +690,7 @@ def _(block_groups, claims, flags, ihp, pd, policies):
         "hand_fim_or_sink": "HAND-FIM or depression",
     }
     _g = flags.groupby("bg")
-    bg = pd.DataFrame({"buildings": _g.size(), "homes": _g.residential.sum()})
+    bg = pd.DataFrame({"buildings": _g.size(), "units": _g.resunits.sum()})
     bg = bg.join(_g[list(LAYERS)].mean())
     bg["policies"] = policies.groupby("bg").size()
     bg["claims"] = claims.groupby("bg").size()
@@ -625,19 +705,21 @@ def _(block_groups, claims, flags, ihp, pd, policies):
         "river_per_policy": ("River claims (cause 2) per policy", bg.claims_river / bg.policies, _many_policies),
         "rain_per_policy": ("Rainfall claims (cause 4) per policy", bg.claims_rain / bg.policies, _many_policies),
         "claims_per_building": ("Paid claims per NSI building", bg.claims / bg.buildings, _many_buildings),
-        "ihp_per_home": (
-            "IHP flood-damage registrations per NSI home",
-            bg.ihp_flood / bg.homes.clip(lower=1),
-            _many_buildings & (bg.homes > 0),
+        "ihp_per_unit": (
+            "IHP flood-damage registrations per housing unit",
+            bg.ihp_flood / bg.units.clip(lower=1),
+            bg.units >= 50,
         ),
     }
     matched = {
         "claims": claims.bg.isin(bg.index).mean(),
         "policies": policies.bg.isin(bg.index).mean(),
         "ihp": ihp.bg.isin(bg.index).mean(),
+        "claims_read_as_2020": (claims.censusGeoid.str[:12] != claims.bg).mean(),
+        "policies_read_as_2020": (policies.censusGeoid.str[:12] != policies.bg).mean(),
     }
     print(
-        f"{len(bg):,} block groups. Share of records whose block group matches a 2010 block group: "
+        f"{len(bg):,} block groups. Share of records placed in a 2010 block group: "
         + ", ".join(f"{k} {v:.1%}" for k, v in matched.items())
     )
     bg.describe().T.round(3)
@@ -652,7 +734,8 @@ def _(mo):
     **Spearman ρ** asks whether a layer orders block groups the way the damage does. **AUC** asks
     how often a block group in the worst-hit fifth (by that key) gets a higher layer score than one
     outside it; 0.5 is a coin flip. Intervals are the 2.5th–97.5th percentiles of 500 bootstrap
-    resamples of block groups.
+    resamples of block groups. The difference from the SFHA is computed on the same resamples, so
+    its interval says whether a layer beats the SFHA, not just whether the two intervals overlap.
     """)
 
 
@@ -664,23 +747,28 @@ def _(KEYS, LAYERS, bg, np, pd, roc_auc_score, spearmanr):
         _y = _rate[_keep].to_numpy()
         _top = _y >= np.quantile(_y, 0.8)
         _boots = [_rng.integers(0, len(_y), len(_y)) for _ in range(500)]
-        for _layer, _layer_label in LAYERS.items():
+        _sfha_b = None  # the SFHA's bootstrap scores, to take paired differences against
+        for _layer, _layer_label in LAYERS.items():  # LAYERS starts with the SFHA
             _x = bg.loc[_keep, _layer].to_numpy()
-            _rho = spearmanr(_x, _y).statistic
-            _auc = roc_auc_score(_top, _x)
-            _rho_b = [spearmanr(_x[b], _y[b]).statistic for b in _boots]
-            _auc_b = [roc_auc_score(_top[b], _x[b]) for b in _boots]
+            _b = np.array([(spearmanr(_x[i], _y[i]).statistic, roc_auc_score(_top[i], _x[i])) for i in _boots])
+            _sfha_b = _b if _sfha_b is None else _sfha_b
+            _lo, _hi = np.nanpercentile(_b, 2.5, axis=0), np.nanpercentile(_b, 97.5, axis=0)
+            _dlo, _dhi = np.nanpercentile(_b - _sfha_b, 2.5, axis=0), np.nanpercentile(_b - _sfha_b, 97.5, axis=0)
             _rows.append(
                 {
                     "key": _key_label,
                     "layer": _layer_label,
                     "block groups": len(_y),
-                    "rho": _rho,
-                    "rho_lo": np.nanpercentile(_rho_b, 2.5),
-                    "rho_hi": np.nanpercentile(_rho_b, 97.5),
-                    "auc": _auc,
-                    "auc_lo": np.percentile(_auc_b, 2.5),
-                    "auc_hi": np.percentile(_auc_b, 97.5),
+                    "rho": spearmanr(_x, _y).statistic,
+                    "rho_lo": _lo[0],
+                    "rho_hi": _hi[0],
+                    "auc": roc_auc_score(_top, _x),
+                    "auc_lo": _lo[1],
+                    "auc_hi": _hi[1],
+                    "rho_vs_sfha_lo": _dlo[0],
+                    "rho_vs_sfha_hi": _dhi[0],
+                    "auc_vs_sfha_lo": _dlo[1],
+                    "auc_vs_sfha_hi": _dhi[1],
                 }
             )
     scores = pd.DataFrame(_rows)
@@ -696,7 +784,13 @@ def _(results, scores):
     _show = scores.copy()
     _show["Spearman ρ (95% CI)"] = _show.apply(lambda r: f"{r.rho:.2f} ({r.rho_lo:.2f}–{r.rho_hi:.2f})", axis=1)
     _show["AUC (95% CI)"] = _show.apply(lambda r: f"{r.auc:.2f} ({r.auc_lo:.2f}–{r.auc_hi:.2f})", axis=1)
-    _show[["key", "layer", "block groups", "Spearman ρ (95% CI)", "AUC (95% CI)"]]
+    _show["ρ minus SFHA"] = _show.apply(
+        lambda r: f"{r.rho_vs_sfha:+.2f} ({r.rho_vs_sfha_lo:+.2f} to {r.rho_vs_sfha_hi:+.2f})", axis=1
+    )
+    _show["AUC minus SFHA"] = _show.apply(
+        lambda r: f"{r.auc_vs_sfha:+.2f} ({r.auc_vs_sfha_lo:+.2f} to {r.auc_vs_sfha_hi:+.2f})", axis=1
+    )
+    _show[["key", "layer", "block groups", "Spearman ρ (95% CI)", "AUC (95% CI)", "ρ minus SFHA", "AUC minus SFHA"]]
     return
 
 
@@ -733,9 +827,82 @@ def _(KEYS, LAYERS, plt, results, scores):
 @app.cell
 def _(mo):
     mo.md(r"""
+    ### Do the cut-offs matter?
+
+    The HAND and depression cut-offs above were fixed before scoring. This sweep shows what other
+    cut-offs would have given, against the two per-building keys. No cut-off lets either static
+    layer reach the SFHA.
+    """)
+
+
+@app.cell
+def _(KEYS, flags, pd, results, spearmanr):
+    _rows = []
+    _cuts = [("HAND ≤", "hand_m", c) for c in (0.5, 1, 2, 3, 5, 8)] + [
+        ("depression ≥", "sink_m", c) for c in (0.01, 0.05, 0.1, 0.3, 0.6)
+    ]
+    for _name, _col, _cut in _cuts:
+        _flag = flags[_col] <= _cut if _col == "hand_m" else flags[_col] >= _cut
+        _share = _flag.groupby(flags.bg).mean()
+        _row = {"layer": f"{_name} {_cut} m", "buildings flagged": f"{_flag.mean():.1%}"}
+        for _key in ("claims_per_building", "ihp_per_unit"):
+            _label, _rate, _keep = KEYS[_key]
+            _row[f"ρ, {_label}"] = round(spearmanr(_share[_keep], _rate[_keep]).statistic, 3)
+        _rows.append(_row)
+    _sfha = flags.sfha.groupby(flags.bg).mean()
+    _rows.append(
+        {"layer": "FEMA SFHA", "buildings flagged": f"{flags.sfha.mean():.1%}"}
+        | {
+            f"ρ, {KEYS[k][0]}": round(spearmanr(_sfha[KEYS[k][2]], KEYS[k][1][KEYS[k][2]]).statistic, 3)
+            for k in ("claims_per_building", "ihp_per_unit")
+        }
+    )
+    _table = pd.DataFrame(_rows)
+    _table.to_csv(results / "sensitivity.csv", index=False)
+    _table
+    return
+
+
+@app.cell
+def _(KEYS, bg, block_groups, plt, results):
+    _label, _rate, _keep = KEYS["ihp_per_unit"]
+    _m = block_groups.set_index("bg").join(bg[["sfha", "hand_fim", "sink_30cm"]]).assign(key=_rate.where(_keep))
+    _fig, _axes = plt.subplots(1, 4, figsize=(18, 5))
+    for _ax, (_col, _title) in zip(
+        _axes,
+        [
+            ("sfha", "FEMA SFHA: share of buildings"),
+            ("hand_fim", "OWP HAND-FIM, Harvey flows"),
+            ("sink_30cm", "3DEP depression ≥ 0.3 m"),
+            ("key", "IHP flood registrations per housing unit"),
+        ],
+        strict=True,
+    ):
+        _m.plot(
+            column=_col,
+            ax=_ax,
+            cmap="Blues",
+            vmin=0,
+            vmax=_m[_col].quantile(0.97),
+            legend=True,
+            missing_kwds={"color": "lightgrey"},
+            legend_kwds={"shrink": 0.6},
+        )
+        _ax.set_title(_title, fontsize=10)
+        _ax.set_axis_off()
+    _fig.suptitle("Harris County 2010 block groups (grey: fewer than 50 buildings)")
+    _fig.tight_layout()
+    _fig.savefig(results / "maps.png", dpi=110)
+    _fig
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
     ## 9. Where each layer goes most wrong
 
-    For the uninsured-inclusive key (IHP flood registrations per home) we rank block groups by the
+    For the key that includes the uninsured (IHP flood registrations per housing unit) we rank block groups by the
     key and by each layer, and list the ones with the biggest gap each way: **missed** (heavy
     damage, layer rates them low) and **false alarm** (layer rates them high, little damage).
     The columns beside them are the clues for why.
@@ -744,12 +911,12 @@ def _(mo):
 
 @app.cell
 def _(KEYS, LAYERS, bg, block_groups, pd, results):
-    _label, _rate, _keep = KEYS["ihp_per_home"]
+    _label, _rate, _keep = KEYS["ihp_per_unit"]
     _d = bg[_keep].assign(key=_rate[_keep])
     _cent = block_groups.set_index("bg").geometry.centroid.to_crs("EPSG:4326")
     _d["lat"], _d["lon"] = _cent.y.reindex(_d.index).round(3), _cent.x.reindex(_d.index).round(3)
     _d["key_pct"] = _d.key.rank(pct=True)
-    _cols = ["key", "buildings", "policies", "claims_river", "claims_rain", *LAYERS, "lat", "lon"]
+    _cols = ["key", "buildings", "units", "policies", "claims_river", "claims_rain", *LAYERS, "lat", "lon"]
     _out = []
     for _layer, _layer_label in LAYERS.items():
         _gap = _d.key_pct - _d[_layer].rank(pct=True)
