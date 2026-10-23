@@ -105,23 +105,23 @@ def _(mo):
 @app.cell
 def _(Path, json, log, requests, time):
     def get(url: str, params: dict | None = None) -> requests.Response:
-        """GET with up to 5 attempts and backoff; FEMA's and NOAA's servers drop connections now and then."""
-        for attempt in range(5):
+        """GET with up to 8 attempts and backoff; FEMA's and NOAA's servers drop connections now and then."""
+        for attempt in range(8):
             try:
                 r = requests.get(url, params=params, timeout=600)
                 r.raise_for_status()
                 return r
             except requests.RequestException as e:
                 log.warning("attempt %d for %s failed: %s", attempt + 1, url, str(e)[:120])
-                time.sleep(2 ** (attempt + 1))
+                time.sleep(min(2 ** (attempt + 1), 60))
         raise RuntimeError(f"GET failed: {url} {params}")
 
     def fetch(url: str, path: Path, params: dict | None = None) -> Path:
-        """Download url to path once, with up to 4 attempts and backoff."""
+        """Download url to path once, with up to 8 attempts and backoff."""
         if path.exists():
             return path
         path.parent.mkdir(parents=True, exist_ok=True)
-        for attempt in range(4):
+        for attempt in range(8):
             try:
                 with requests.get(url, params=params, stream=True, timeout=600) as r:
                     r.raise_for_status()
@@ -133,7 +133,7 @@ def _(Path, json, log, requests, time):
                     return path
             except requests.RequestException as e:
                 log.warning("attempt %d for %s failed: %s", attempt + 1, url, e)
-                time.sleep(2 ** (attempt + 1))
+                time.sleep(min(2 ** (attempt + 1), 60))
         raise RuntimeError(f"could not download {url}")
 
     def openfema(entity: str, filter_: str, select: str, path: Path) -> list[dict]:
@@ -147,7 +147,7 @@ def _(Path, json, log, requests, time):
         rows: list[dict] = []
         for page in range(100):  # 1 million rows is far beyond any one filter here
             params = {"$filter": filter_, "$select": select, "$top": 10000, "$skip": page * 10000}
-            for attempt in range(5):
+            for attempt in range(8):
                 try:
                     r = requests.get(f"https://www.fema.gov/api/open/{entity}", params=params, timeout=300)
                     r.raise_for_status()
@@ -155,7 +155,7 @@ def _(Path, json, log, requests, time):
                     break
                 except (requests.RequestException, ValueError, KeyError) as e:
                     log.warning("OpenFEMA attempt %d (%s) failed: %s", attempt + 1, filter_, str(e)[:120])
-                    time.sleep(2 ** (attempt + 1))
+                    time.sleep(min(2 ** (attempt + 1), 60))
             else:
                 raise RuntimeError(f"OpenFEMA query failed: {entity} {filter_}")
             rows += batch

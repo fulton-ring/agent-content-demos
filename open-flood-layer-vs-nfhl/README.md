@@ -86,7 +86,7 @@ The closest result: on river claims, HAND-FIM or depression minus the SFHA is ρ
 - **Answer-key biases.** NFIP policies cluster in the SFHA because of the mandatory-purchase rule, and take-up outside it is low, which favours the SFHA on per-policy keys. IHP counts registrations, not measured damage. People had to apply, renters register, and insured owners often don't.
 - **Vintage mismatches.** The NFHL, NSI (2022), 3DEP (republished 2026) and HAND are all current, not August 2017. 17% of claims and 19% of policies carry 2020 block-group codes, which we crosswalk to 2010 through NSI buildings.
 - **Harvey exceeded the 1% event** across much of the county. A 1% map is not expected to contain it, so these are rankings, not hit rates.
-- **One event, one county.** A second event (for example Tropical Storm Imelda, 2019) is split off as a sub-issue.
+- **One event, one county.** A second event (Imelda 2019 or Tax Day 2016) is split off as #111.
 - **No 1%-flow HAND map.** OWP's recurrence flows sit in a requester-pays bucket, and the retrospective archive is too big to fit 100-year flows from in this spike.
 
 ## What we looked at first
