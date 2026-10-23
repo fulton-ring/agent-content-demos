@@ -135,8 +135,7 @@ day apart.
   page title, so a 2025 release on a new page would be missed. The newest Pathfinder year
   folder, not the newest day.
 - **A pattern is tied to a page's wording.** A redesign makes the row fail loudly and fall
-  back to manual, rather than read a wrong date. That is deliberate, but it means some
-  upkeep.
+  back to manual, rather than read a wrong date. That is deliberate, but needs upkeep.
 - **Markers never date a copy.** Seven datasets still need a person whenever their marker
   changes.
 - **It doesn't run on a schedule.** See below.
