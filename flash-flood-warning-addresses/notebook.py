@@ -99,11 +99,15 @@ def _(mo):
     buildings and road crossings likely to flood first? If so, the places that actually flooded in
     Lanesville should land near the top of the list.
 
-    **Test.** We rank every structure and road–stream crossing in and around Lanesville three ways:
+    **Test.** We rank every structure and road–stream crossing in and around Lanesville five ways:
 
-    1. HAND (height above nearest drainage) computed here from the 1 m lidar DEM;
+    1. HAND (height above nearest drainage) computed here from the 1 m lidar DEM, against every
+       mapped stream;
     2. NOAA OWP's precomputed 10 m HAND, the national product behind its flood inundation maps;
-    3. plain height above the nearest creek point, in a straight line.
+    3. plain height above the nearest creek point, in a straight line;
+    4. and 5. the same 1 m HAND, measured only against named creeks, or only against the
+       National Water Model streams OWP uses. These two test whether the gap between rankings 1
+       and 2 comes from the stream network or from the DEM's resolution.
 
     Then we check where the places seen flooding land. The answer key is the NWS flood survey,
     plus named places from storm reports and news. It records only where flooding *was* seen,
@@ -415,6 +419,15 @@ def _(mo):
       included, nearly every building sits next to a "stream".
     - **Roads:** TIGER 2025.
     - **Bridges and culverts:** the National Bridge Inventory (BTS NTAD, June 2025).
+
+    Two coarser networks, each a subset of the kept NHD flowlines:
+
+    - **Named creeks:** flowlines with a GNIS name.
+    - **NWM streams:** OWP publishes the National Water Model streams it built its HAND on
+      (`nwm_subset_streams.gpkg`, NHDPlus V2 medium resolution) beside the rasters. Those lines
+      sit a median 11–15 m off the lidar channels here, too far to burn into a 1 m DEM, so we
+      keep the NHD High Resolution flowlines that run along them: at least 80% of the flowline
+      within 60 m of an NWM stream.
     """)
 
 
@@ -478,6 +491,14 @@ def _(UTM, arcgis, box, cache, fetch, gpd, pd, shape, site, zipfile):
     _flow = gpd.read_file(_gpkg, layer="NHDFlowline", bbox=AREA)
     streams = _flow[_flow.ftype.isin([460, 558, 334, 336])].to_crs(UTM)
     swales = _flow[_flow.ftype == 468].to_crs(UTM)
+    named_streams = streams[streams.gnis_name.notna()]
+    fetch(
+        "https://ciroh-owp-hand-fim.s3.us-east-2.amazonaws.com/hand_fim_4_9_9_0/05140104/nwm_subset_streams.gpkg",
+        cache / "nwm_05140104.gpkg",
+    )
+    _nwm = gpd.read_file(cache / "nwm_05140104.gpkg").to_crs(UTM).clip(streams.total_bounds)
+    _along = streams.geometry.intersection(_nwm.union_all().buffer(60)).length / streams.length
+    nwm_streams = streams[_along >= 0.8]
 
     roads = gpd.read_file(cache / "roads_18061.zip", bbox=AREA).to_crs(UTM)
     area_utm = gpd.GeoSeries([box(*AREA)], crs="EPSG:4326").to_crs(UTM).iloc[0]
@@ -490,13 +511,19 @@ def _(UTM, arcgis, box, cache, fetch, gpd, pd, shape, site, zipfile):
                 "structures": len(structures),
                 "stream flowlines": len(streams),
                 "drainageway swales dropped": len(swales),
+                "named-creek flowlines": len(named_streams),
+                "NWM streams (OWP)": len(_nwm),
+                "flowlines along an NWM stream": len(nwm_streams),
+                "km of flowlines: all, named, along NWM": " / ".join(
+                    f"{g.length.sum() / 1000:.0f}" for g in (streams, named_streams, nwm_streams)
+                ),
                 "road segments": len(roads),
                 "NBI structures": len(bridges),
                 "NBI culverts": int(bridges.culvert.sum()),
             }
         ).to_string()
     )
-    return AREA, area_label, area_utm, bridges, roads, streams, structures
+    return AREA, area_label, area_utm, bridges, named_streams, nwm_streams, roads, streams, structures
 
 
 @app.cell
@@ -515,7 +542,9 @@ def _(mo):
        the culverts the DEM can't see;
     2. `breach_depressions_least_cost` lets every cell drain;
     3. `elevation_above_stream` traces each cell's downslope path to the first stream cell and
-       reports how far above that cell it sits. That is HAND.
+       reports how far above that cell it sits. That is HAND. We run it three times on the same
+       conditioned DEM, changing only which streams count: all kept flowlines, named creeks, and
+       flowlines along NWM streams.
 
     The same library gives the third ranking, `elevation_above_stream_euclidean`: height above
     the nearest stream cell in a straight line, with no flow routing. It also gives
@@ -532,7 +561,9 @@ def _(
     log,
     math,
     merge,
+    named_streams,
     np,
+    nwm_streams,
     rasterio,
     rasterize,
     roads,
@@ -541,7 +572,9 @@ def _(
     transform_bounds,
     wbw,
 ):
-    _dem_path, _out = site_cache / "dem_1m.tif", {n: site_cache / f"{n}.tif" for n in ["hand", "above_creek", "sink"]}
+    _networks = {"hand": streams, "hand_named": named_streams, "hand_nwm": nwm_streams}
+    _dem_path = site_cache / "dem_1m.tif"
+    _out = {n: site_cache / f"{n}.tif" for n in [*_networks, "above_creek", "sink"]}
     if not all(p.exists() for p in _out.values()):
         _base = (
             "/vsicurl/https://prd-tnm.s3.amazonaws.com/StagedProducts/Elevation/1m/Projects/"
@@ -567,9 +600,10 @@ def _(
         }
         with rasterio.open(_dem_path, "w", **_prof) as _d:
             _d.write(_arr.astype("float32"))
-        _mask = rasterize(streams.geometry, out_shape=_arr.shape[1:], transform=_tr, all_touched=True)
-        with rasterio.open(site_cache / "streams.tif", "w", **{**_prof, "nodata": 0}) as _d:
-            _d.write(_mask.astype("float32"), 1)
+        for _name, _net in _networks.items():
+            _mask = rasterize(_net.geometry, out_shape=_arr.shape[1:], transform=_tr, all_touched=True)
+            with rasterio.open(site_cache / f"streams_{_name}.tif", "w", **{**_prof, "nodata": 0}) as _d:
+                _d.write(_mask.astype("float32"), 1)
         for _name, _gdf in [("streams", streams), ("roads", roads)]:
             _flat = _gdf[["geometry"]].explode(ignore_index=True)
             _flat["geometry"] = _flat.geometry.force_2d()
@@ -580,7 +614,7 @@ def _(
         _wbe.verbose = False
         _h = _wbe.hydrology
         _raw = _wbe.read_raster(str(_dem_path))
-        _stream_raster = _wbe.read_raster(str(site_cache / "streams.tif"))
+        _stream_raster = _wbe.read_raster(str(site_cache / "streams_hand.tif"))
         _culverts = _h.burn_streams_at_roads(
             dem=_raw,
             streams=_wbe.read_vector(str(site_cache / "streams.shp")),
@@ -588,7 +622,9 @@ def _(
             road_width=30.0,
         )
         _drained = _h.breach_depressions_least_cost(dem=_culverts, max_dist=100, fill_deps=True)
-        _wbe.write_raster(_h.elevation_above_stream(dem=_drained, streams=_stream_raster), str(_out["hand"]))
+        for _name in _networks:
+            _net_raster = _wbe.read_raster(str(site_cache / f"streams_{_name}.tif"))
+            _wbe.write_raster(_h.elevation_above_stream(dem=_drained, streams=_net_raster), str(_out[_name]))
         _wbe.write_raster(
             _h.elevation_above_stream_euclidean(dem=_raw, streams=_stream_raster), str(_out["above_creek"])
         )
@@ -602,8 +638,11 @@ def _(
             assert _d.shape == dem.shape and _d.transform == dem_transform, f"{_name} is off the DEM grid"
             _layers[_name] = _d.read(1, masked=True).astype("float32").filled(np.nan)
     hand, above_creek, depression = _layers["hand"], _layers["above_creek"], _layers["sink"]
-    print(f"DEM {dem.shape[1]} x {dem.shape[0]} cells; HAND missing for {np.isnan(hand).mean():.1%} of cells")
-    return above_creek, dem, dem_transform, depression, hand
+    hand_named, hand_nwm = _layers["hand_named"], _layers["hand_nwm"]
+    print(f"DEM {dem.shape[1]} x {dem.shape[0]} cells")
+    for _name in _networks:
+        print(f"{_name}: missing for {np.isnan(_layers[_name]).mean():.1%} of cells")
+    return above_creek, dem, dem_transform, depression, hand, hand_named, hand_nwm
 
 
 @app.cell
@@ -763,6 +802,8 @@ def _(
     geometry_mask,
     gpd,
     hand,
+    hand_named,
+    hand_nwm,
     np,
     owp_layers,
     pd,
@@ -806,7 +847,12 @@ def _(
     )
     candidates = gpd.GeoDataFrame(_cand, geometry="geometry", crs=structures.crs)
     _is_min = (candidates.stat == "min").to_numpy()
-    for _name, _arr in [("hand_1m", hand), ("above_creek", above_creek)]:
+    for _name, _arr in [
+        ("hand_1m", hand),
+        ("hand_1m_named", hand_named),
+        ("hand_1m_nwm", hand_nwm),
+        ("above_creek", above_creek),
+    ]:
         _lo = zonal(_arr, dem_transform, list(candidates.geometry), np.min)
         _hi = zonal(_arr, dem_transform, list(candidates.geometry), np.max)
         candidates[_name] = np.where(_is_min, _lo, _hi)
@@ -818,7 +864,13 @@ def _(
         candidates["hand_owp_10m"] = np.nanmin(_owp, axis=0) if len(owp_layers) else np.nan
     _town_utm = gpd.GeoSeries([town], crs="EPSG:4326").to_crs(candidates.crs).iloc[0]
     candidates["in_town"] = candidates.intersects(_town_utm)
-    METHODS = {"hand_1m": "1 m HAND", "hand_owp_10m": "10 m OWP HAND", "above_creek": "Height above creek"}
+    METHODS = {
+        "hand_1m": "1 m HAND",
+        "hand_owp_10m": "10 m OWP HAND",
+        "above_creek": "Height above creek",
+        "hand_1m_named": "1 m HAND, named creeks",
+        "hand_1m_nwm": "1 m HAND, NWM streams",
+    }
     print(candidates.groupby("kind")[list(METHODS)].describe().T.round(1).to_string())
     return METHODS, candidates
 
@@ -956,8 +1008,10 @@ def _(mo):
 
     The two HAND products measure height above different streams. Our 1 m HAND uses every kept
     NHD High Resolution flowline, most of them small unnamed channels. OWP builds its HAND on
-    the National Water Model's coarser network. For each ranking's top 25 in town, we count how
-    many sit nearest a named creek and show the median of the *other* product's HAND.
+    the National Water Model's coarser network. For each HAND ranking's top 25 in town, we count
+    how many sit nearest a named creek and show their median HAND in the other rankings. If the
+    1 m HAND against NWM streams picks the same places as OWP's 10 m HAND, the network explains
+    the gap; if it still picks different ones, the resolution does.
     """)
 
 
@@ -966,14 +1020,17 @@ def _(candidates, np, pd, streams):
     _town = candidates[candidates.in_town]
     _named = streams[streams.gnis_name.notna()]
     _rows = {}
-    for _m, _other in [("hand_1m", "hand_owp_10m"), ("hand_owp_10m", "hand_1m")]:
+    _hands = ["hand_1m", "hand_1m_named", "hand_1m_nwm", "hand_owp_10m"]
+    _owp_top = set(_town.index[_town.hand_owp_10m.rank(method="average") <= 25])
+    for _m in _hands:
         _top = _town[_town[_m].rank(method="average") <= 25]
         _to_named = np.array([_named.distance(g).min() for g in _top.geometry])
         _to_any = np.array([streams.distance(g).min() for g in _top.geometry])
         _rows[f"top 25 by {_m}"] = {
+            "candidates in it (ties included)": len(_top),
+            "also in OWP's top 25": len(_owp_top & set(_top.index)),
             "nearest stream is a named creek": int((_to_named <= _to_any).sum()),
-            "median 1 m HAND (m)": round(float(_top.hand_1m.median()), 1),
-            "median 10 m OWP HAND (m)": round(float(_top.hand_owp_10m.median()), 1),
+            **{f"median {h} (m)": round(float(_top[h].median()), 1) for h in _hands},
         }
     network = pd.DataFrame(_rows)
     print(f"{int(streams.gnis_name.isna().sum())} of {len(streams)} kept flowlines in the study area are unnamed")
