@@ -5,3 +5,4 @@ set -euo pipefail
 cd "$(dirname "$0")"
 uv run 1_data.py
 uv run 2_backtest.py
+uv run 3_favourite.py
