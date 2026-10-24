@@ -41,7 +41,7 @@ def _():
     import matplotlib.pyplot as plt
     import numpy as np
     import pandas as pd
-    from scipy.stats import binomtest
+    from scipy.stats import binomtest, ttest_1samp
 
     CACHE = Path(
         os.environ.get("KALSHI_NYC_CACHE", Path.home() / ".cache" / "kalshi-nyc-temperature")
@@ -65,6 +65,7 @@ def _():
         pd,
         plt,
         prices,
+        ttest_1samp,
     )
 
 
@@ -115,16 +116,18 @@ def _(mo):
 
         If the market is calibrated, favourites priced at 70% win about 70% of the time. For
         each snapshot and price bin we count wins and give a Wilson 95% interval for the win
-        rate. One favourite a day, so the days are independent draws. The last column of the
-        summary is the **gap**: win rate minus average midpoint, with a 95% interval. A gap
-        above zero means the market was underconfident.
+        rate. One favourite a day, so the days are independent draws. The summary's **gap**
+        is the win rate minus the average midpoint, with a 95% interval and a t-test p-value;
+        a gap above zero means the market was underconfident. **buyer_edge** is what is left
+        for someone who buys at the ask and pays the taker fee (before its rounding to the
+        cent): the gap minus the half-spread minus the fee.
         """
     )
     return
 
 
 @app.cell
-def _(RESULTS, SNAPSHOTS, binomtest, fav, np, pd):
+def _(RESULTS, SNAPSHOTS, binomtest, fav, np, pd, ttest_1samp):
     BINS = [0.0, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.01]
     _fav = fav.assign(bin=pd.cut(fav.mid, BINS, right=False))
     _rows = []
@@ -147,6 +150,7 @@ def _(RESULTS, SNAPSHOTS, binomtest, fav, np, pd):
     def gap(g: pd.DataFrame) -> pd.Series:
         """Win rate minus average price, with a normal 95% interval over days."""
         diff = g.won - g.mid
+        buyer = g.won - g.yes_ask - 0.07 * g.yes_ask * (1 - g.yes_ask)
         return pd.Series(
             {
                 "n": len(g),
@@ -154,6 +158,9 @@ def _(RESULTS, SNAPSHOTS, binomtest, fav, np, pd):
                 "win_rate": g.won.mean(),
                 "gap": diff.mean(),
                 "gap_ci95": 1.96 * diff.std() / np.sqrt(len(g)),
+                "p_value": ttest_1samp(diff, 0).pvalue,
+                "buyer_edge": buyer.mean(),
+                "buyer_edge_ci95": 1.96 * buyer.std() / np.sqrt(len(g)),
             }
         )
 
@@ -339,19 +346,26 @@ def _(mo):
         On 2026-08-14 Kalshi moved settlement from the NWS Daily Climate Report to The
         Weather Company. `2_backtest.py` found the two agreed on every day both exist, but a
         change in source could still change how traders price the favourite. We split the
-        calibration gap at the switch, and the chosen rule's second-half trades with it.
+        calibration gap into three periods (the first half, the second half before the
+        switch, and after it), and the chosen rule's second-half trades at the switch.
         """
     )
     return
 
 
 @app.cell
-def _(SNAPSHOTS, SWITCH, chosen_trades, fav, gap, pd, summary):
+def _(RESULTS, SECOND_HALF, SNAPSHOTS, SWITCH, chosen_trades, fav, gap, pd, summary):
+    _periods = {
+        "first half": fav.date < SECOND_HALF,
+        "second half, NWS CLI": (fav.date >= SECOND_HALF) & (fav.date < SWITCH),
+        "after switch, Weather Company": fav.date >= SWITCH,
+    }
     _rows = []
     for _snap in SNAPSHOTS:
-        for _label, _part in [("before", fav.date < SWITCH), ("after", fav.date >= SWITCH)]:
+        for _label, _part in _periods.items():
             _rows.append(gap(fav[(fav.snapshot == _snap) & _part]).rename(f"{_snap}, {_label}"))
-    by_source = pd.DataFrame(_rows)
+    by_period = pd.DataFrame(_rows)
+    by_period.to_csv(RESULTS / "favourite_gaps_by_period.csv")
     _split = pd.DataFrame(
         {
             "before": summary(chosen_trades[chosen_trades.date < SWITCH]),
@@ -360,7 +374,7 @@ def _(SNAPSHOTS, SWITCH, chosen_trades, fav, gap, pd, summary):
     ).T
     print("Chosen rule's second-half trades, before and after the switch:")
     print(_split.round(2).to_string())
-    by_source.round(3)
+    by_period.round(3)
     return
 
 
@@ -368,10 +382,19 @@ def _(SNAPSHOTS, SWITCH, chosen_trades, fav, gap, pd, summary):
 def _(mo):
     mo.md(
         """
-        ## What this does and doesn't show
+        ## The answer, and what this doesn't show
 
-        The tables above are the result; the README states the answer in a sentence. Limits:
-        one year of one market; prices are hourly closes, and every order fills in full at
+        Read the tables above in this order. Over the whole year the favourite at 4 pm the
+        day before and at 8 am won a few points more often than its price, a gap at the edge
+        of the 95% interval. Most of that comes from favourites priced 40 to 60%; few were
+        priced 60 to 80%, and in that band the gap is within its interval at every snapshot,
+        so the hint in `2_backtest.py` came from a small number of days. The gap isn't
+        steady either: it is positive in the first half, negative from late April to the
+        settlement switch, and positive again after it. And the rule picked on the first
+        half lost money on the second. So the market is not reliably underconfident on its
+        favourite, and there is nothing to trade after the spread and the fee.
+
+        Limits: one year of one market; prices are hourly closes, and every order fills in full at
         the quoted ask with no slippage; the bins and bands are coarse because a year gives
         only about 180 favourites per half per snapshot, so an edge of a few cents is below
         what this sample can detect.
