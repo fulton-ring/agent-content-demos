@@ -116,11 +116,14 @@ highest midpoint) alone, one per day, with 95% intervals (`results/favourite_*.c
 | 8 am | 364 | 56.0% | 61.0% | +5.0 ± 4.8 | 0.04 | +2.3 ± 4.8 |
 | 2 pm | 365 | 76.8% | 78.4% | +1.6 ± 3.9 | 0.43 | −0.9 ± 3.9 |
 
-- **The 60 to 80% band itself shows nothing.** Only 15 favourites the day before and 56 at
-  8 am were priced there, and the gap is inside its interval at every snapshot. The
-  whole-year gap comes mostly from favourites priced 40 to 60%.
+- **The 60 to 80% band itself shows little.** Only 15 favourites the day before and 56 at
+  8 am were priced there. The day-before gap is +17.8 ± 16.7 pts on those 15 days
+  (p = 0.06); at 8 am and 2 pm it is inside its interval. The whole-year gap comes mostly
+  from favourites priced 40 to 60%.
 - **It doesn't hold over time.** At 8 am the gap was +9.6 ± 6.7 pts in the first half,
-  −3.7 ± 8.8 from 2026-04-20 to the settlement switch, and +7.3 ± 11.0 after it.
+  −3.7 ± 8.8 from 2026-04-20 to the settlement switch, and +7.3 ± 11.0 after it. At 4 pm
+  the day before it went +6.3, −5.3, then +19.3 ± 10.9 after the switch (65 days), the one
+  period that stands out; it needs more post-switch days before it means anything.
 - **Out of sample it loses.** Of 63 rules (snapshot × price band on the ask) tried on
   2025-10-20 to 2026-04-19, the best was "buy 10 of the 8 am favourite whenever its ask is
   40% or more": +$132 ± $115 on 159 trades. On 2026-04-20 to 2026-10-19 the same rule lost
@@ -169,7 +172,7 @@ not from the published run.
 - Sensor data and the official record are different things: 1-minute readings ran above
   the official high on a third of days.
 - The market's apparent underconfidence on its favourite bracket is not a reliable edge
-  (see below).
+  (see above).
 
 ## What we looked at first
 
