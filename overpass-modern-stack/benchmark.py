@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.10.0"
+__generated_with = "0.25.2"
 app = marimo.App(width="medium")
 
 
@@ -19,27 +19,37 @@ def _():
     import marimo as mo
     import polars as pl
 
-    return Callable, Path, httpx, json, mo, os, pl, statistics, subprocess, sys, time
+    return (
+        Callable,
+        Path,
+        httpx,
+        json,
+        mo,
+        os,
+        pl,
+        statistics,
+        subprocess,
+        sys,
+        time,
+    )
 
 
 @app.cell
 def _(mo):
-    mo.md(
-        """
-        # Can a modern stack answer the queries people send to Overpass?
+    mo.md("""
+    # Can a modern stack answer the queries people send to Overpass?
 
-        Overpass is the API most people use to pull features out of OpenStreetMap
-        (OSM). The main public instance rate-limits everyone. Hosting your own means
-        running Overpass's own database and its sync scripts. The candidate here is
-        **osm2pgsql → PostGIS behind a small FastAPI service** (`service.py`), which
-        uses tools that GIS teams already run.
+    Overpass is the API most people use to pull features out of OpenStreetMap
+    (OSM). The main public instance rate-limits everyone. Hosting your own means
+    running Overpass's own database and its sync scripts. The candidate here is
+    **osm2pgsql → PostGIS behind a small FastAPI service** (`service.py`), which
+    uses tools that GIS teams already run.
 
-        We load **the same regional extract into both**, on the same machine, one at
-        a time, and send ten typical queries to each over HTTP. We check that both
-        sides return the same element IDs, then measure latency, disk, RAM and
-        import time. Last, we apply the same hour of OSM replication diffs to both.
-        """
-    )
+    We load **the same regional extract into both**, on the same machine, one at
+    a time, and send ten typical queries to each over HTTP. We check that both
+    sides return the same element IDs, then measure latency, disk, RAM and
+    import time. Last, we apply the same hour of OSM replication diffs to both.
+    """)
     return
 
 
@@ -51,12 +61,9 @@ def _(Path, os):
         "EXTRACT_URL",
         "https://download.bbbike.org/osm/bbbike/WashingtonDC/WashingtonDC.osm.pbf",
     )
-    # One hour of planet replication diffs, 2026-10-24 00:00-01:00Z, right after
-    # the extract's snapshot time.
-    DIFF_URL = os.environ.get(
-        "DIFF_URL",
-        "https://planet.openstreetmap.org/replication/hour/000/123/714.osc.gz",
-    )
+    # Hourly planet replication diffs, starting at the extract's snapshot time.
+    REPLICATION = "https://planet.openstreetmap.org/replication/hour"
+    DIFF_HOURS = int(os.environ.get("DIFF_HOURS", "16"))
     RUNS = int(os.environ.get("RUNS", "7"))
     HERE = Path(__file__).parent
     DATA = HERE / "data"
@@ -74,13 +81,14 @@ def _(Path, os):
         CANDIDATE_URL,
         DATA,
         DB_URL,
-        DIFF_URL,
+        DIFF_HOURS,
         EXTRACT_URL,
         HERE,
         OSM2PGSQL_IMAGE,
         OVERPASS_IMAGE,
         OVERPASS_URL,
         POSTGIS_IMAGE,
+        REPLICATION,
         RESULTS,
         RUNS,
     )
@@ -98,9 +106,14 @@ def _(Callable, subprocess, time):
     def peak_mem_mb(container: str) -> float:
         """Peak memory of a container so far, page cache included (cgroup v1 or v2)."""
         out = sh(
-            ["docker", "exec", container, "sh", "-c",
-             "cat /sys/fs/cgroup/memory.peak 2>/dev/null"
-             " || cat /sys/fs/cgroup/memory/memory.max_usage_in_bytes"]
+            [
+                "docker",
+                "exec",
+                container,
+                "sh",
+                "-c",
+                "cat /sys/fs/cgroup/memory.peak 2>/dev/null || cat /sys/fs/cgroup/memory/memory.max_usage_in_bytes",
+            ]
         )
         return int(out.strip()) / 2**20
 
@@ -108,7 +121,12 @@ def _(Callable, subprocess, time):
         """Memory in use now, as `docker stats` reports it (page cache excluded)."""
         out = sh(["docker", "stats", "--no-stream", "--format", "{{.MemUsage}}", container])
         used = out.split("/")[0].strip()
-        for unit, factor in [("GiB", 1024), ("MiB", 1), ("KiB", 1 / 1024), ("B", 1 / 2**20)]:
+        for unit, factor in [
+            ("GiB", 1024),
+            ("MiB", 1),
+            ("KiB", 1 / 1024),
+            ("B", 1 / 2**20),
+        ]:
             if used.endswith(unit):
                 return float(used[: -len(unit)]) * factor
         raise ValueError(f"unexpected docker stats output: {out!r}")
@@ -127,49 +145,56 @@ def _(Callable, subprocess, time):
 
 @app.cell
 def _(mo):
-    mo.md(
-        """
-        ## The data
+    mo.md("""
+    ## The data
 
-        One public extract: BBBike's Washington DC extract (DC with Arlington,
-        Alexandria and parts of Maryland; about 65 MB, 6.3 M nodes, 0.96 M ways).
-        OSM data © OpenStreetMap contributors, ODbL. BBBike refreshes it weekly, so a
-        later run loads a later snapshot. Both sides always load the same file, and
-        the snapshot time is printed below.
-        """
-    )
+    One public extract: BBBike's Washington DC extract (DC with Arlington,
+    Alexandria and parts of Maryland; about 65 MB, 6.3 M nodes, 0.96 M ways).
+    OSM data © OpenStreetMap contributors, ODbL. BBBike refreshes it weekly, so a
+    later run loads a later snapshot. Both sides always load the same file, and
+    the snapshot time is printed below.
+    """)
     return
 
 
 @app.cell
-def _(DATA, DIFF_URL, EXTRACT_URL, OVERPASS_IMAGE, sh):
-    for _url, _name in [(EXTRACT_URL, "extract.osm.pbf"), (DIFF_URL, "diff.osc.gz")]:
-        if not (DATA / _name).exists():
-            sh(["curl", "-fsSL", "--retry", "3", "-o", str(DATA / _name), _url])
+def _(DATA, EXTRACT_URL, OVERPASS_IMAGE, sh):
+    if not (DATA / "extract.osm.pbf").exists():
+        sh(["curl", "-fsSL", "--retry", "3", "-o", str(DATA / "extract.osm.pbf"), EXTRACT_URL])
     snapshot = sh(
-        ["docker", "run", "--rm", "-v", f"{DATA}:/d:ro", "--entrypoint", "osmium",
-         OVERPASS_IMAGE, "fileinfo", "-g", "header.option.timestamp", "/d/extract.osm.pbf"]
+        [
+            "docker",
+            "run",
+            "--rm",
+            "-v",
+            f"{DATA}:/d:ro",
+            "--entrypoint",
+            "osmium",
+            OVERPASS_IMAGE,
+            "fileinfo",
+            "-g",
+            "header.option.timestamp",
+            "/d/extract.osm.pbf",
+        ]
     ).strip()
     extract_mb = (DATA / "extract.osm.pbf").stat().st_size / 2**20
     print(f"extract: {extract_mb:.0f} MB, snapshot {snapshot}")
-    return extract_mb, snapshot
+    return (snapshot,)
 
 
 @app.cell
 def _(mo):
-    mo.md(
-        """
-        ## Side 1: Overpass, from the Docker image its wiki points to
+    mo.md("""
+    ## Side 1: Overpass, from the Docker image its wiki points to
 
-        `wiktorn/overpass-api` is the image the Overpass wiki lists under "Via a
-        Docker image". It isn't an official Overpass release, but it's the usual way
-        to host Overpass. Its `init` mode only reads `.osm.bz2`, so we use the
-        image's documented preprocess step to convert the PBF. That conversion counts
-        as import time, because anyone hosting Overpass this way pays it too. Area
-        generation, which `area[...]` queries need, is part of init. Diffs are off
-        here; we apply one hour of them by hand later.
-        """
-    )
+    `wiktorn/overpass-api` is the image the Overpass wiki lists under "Via a
+    Docker image". It isn't an official Overpass release, but it's the usual way
+    to host Overpass. Its `init` mode only reads `.osm.bz2`, so we use the
+    image's documented preprocess step to convert the PBF. That conversion counts
+    as import time, because anyone hosting Overpass this way pays it too. Area
+    generation, which `area[...]` queries need, is part of init. Diffs are off
+    here; we apply one hour of them by hand later.
+    """)
     return
 
 
@@ -180,42 +205,71 @@ def _(DATA, OVERPASS_IMAGE, peak_mem_mb, sh, snapshot, time, wait_until):
     sh(["docker", "volume", "rm", "-f", "ovp_db"], may_fail=True)
     _t0 = time.monotonic()
     sh(
-        ["docker", "run", "-d", "--name", "ovp", "-p", "12345:80",
-         "-v", f"{DATA}:/data:ro", "-v", "ovp_db:/db",
-         "-e", "OVERPASS_MODE=init", "-e", "OVERPASS_META=no",
-         "-e", "OVERPASS_PLANET_URL=file:///data/extract.osm.pbf",
-         "-e", "OVERPASS_PLANET_PREPROCESS=mv /db/planet.osm.bz2 /db/planet.osm.pbf"
-               " && osmium cat -o /db/planet.osm.bz2 /db/planet.osm.pbf && rm /db/planet.osm.pbf",
-         "-e", "OVERPASS_STOP_AFTER_INIT=false",
-         "-e", "OVERPASS_ALLOW_DUPLICATE_QUERIES=yes",
-         OVERPASS_IMAGE]
+        [
+            "docker",
+            "run",
+            "-d",
+            "--name",
+            "ovp",
+            "-p",
+            "12345:80",
+            "-v",
+            f"{DATA}:/data:ro",
+            "-v",
+            "ovp_db:/db",
+            "-e",
+            "OVERPASS_MODE=init",
+            "-e",
+            "OVERPASS_META=no",
+            "-e",
+            "OVERPASS_PLANET_URL=file:///data/extract.osm.pbf",
+            "-e",
+            "OVERPASS_PLANET_PREPROCESS=mv /db/planet.osm.bz2 /db/planet.osm.pbf"
+            " && osmium cat -o /db/planet.osm.bz2 /db/planet.osm.pbf && rm /db/planet.osm.pbf",
+            "-e",
+            "OVERPASS_STOP_AFTER_INIT=false",
+            "-e",
+            "OVERPASS_ALLOW_DUPLICATE_QUERIES=yes",
+            OVERPASS_IMAGE,
+        ]
     )
+    wait_until(
+        lambda: "ready to receive requests" in sh(["docker", "logs", "ovp"]),
+        "the Overpass import",
+        4 * 3600,
+    )
+    # The image leaves /db readable only by its overpass user when /db is a named
+    # volume, so the web server can't reach the dispatcher's socket. Open it up.
+    sh(["docker", "exec", "ovp", "chmod", "755", "/db"])
     _probe = "http://127.0.0.1:12345/api/interpreter?data=[out:json];node(1);out;"
-    wait_until(lambda: '"generator"' in sh(["curl", "-s", _probe], may_fail=True),
-               "the Overpass import", 4 * 3600)
+    wait_until(
+        lambda: '"generator"' in sh(["curl", "-sg", "--noproxy", "*", _probe], may_fail=True),
+        "Overpass to answer",
+        300,
+    )
     overpass_import_s = time.monotonic() - _t0
     overpass_import_peak_mb = peak_mem_mb("ovp")
-    print(f"Overpass ({snapshot}) import: {overpass_import_s:.0f} s, "
-          f"peak memory {overpass_import_peak_mb:.0f} MB incl. page cache")
+    print(
+        f"Overpass ({snapshot}) import: {overpass_import_s:.0f} s, "
+        f"peak memory {overpass_import_peak_mb:.0f} MB incl. page cache"
+    )
     return overpass_import_peak_mb, overpass_import_s
 
 
 @app.cell
 def _(mo):
-    mo.md(
-        """
-        ## Side 2: the candidate, osm2pgsql into PostGIS
+    mo.md("""
+    ## Side 2: the candidate, osm2pgsql into PostGIS
 
-        osm2pgsql runs in `--slim` mode with the flex style in `flex.lua`. Slim mode
-        keeps "middle" tables holding every node, way and relation with its tags,
-        way node lists and relation members. That's Overpass's own data model, so
-        recursion becomes a lookup. It's also what lets osm2pgsql apply diffs.
-        `flex.lua` adds three tables with geometry and GiST and GIN indexes for
-        tagged nodes, ways and named areas. Both PostgreSQL and osm2pgsql run with
-        default settings. We start this after Overpass has finished so the two
-        imports don't compete for the machine.
-        """
-    )
+    osm2pgsql runs in `--slim` mode with the flex style in `flex.lua`. Slim mode
+    keeps "middle" tables holding every node, way and relation with its tags,
+    way node lists and relation members. That's Overpass's own data model, so
+    recursion becomes a lookup. It's also what lets osm2pgsql apply diffs.
+    `flex.lua` adds three tables with geometry and GiST and GIN indexes for
+    tagged nodes, ways and named areas. Both PostgreSQL and osm2pgsql run with
+    default settings. We start this after Overpass has finished so the two
+    imports don't compete for the machine.
+    """)
     return
 
 
@@ -232,32 +286,742 @@ def _(
     wait_until,
 ):
     assert overpass_import_s > 0
-    sh(["docker", "run", "-d", "--name", "pg", "-p", "15432:5432",
-        "-e", "POSTGRES_PASSWORD=osm", "-e", "POSTGRES_DB=osm", POSTGIS_IMAGE])
+    sh(
+        [
+            "docker",
+            "run",
+            "-d",
+            "--name",
+            "pg",
+            "-p",
+            "15432:5432",
+            "-e",
+            "POSTGRES_PASSWORD=osm",
+            "-e",
+            "POSTGRES_DB=osm",
+            POSTGIS_IMAGE,
+        ]
+    )
     wait_until(
-        lambda: "1" in sh(["docker", "exec", "pg", "psql", "-U", "postgres", "-d", "osm",
-                           "-Atc", "select 1"], may_fail=True),
-        "PostgreSQL to start", 120,
+        lambda: (
+            "1"
+            in sh(
+                [
+                    "docker",
+                    "exec",
+                    "pg",
+                    "psql",
+                    "-U",
+                    "postgres",
+                    "-d",
+                    "osm",
+                    "-Atc",
+                    "select 1",
+                ],
+                may_fail=True,
+            )
+        ),
+        "PostgreSQL to start",
+        120,
     )
     time.sleep(3)  # the image restarts postgres once after its init scripts
     wait_until(
-        lambda: "1" in sh(["docker", "exec", "pg", "psql", "-U", "postgres", "-d", "osm",
-                           "-Atc", "select 1"], may_fail=True),
-        "PostgreSQL to restart", 120,
+        lambda: (
+            "1"
+            in sh(
+                [
+                    "docker",
+                    "exec",
+                    "pg",
+                    "psql",
+                    "-U",
+                    "postgres",
+                    "-d",
+                    "osm",
+                    "-Atc",
+                    "select 1",
+                ],
+                may_fail=True,
+            )
+        ),
+        "PostgreSQL to restart",
+        120,
     )
     _t0 = time.monotonic()
     _log = sh(
-        ["docker", "run", "--rm", "--network", "host", "--entrypoint", "sh",
-         "-e", "PGPASSWORD=osm", "-v", f"{DATA}:/data:ro", "-v", f"{HERE}:/style:ro",
-         OSM2PGSQL_IMAGE, "-c",
-         "osm2pgsql --slim -d osm -U postgres -H 127.0.0.1 -P 15432"
-         " -O flex -S /style/flex.lua /data/extract.osm.pbf"
-         " && (cat /sys/fs/cgroup/memory.peak 2>/dev/null"
-         " || cat /sys/fs/cgroup/memory/memory.max_usage_in_bytes)"]
+        [
+            "docker",
+            "run",
+            "--rm",
+            "--network",
+            "host",
+            "--entrypoint",
+            "sh",
+            "-e",
+            "PGPASSWORD=osm",
+            "-v",
+            f"{DATA}:/data:ro",
+            "-v",
+            f"{HERE}:/style:ro",
+            OSM2PGSQL_IMAGE,
+            "-c",
+            "osm2pgsql --slim -d osm -U postgres -H 127.0.0.1 -P 15432"
+            " -O flex -S /style/flex.lua /data/extract.osm.pbf"
+            " && (cat /sys/fs/cgroup/memory.peak 2>/dev/null"
+            " || cat /sys/fs/cgroup/memory/memory.max_usage_in_bytes)",
+        ]
     )
     candidate_import_s = time.monotonic() - _t0
     osm2pgsql_peak_mb = int(_log.strip()) / 2**20
     postgres_import_peak_mb = peak_mem_mb("pg")
-    print(f"candidate import: {candidate_import_s:.0f} s, peak memory "
-          f"osm2pgsql {osm2pgsql_peak_mb:.0f} MB + PostgreSQL {postgres_import_peak_mb:.0f} MB")
+    print(
+        f"candidate import: {candidate_import_s:.0f} s, peak memory "
+        f"osm2pgsql {osm2pgsql_peak_mb:.0f} MB + PostgreSQL {postgres_import_peak_mb:.0f} MB"
+    )
     return candidate_import_s, osm2pgsql_peak_mb, postgres_import_peak_mb
+
+
+@app.cell
+def _(
+    CANDIDATE_URL,
+    DB_URL,
+    HERE,
+    candidate_import_s,
+    httpx,
+    os,
+    subprocess,
+    sys,
+    wait_until,
+):
+    assert candidate_import_s > 0
+    service = subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "uvicorn",
+            "service:app",
+            "--port",
+            "18000",
+            "--log-level",
+            "warning",
+        ],
+        cwd=HERE,
+        env={**os.environ, "CANDIDATE_DB_URL": DB_URL},
+    )
+
+    def _up() -> bool:
+        try:
+            return (
+                httpx.post(
+                    CANDIDATE_URL,
+                    json={"type": "node", "tags": [{"key": "x", "value": "y"}]},
+                    timeout=5,
+                    trust_env=False,
+                ).status_code
+                == 200
+            )
+        except httpx.HTTPError:
+            return False
+
+    wait_until(_up, "the candidate service", 60)
+    return (service,)
+
+
+@app.cell
+def _(mo):
+    mo.md("""
+    ## The query set
+
+    Ten queries cover the shapes the issue asked for: a tag filter in a bbox,
+    around a point, an area by name, ways with their nodes, recursion down and
+    up, and two HIFLD Next-style infrastructure pulls (substations, hospitals)
+    within a county or state boundary. Overpass gets each one as QL with
+    `out ids;`. The candidate gets the same query as JSON, which `service.py`
+    turns into SQL. The JSON keeps QL's structure: element type, tag filters,
+    one spatial filter, and an optional `(._;>;)` or `(._;<;)`.
+    """)
+    return
+
+
+@app.cell
+def _(pl):
+    CORE = (38.88, -77.05, 38.92, -77.00)  # downtown DC, as south, west, north, east
+    WHOLE = (38.78, -77.23, 39.05, -76.84)  # the extract's clip box
+
+    def bb(box: tuple[float, float, float, float]) -> str:
+        return ",".join(map(str, box))
+
+    def tag(key: str, value: str | None = None, op: str = "=") -> dict[str, str | None]:
+        return {"key": key, "value": value, "op": op if value is not None else "exists"}
+
+    QUERIES: list[tuple[str, str, dict]] = [
+        (
+            "tag in bbox (nodes)",
+            f'node["amenity"="cafe"]({bb(CORE)});',
+            {"type": "node", "tags": [tag("amenity", "cafe")], "bbox": CORE},
+        ),
+        (
+            "tag in bbox (nwr)",
+            f'nwr["amenity"="school"]({bb(CORE)});',
+            {"type": "nwr", "tags": [tag("amenity", "school")], "bbox": CORE},
+        ),
+        (
+            "regex tag, whole extract",
+            f'nwr["name"~"^Starbucks"]({bb(WHOLE)});',
+            {"type": "nwr", "tags": [tag("name", "^Starbucks", "~")], "bbox": WHOLE},
+        ),
+        (
+            "around a point",
+            'node["amenity"="restaurant"](around:500,38.8977,-77.0365);',
+            {
+                "type": "node",
+                "tags": [tag("amenity", "restaurant")],
+                "around": {"lat": 38.8977, "lon": -77.0365, "radius_m": 500},
+            },
+        ),
+        (
+            "area by name",
+            'area["name"="Alexandria"]["admin_level"="6"]->.a; nwr["leisure"="park"](area.a);',
+            {
+                "type": "nwr",
+                "tags": [tag("leisure", "park")],
+                "area": [tag("name", "Alexandria"), tag("admin_level", "6")],
+            },
+        ),
+        (
+            "ways with their nodes",
+            f'way["highway"="primary"]({bb(CORE)}); (._;>;);',
+            {
+                "type": "way",
+                "tags": [tag("highway", "primary")],
+                "bbox": CORE,
+                "recurse": "down",
+            },
+        ),
+        (
+            "recurse down (relations)",
+            f'rel["route"="subway"]({bb(CORE)}); (._;>;);',
+            {
+                "type": "relation",
+                "tags": [tag("route", "subway")],
+                "bbox": CORE,
+                "recurse": "down",
+            },
+        ),
+        (
+            "recurse up (nodes)",
+            f'node["railway"="station"]["station"="subway"]({bb(CORE)}); (._;<;);',
+            {
+                "type": "node",
+                "tags": [tag("railway", "station"), tag("station", "subway")],
+                "bbox": CORE,
+                "recurse": "up",
+            },
+        ),
+        (
+            "substations in DC",
+            'area["name"="District of Columbia"]["admin_level"="4"]->.a; nwr["power"="substation"](area.a);',
+            {
+                "type": "nwr",
+                "tags": [tag("power", "substation")],
+                "area": [tag("name", "District of Columbia"), tag("admin_level", "4")],
+            },
+        ),
+        (
+            "hospitals in Arlington County",
+            'area["name"="Arlington County"]["admin_level"="6"]->.a; nwr["amenity"="hospital"](area.a);',
+            {
+                "type": "nwr",
+                "tags": [tag("amenity", "hospital")],
+                "area": [tag("name", "Arlington County"), tag("admin_level", "6")],
+            },
+        ),
+    ]
+    pl.DataFrame({"query": [q[0] for q in QUERIES], "Overpass QL": [q[1] for q in QUERIES]})
+    return (QUERIES,)
+
+
+@app.cell
+def _(CANDIDATE_URL, OVERPASS_URL, httpx, time):
+    client = httpx.Client(timeout=600, trust_env=False)
+
+    def ask_overpass(ql: str) -> tuple[set[tuple[str, int]], float]:
+        """Run QL on Overpass; return the (type, id) set and the seconds taken."""
+        t0 = time.perf_counter()
+        r = client.post(OVERPASS_URL, data={"data": f"[out:json][timeout:600];{ql}out ids;"})
+        took = time.perf_counter() - t0
+        r.raise_for_status()
+        body = r.json()
+        assert "remark" not in body, f"Overpass remark: {body['remark']}"
+        return {(e["type"], e["id"]) for e in body["elements"]}, took
+
+    def ask_candidate(spec: dict) -> tuple[set[tuple[str, int]], float]:
+        """Run the JSON query on the candidate; return the (type, id) set and seconds."""
+        t0 = time.perf_counter()
+        r = client.post(CANDIDATE_URL, json=spec)
+        took = time.perf_counter() - t0
+        r.raise_for_status()
+        return {(e["type"], e["id"]) for e in r.json()["elements"]}, took
+
+    return ask_candidate, ask_overpass, client
+
+
+@app.cell
+def _(mo):
+    mo.md("""
+    ## Equivalence and latency
+
+    Each query runs once to warm caches. Then it runs `RUNS` times on each side,
+    alternating between them, and we report the median (p50) wall time over HTTP.
+    A query is equivalent when both sides return exactly the same set of element
+    types and IDs. Any difference is listed.
+    """)
+    return
+
+
+@app.cell
+def _(
+    QUERIES: list[tuple[str, str, dict]],
+    RESULTS,
+    RUNS,
+    ask_candidate,
+    ask_overpass,
+    pl,
+    service,
+    statistics,
+):
+    assert service.poll() is None, "candidate service died"
+    _rows = []
+    for _name, _ql, _spec in QUERIES:
+        _o_ids, _ = ask_overpass(_ql)
+        _c_ids, _ = ask_candidate(_spec)
+        _o_times, _c_times = [], []
+        for _ in range(RUNS):
+            _o_times.append(ask_overpass(_ql)[1])
+            _c_times.append(ask_candidate(_spec)[1])
+        _o_p50, _c_p50 = statistics.median(_o_times), statistics.median(_c_times)
+        _rows.append(
+            {
+                "query": _name,
+                "elements": len(_o_ids),
+                "equivalent": _o_ids == _c_ids,
+                "only in Overpass": len(_o_ids - _c_ids),
+                "only in candidate": len(_c_ids - _o_ids),
+                "Overpass p50 ms": round(_o_p50 * 1000, 1),
+                "candidate p50 ms": round(_c_p50 * 1000, 1),
+                "speed-up": round(_o_p50 / _c_p50, 1),
+            }
+        )
+    query_results = pl.DataFrame(_rows)
+    query_results.write_csv(RESULTS / "queries.csv")
+    with pl.Config(tbl_rows=20, tbl_cols=10, tbl_width_chars=200):
+        print(query_results)
+    query_results
+    return (query_results,)
+
+
+@app.cell
+def _(mo):
+    mo.md("""
+    ## Disk, RAM and import time
+
+    Disk is Overpass's database directory against PostgreSQL's database size.
+    "Steady RAM" is what `docker stats` reports after the queries (page cache
+    excluded); for the candidate it adds the service process. "Import peak" is
+    the cgroup's peak during import, page cache included. Both run on default
+    settings, so neither side was tuned.
+    """)
+    return
+
+
+@app.cell
+def _(
+    RESULTS,
+    candidate_import_s,
+    osm2pgsql_peak_mb,
+    overpass_import_peak_mb,
+    overpass_import_s,
+    pl,
+    postgres_import_peak_mb,
+    query_results,
+    service,
+    sh,
+    used_mem_mb,
+):
+    assert query_results.height > 0
+    _ovp_disk = int(sh(["docker", "exec", "ovp", "du", "-sb", "/db/db"]).split()[0]) / 2**20
+    _pg_disk = (
+        int(
+            sh(
+                [
+                    "docker",
+                    "exec",
+                    "pg",
+                    "psql",
+                    "-U",
+                    "postgres",
+                    "-d",
+                    "osm",
+                    "-Atc",
+                    "select pg_database_size('osm')",
+                ]
+            ).strip()
+        )
+        / 2**20
+    )
+    with open(f"/proc/{service.pid}/status") as _f:
+        _service_rss = next(int(line.split()[1]) for line in _f if line.startswith("VmRSS")) / 1024
+    resources = pl.DataFrame(
+        [
+            {
+                "side": "Overpass",
+                "disk MB": round(_ovp_disk),
+                "steady RAM MB": round(used_mem_mb("ovp")),
+                "import peak MB": round(overpass_import_peak_mb),
+                "import s": round(overpass_import_s),
+            },
+            {
+                "side": "candidate",
+                "disk MB": round(_pg_disk),
+                "steady RAM MB": round(used_mem_mb("pg") + _service_rss),
+                "import peak MB": round(osm2pgsql_peak_mb + postgres_import_peak_mb),
+                "import s": round(candidate_import_s),
+            },
+        ]
+    )
+    resources.write_csv(RESULTS / "resources.csv")
+    print(resources)
+    resources
+    return (resources,)
+
+
+@app.cell
+def _(mo):
+    mo.md("""
+    ## Freshness: applying replication diffs
+
+    Both sides get the same planet-wide hourly `osmChange` files, starting at the
+    extract's snapshot time, one hour at a time. BBBike has no regional diff feed,
+    and Geofabrik's was out of reach, so each file is the whole planet's hour.
+    That's an upper bound on a regional feed's work. Both databases also take in
+    the out-of-region objects it contains.
+
+    - Overpass applies each file with `update_from_dir`, the same step its own
+      update loop runs.
+    - osm2pgsql needs each object to appear only once per file, so each file
+      first goes through `osmium merge-changes -s`. That's what
+      `osm2pgsql-replication` does internally, and it counts in the candidate's
+      time.
+
+    We apply 16 hours rather than one: the first hours after midnight UTC carry
+    no edits in DC, so one hour alone wouldn't test anything local.
+    """)
+    return
+
+
+@app.cell
+def _(DATA, DIFF_HOURS, REPLICATION, resources, sh, snapshot):
+    from datetime import datetime
+
+    assert resources.height == 2
+
+    def state(url: str) -> tuple[int, datetime]:
+        """Sequence number and timestamp from a replication state.txt."""
+        fields = dict(line.split("=", 1) for line in sh(["curl", "-fsSL", url]).splitlines() if "=" in line)
+        return int(fields["sequenceNumber"]), datetime.fromisoformat(fields["timestamp"].replace("\\", ""))
+
+    _latest_seq, _latest_at = state(f"{REPLICATION}/state.txt")
+    _start_at = datetime.fromisoformat(snapshot)
+    # Hourly sequence numbers go up by one per hour; file N covers the hour ending at its timestamp.
+    first_seq = _latest_seq - int((_latest_at - _start_at).total_seconds() // 3600) + 1
+    _check_seq, _check_at = state(
+        f"{REPLICATION}/{first_seq // 10**6:03d}/{first_seq // 1000 % 1000:03d}/{first_seq % 1000:03d}.state.txt"
+    )
+    assert (_check_at - _start_at).total_seconds() == 3600, (
+        f"diff {first_seq} ends at {_check_at}, not 1 h after {snapshot}"
+    )
+    diff_files = []
+    for _seq in range(first_seq, first_seq + DIFF_HOURS):
+        _path = DATA / f"hour-{_seq}.osc.gz"
+        if not _path.exists():
+            _url = f"{REPLICATION}/{_seq // 10**6:03d}/{_seq // 1000 % 1000:03d}/{_seq % 1000:03d}.osc.gz"
+            sh(["curl", "-fsSL", "--retry", "3", "-o", str(_path), _url])
+        diff_files.append(_path)
+    print(f"{len(diff_files)} hourly diffs from sequence {first_seq} ({snapshot} onwards)")
+    return (diff_files,)
+
+
+@app.cell
+def _(
+    DATA,
+    HERE,
+    OSM2PGSQL_IMAGE,
+    OVERPASS_IMAGE,
+    Path,
+    RESULTS,
+    diff_files,
+    pl,
+    sh,
+    statistics,
+    time,
+):
+    def apply_to_overpass(path: Path) -> float:
+        """Apply one .osc.gz to Overpass the way its update loop does; return seconds."""
+        sh(["docker", "exec", "ovp", "sh", "-c", "rm -rf /db/diffin && mkdir /db/diffin"])
+        sh(["docker", "cp", str(path), "ovp:/db/diffin/changes.osc.gz"])
+        sh(["docker", "exec", "ovp", "sh", "-c", "gunzip /db/diffin/changes.osc.gz && chown -R overpass /db/diffin"])
+        version = sh(
+            ["docker", "exec", "ovp", "osmium", "fileinfo", "-e", "-g", "data.timestamp.last", "/db/diffin/changes.osc"]
+        ).strip()
+        t0 = time.monotonic()
+        sh(
+            [
+                "docker",
+                "exec",
+                "-u",
+                "overpass",
+                "ovp",
+                "/app/bin/update_from_dir",
+                "--osc-dir=/db/diffin",
+                f"--version={version}",
+                "--flush-size=16",
+            ]
+        )
+        return time.monotonic() - t0
+
+    def apply_to_candidate(path: Path) -> float:
+        """Simplify one .osc.gz and apply it with osm2pgsql --append; return seconds."""
+        name = path.name
+        t0 = time.monotonic()
+        sh(
+            [
+                "docker",
+                "run",
+                "--rm",
+                "-v",
+                f"{DATA}:/d",
+                "--entrypoint",
+                "osmium",
+                OVERPASS_IMAGE,
+                "merge-changes",
+                "-s",
+                "-O",
+                "-o",
+                f"/d/simple-{name}",
+                f"/d/{name}",
+            ]
+        )
+        sh(
+            [
+                "docker",
+                "run",
+                "--rm",
+                "--network",
+                "host",
+                "--entrypoint",
+                "sh",
+                "-e",
+                "PGPASSWORD=osm",
+                "-v",
+                f"{DATA}:/data:ro",
+                "-v",
+                f"{HERE}:/style:ro",
+                OSM2PGSQL_IMAGE,
+                "-c",
+                "osm2pgsql --append --slim -d osm -U postgres -H 127.0.0.1 -P 15432"
+                f" -O flex -S /style/flex.lua /data/simple-{name}",
+            ]
+        )
+        return time.monotonic() - t0
+
+    _rows = []
+    for _path in diff_files:
+        _rows.append(
+            {
+                "diff": _path.name,
+                "MB": round(_path.stat().st_size / 2**20, 1),
+                "Overpass s": round(apply_to_overpass(_path), 1),
+                "candidate s": round(apply_to_candidate(_path), 1),
+            }
+        )
+    diff_times = pl.DataFrame(_rows)
+    diff_times.write_csv(RESULTS / "diffs.csv")
+    overpass_diff_s = statistics.median(diff_times["Overpass s"].to_list())
+    candidate_diff_s = statistics.median(diff_times["candidate s"].to_list())
+    print(diff_times)
+    print(f"median per planet hour: Overpass {overpass_diff_s:.1f} s, candidate {candidate_diff_s:.1f} s")
+    diff_times
+    return candidate_diff_s, overpass_diff_s
+
+
+@app.cell
+def _(mo):
+    mo.md("""
+    Did the edits land the same way on both sides? We take every node the diffs
+    created or changed inside the extract's box, keep its final version, and check
+    that both sides now hold exactly those tags and coordinates. Then we rerun the
+    ten queries once each.
+    """)
+    return
+
+
+@app.cell
+def _(
+    DATA,
+    OVERPASS_IMAGE,
+    OVERPASS_URL,
+    candidate_diff_s,
+    client,
+    diff_files,
+    json,
+    sh,
+):
+    import gzip
+    import xml.etree.ElementTree as ET
+
+    assert candidate_diff_s > 0
+    _names = [f"/d/{p.name}" for p in diff_files]
+    sh(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "-v",
+            f"{DATA}:/d",
+            "--entrypoint",
+            "osmium",
+            OVERPASS_IMAGE,
+            "merge-changes",
+            "-s",
+            "-O",
+            "-o",
+            "/d/all-simple.osc.gz",
+            *_names,
+        ]
+    )
+    _box = (38.78, -77.23, 39.05, -76.84)
+    expected: dict[int, tuple[float, float, dict[str, str]]] = {}
+    for _action in ET.parse(gzip.open(DATA / "all-simple.osc.gz")).getroot():
+        for _el in _action:
+            if _action.tag == "delete" or _el.tag != "node":
+                continue
+            _lat, _lon = float(_el.get("lat", "nan")), float(_el.get("lon", "nan"))
+            if _box[0] <= _lat <= _box[2] and _box[1] <= _lon <= _box[3]:
+                expected[int(_el.get("id", "0"))] = (_lat, _lon, {t.get("k", ""): t.get("v", "") for t in _el})
+    _ids = ",".join(map(str, expected))
+    _r = client.post(OVERPASS_URL, data={"data": f"[out:json];node(id:{_ids});out body;"})
+    _r.raise_for_status()
+    overpass_nodes = {e["id"]: (e["lat"], e["lon"], e.get("tags", {})) for e in _r.json()["elements"]}
+    _rows = sh(
+        [
+            "docker",
+            "exec",
+            "pg",
+            "psql",
+            "-U",
+            "postgres",
+            "-d",
+            "osm",
+            "-At",
+            "-F",
+            "\t",
+            "-c",
+            f"select id, lat, lon, coalesce(tags, '{{}}') from planet_osm_nodes where id in ({_ids})",
+        ]
+    )
+    candidate_nodes = {}
+    for _line in _rows.splitlines():
+        _id, _lat, _lon, _tags = _line.split("\t")
+        candidate_nodes[int(_id)] = (int(_lat) / 1e7, int(_lon) / 1e7, json.loads(_tags))
+    return candidate_nodes, expected, overpass_nodes
+
+
+@app.cell
+def _(
+    RESULTS,
+    candidate_nodes,
+    expected: dict[int, tuple[float, float, dict[str, str]]],
+    json,
+    overpass_nodes,
+):
+    def matches(want: tuple[float, float, dict], got: tuple[float, float, dict] | None) -> bool:
+        """Same tags, and coordinates equal at OSM's 1e-7 degree precision."""
+        return got is not None and abs(want[0] - got[0]) < 1e-6 and abs(want[1] - got[1]) < 1e-6 and want[2] == got[2]
+
+    freshness = {
+        "changed nodes in the box": len(expected),
+        "tagged": sum(1 for v in expected.values() if v[2]),
+        "current in Overpass": sum(matches(v, overpass_nodes.get(k)) for k, v in expected.items()),
+        "current in candidate": sum(matches(v, candidate_nodes.get(k)) for k, v in expected.items()),
+    }
+    (RESULTS / "freshness.json").write_text(json.dumps(freshness, indent=2))
+    print(freshness)
+    freshness
+    return (freshness,)
+
+
+@app.cell
+def _(mo):
+    mo.md("""
+    ## What the candidate can't do
+
+    The service covers the subset above and nothing else. These are the Overpass QL
+    features it lacks. Each says whether PostGIS could add it cheaply or whether
+    it needs a different design.
+
+    | # | QL feature | Candidate | Cost to add |
+    |---|---|---|---|
+    | 1 | QL text itself (a parser) | JSON equivalent only | A parser for this subset is days of work; full QL is a language |
+    | 2 | Named sets, unions, differences beyond `(._;>;)` / `(._;<;)` | no | needs a QL interpreter over SQL steps |
+    | 3 | `foreach`, `for`, `if`, `complete`, `retro` | no | imperative; needs the interpreter |
+    | 4 | `>>` / `<<` (recursive closure, sub-relations) | no | recursive CTE over `members` |
+    | 5 | `rel(r)`, `way(r)`, `node(w)` with roles, `rel(bn)` etc. | no | one join each on the middle tables |
+    | 6 | `is_in`, `pivot`, `map_to_area`, `area(id)` lookups | no | `ST_Contains` on `areas_geo`; area IDs need the 2.4e9/3.6e9 offsets |
+    | 7 | Attic: `[date:]`, `[diff:]`, `[adiff:]`, `changed`, `newer`, `user`, `uid` | no | osm2pgsql keeps no history or metadata; a different store |
+    | 8 | Output modes: `out body/skel/meta/tags`, `geom`, `center`, `bb`, `qt` sort | IDs only | `body`, `geom` and `center` come cheap from the tables; `meta` needs metadata on import |
+    | 9 | `out count`, `[out:csv]` | no | trivial |
+    | 10 | Evaluators and `make`/`convert` (`t[]`, `length()`, `per_member`, `per_vertex`) | no | per-element SQL expressions; a lot of surface |
+    | 11 | `poly:` filter, `around` on sets (`around.a:`), `(if: ...)` filters | no | `around`/`poly` are one PostGIS call each; `if` needs the evaluator |
+    | 12 | Untagged nodes in spatial filters (`node(bbox)` with no tag) | no | `process_untagged_node`, adding a few hundred MB here |
+    | 13 | Global `[maxsize:]`, `[timeout:]`, and the dispatcher's per-client quotas | no | statement_timeout, plus a gateway |
+
+    **13 features unsupported.** Items 5, 6, 9, 11 and 12 are small additions on
+    the same tables. Items 1–4 and 10 add up to an Overpass QL interpreter. Item 7
+    needs a different kind of database.
+    """)
+    return
+
+
+@app.cell
+def _(
+    RESULTS,
+    after_diff,
+    candidate_diff_s,
+    freshness,
+    overpass_diff_s,
+    query_results,
+    resources,
+    service,
+    sh,
+    snapshot,
+):
+    _summary = (
+        f"Extract snapshot: {snapshot}\n"
+        f"Equivalent queries: {int(query_results['equivalent'].sum())}/{query_results.height} before diffs, "
+        f"{int(after_diff['equivalent after diff'].sum())}/{after_diff.height} after\n"
+        f"Median speed-up across queries: {query_results['speed-up'].median():.1f}x\n"
+        f"Diff apply, median per planet hour: Overpass {overpass_diff_s:.1f} s, candidate {candidate_diff_s:.1f} s\n"
+        f"Changed nodes in the box current on both sides: Overpass {freshness['current in Overpass']}, "
+        f"candidate {freshness['current in candidate']} of {freshness['changed nodes in the box']}\n"
+    )
+    (RESULTS / "summary.txt").write_text(_summary)
+    print(_summary)
+    service.terminate()
+    for _c in ["ovp", "pg"]:
+        sh(["docker", "stop", _c], may_fail=True)
+    assert resources.height == 2
+    return
+
+
+if __name__ == "__main__":
+    app.run()
