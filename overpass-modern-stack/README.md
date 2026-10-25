@@ -9,16 +9,16 @@ on the same machine, then get the same ten queries and the same diffs.
 
 **Verdict: yes, for common read queries on a region.** All ten returned exactly
 the same element IDs as Overpass, before and after the diffs. The candidate was
-faster on eight, level on one and slower on one (median 4.3×). It imported 8×
-faster (38 s against 300 s), used 37% less disk, and applied an hour of planet
-diffs a little faster (8.2 s against 11.4 s). It isn't Overpass QL: it takes a
+faster on eight, level on one and slower on one (median 4.0×). It imported 8×
+faster (36 s against 287 s), used 37% less disk, and applied an hour of planet
+diffs a little faster (8.4 s against 11.5 s). It isn't Overpass QL: it takes a
 JSON equivalent of a subset, and 13 groups of QL features are missing.
 [Postpass](https://github.com/woodpeck/postpass) already runs this design in
 public, so the case for building our own is narrow.
 
 ## Run it
 
-Needs Docker and [uv](https://docs.astral.sh/uv/). It took 22 minutes and about
+Needs Docker and [uv](https://docs.astral.sh/uv/). It took 16–22 minutes and about
 6 GB of disk on a 4-core, 16 GB machine.
 
 ```sh
@@ -49,24 +49,24 @@ From one run on a clean checkout. All outputs, including the log, are in `result
 
 | query | elements | same IDs | Overpass p50 ms | candidate p50 ms | speed-up |
 |---|---:|:---:|---:|---:|---:|
-| tag in bbox (nodes) | 197 | ✓ | 91 | 9 | 10.2× |
-| tag in bbox (nodes, ways, relations) | 51 | ✓ | 264 | 242 | 1.1× |
-| regex on a tag, whole extract | 151 | ✓ | 1,928 | 391 | 4.9× |
-| around a point (500 m) | 29 | ✓ | 64 | 6 | 10.6× |
-| area by name (parks in Alexandria) | 119 | ✓ | 1,158 | 200 | 5.8× |
-| ways with their nodes | 4,636 | ✓ | 238 | 39 | 6.1× |
-| recurse down from relations | 9,963 | ✓ | 496 | 156 | 3.2× |
-| recurse up from nodes | 43 | ✓ | 136 | 346 | **0.4×** |
-| substations in DC | 40 | ✓ | 731 | 197 | 3.7× |
-| hospitals in Arlington County | 1 | ✓ | 552 | 197 | 2.8× |
+| tag in bbox (nodes) | 197 | ✓ | 92 | 9 | 10.6× |
+| tag in bbox (nodes, ways, relations) | 51 | ✓ | 264 | 243 | 1.1× |
+| regex on a tag, whole extract | 151 | ✓ | 1,983 | 426 | 4.7× |
+| around a point (500 m) | 29 | ✓ | 63 | 7 | 8.5× |
+| area by name (parks in Alexandria) | 119 | ✓ | 1,136 | 209 | 5.4× |
+| ways with their nodes | 4,636 | ✓ | 239 | 39 | 6.2× |
+| recurse down from relations | 9,963 | ✓ | 496 | 164 | 3.0× |
+| recurse up from nodes | 43 | ✓ | 144 | 335 | **0.4×** |
+| substations in DC | 40 | ✓ | 725 | 222 | 3.3× |
+| hospitals in Arlington County | 1 | ✓ | 525 | 180 | 2.9× |
 
 | | Overpass | candidate |
 |---|---:|---:|
-| import time | 300 s | 38 s |
+| import time | 287 s | 36 s |
 | disk | 2,020 MB | 1,263 MB |
 | RAM at rest after queries (`docker stats`) | 245 MB | 1,280 MB |
-| peak during import, page cache included | 4,604 MB | 3,446 MB |
-| one planet hour of diffs, median of 16 (range) | 11.4 s (4.2–27.8) | 8.2 s (2.6–12.9) |
+| peak during import, page cache included | 4,605 MB | 3,429 MB |
+| one planet hour of diffs, median of 16 (range) | 11.5 s (4.7–28.6) | 8.4 s (2.9–13.0) |
 
 - **Latency:** median of 7 timed runs after a warm-up, over HTTP, default settings.
 - **Recurse up** is the one loss. It uses osm2pgsql's bucket index on way node
@@ -89,7 +89,7 @@ From one run on a clean checkout. All outputs, including the log, are in `result
 - **A query-builder bug.** An unqualified `geom` in the area subquery bound to
   the area's own geometry, so "hospitals in Arlington" returned every hospital.
 - **Overpass's Docker image needed two workarounds.** Its `init` mode only reads
-  `.osm.bz2`, so the PBF is re-compressed first, which takes most of the 300 s
+  `.osm.bz2`, so the PBF is re-compressed first, which takes most of the 287 s
   import. With a named volume, `/db` is left readable only by the `overpass`
   user, so every query failed with `Permission denied` until we `chmod 755 /db`.
 - **osm2pgsql refused raw planet diffs** ("node id … appears more than once").
