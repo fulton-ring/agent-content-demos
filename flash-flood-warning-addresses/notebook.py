@@ -425,7 +425,7 @@ def _(mo):
     - **Named creeks:** flowlines with a GNIS name.
     - **NWM streams:** OWP publishes the National Water Model streams it built its HAND on
       (`nwm_subset_streams.gpkg`, NHDPlus V2 medium resolution) beside the rasters. Those lines
-      sit a median 11–15 m off the lidar channels here, too far to burn into a 1 m DEM, so we
+      are drawn from a coarser map and sit well off the lidar channels here, too far to burn into a 1 m DEM, so we
       keep the NHD High Resolution flowlines that run along them: at least 80% of the flowline
       within 60 m of an NWM stream.
     """)
