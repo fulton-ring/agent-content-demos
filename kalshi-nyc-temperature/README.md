@@ -14,7 +14,7 @@ Issue: [#89](https://github.com/fulton-ring/agent-content-demos/issues/89).
 ./run.sh
 ```
 
-This needs [uv](https://docs.astral.sh/uv/). It runs two [marimo](https://marimo.io)
+This needs [uv](https://docs.astral.sh/uv/). It runs three [marimo](https://marimo.io)
 notebooks as scripts and writes every table and figure to `results/`:
 
 - `1_data.py` downloads the public data into `~/.cache/kalshi-nyc-temperature` (or set
@@ -23,6 +23,8 @@ notebooks as scripts and writes every table and figure to `results/`:
   (late August 2026) need one call per bracket, about 1,800 calls, and the limit allowed
   only a few a minute. Later runs use the cache and take about a minute.
 - `2_backtest.py` builds the forecasts, scores them and paper-trades them (about 30 seconds).
+- `3_favourite.py` tests whether the market underprices its favourite bracket (a few seconds;
+  it needs only the Kalshi tables).
 
 The default period is 2025-10-20 to 2026-10-19. Set `BACKTEST_START` and `BACKTEST_END`
 (ISO dates) for a shorter run; the period since late August 2026 downloads fast. To read
@@ -101,6 +103,37 @@ floor one degree below it. Kalshi also switched its settlement source from the N
 Climate Report to The Weather Company on 2026-08-14 (67 days of this period); where both
 exist, they agreed on every day.
 
+## Is the market underconfident on its favourite? (#101)
+
+No, not reliably, and not tradably. `2_backtest.py`'s calibration plot suggested brackets
+priced 60 to 80% won more often than that. `3_favourite.py` tests the day's favourite (the
+highest midpoint) alone, one per day, with 95% intervals (`results/favourite_*.csv` and
+`favourite_calibration.png`):
+
+| Favourite at | Days | Avg price | Won | Gap (± 95%) | p | After half-spread and fee |
+|---|---|---|---|---|---|---|
+| 4 pm day before | 360 | 44.8% | 49.7% | +5.0 ± 5.0 pts | 0.05 | +2.2 ± 5.0 |
+| 8 am | 364 | 56.0% | 61.0% | +5.0 ± 4.8 | 0.04 | +2.3 ± 4.8 |
+| 2 pm | 365 | 76.8% | 78.4% | +1.6 ± 3.9 | 0.43 | −0.9 ± 3.9 |
+
+- **The 60 to 80% band itself shows little.** Only 15 favourites the day before and 56 at
+  8 am were priced there. The day-before gap is +17.8 ± 16.7 pts on those 15 days
+  (p = 0.06); at 8 am and 2 pm it is inside its interval. The whole-year gap comes mostly
+  from favourites priced 40 to 60%.
+- **It doesn't hold over time.** At 8 am the gap was +9.6 ± 6.7 pts in the first half,
+  −3.7 ± 8.8 from 2026-04-20 to the settlement switch, and +7.3 ± 11.0 after it. At 4 pm
+  the day before it went +6.3, −5.3, then +19.3 ± 10.9 after the switch (65 days), the one
+  period that stands out; it needs more post-switch days before it means anything.
+- **Out of sample it loses.** Of 63 rules (snapshot × price band on the ask) tried on
+  2025-10-20 to 2026-04-19, the best was "buy 10 of the 8 am favourite whenever its ask is
+  40% or more": +$132 ± $115 on 159 trades. On 2026-04-20 to 2026-10-19 the same rule lost
+  **$51 ± $125** on 180 trades (57% hit rate, $30 in fees, $104 maximum drawdown):
+  −$83 before the 2026-08-14 switch to The Weather Company and +$32 after, both inside
+  their intervals (`results/favourite_pnl.png`).
+
+A gap of a few points might exist, but a year is too short to tell it from noise, and the
+half-spread plus the fee take about half of it.
+
 ## What didn't work
 
 The first two come from a 59-day trial run (2026-08-22 to 2026-10-19) during development,
@@ -138,9 +171,8 @@ not from the published run.
   and beat every public model and sensor combination we tried, at every lead time.
 - Sensor data and the official record are different things: 1-minute readings ran above
   the official high on a third of days.
-- One thing we saw but didn't test: the market looks underconfident on its favourite
-  bracket the day before and in the morning (brackets priced 60 to 80% won more often;
-  see `results/calibration.png`). That is filed as #101.
+- The market's apparent underconfidence on its favourite bracket is not a reliable edge
+  (see above).
 
 ## What we looked at first
 
