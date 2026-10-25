@@ -118,6 +118,11 @@ filters. Five add up to a QL interpreter: the QL text itself, named sets,
   endpoint for the planet, with `osm-live-updates` for diffs. Qloverleaf, a
   closed proof of concept from June 2026, translates QL to SPARQL and hits the
   same history and imperative-QL limits.
+- **[Underpass-API](https://github.com/teritorio/Underpass-API)** (Teritorio,
+  found after this spike) already compiles a subset of Overpass QL to SQL for
+  PostGIS (Osmosis schema) or DuckDB (QuackOSM), via the Rust parser
+  [overpass_parser_rust](https://github.com/teritorio/overpass_parser_rust). We
+  didn't benchmark it; #125 starts from it.
 - **[osm2pgsql](https://osm2pgsql.org/doc/manual.html)**'s middle tables (tags,
   way node arrays, relation members) already are Overpass's data model, and
   `osm2pgsql-replication` keeps them current. That's why the candidate is mostly
@@ -136,11 +141,11 @@ filters. Five add up to a QL interpreter: the QL text itself, named sets,
   osm2pgsql with `osm2pgsql-replication` on the regions we need, and query
   PostGIS directly or through this JSON shape. It answered every query we tried
   identically and mostly faster, with tools we'd run anyway.
-- **As a public "Overpass replacement": no.** Postpass already is one, and the
-  hard, unsolved part is Overpass QL compatibility, not storage or freshness.
-  The honest next step would be a QL-subset parser that emits this SQL, so
-  existing Overpass clients work unchanged. We haven't sized it. Attic queries
-  stay on Overpass.
+- **As a public "Overpass replacement": no.** Postpass already is one for SQL,
+  and the hard part is Overpass QL compatibility, not storage or freshness.
+  Underpass-API has started on that; the next step is to measure how much of
+  real QL traffic it gets right, and extend it rather than write a new parser.
+  Attic queries stay on Overpass.
 
 ## What this doesn't show
 
