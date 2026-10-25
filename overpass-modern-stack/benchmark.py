@@ -848,7 +848,8 @@ def _(
     diff_times.write_csv(RESULTS / "diffs.csv")
     overpass_diff_s = statistics.median(diff_times["Overpass s"].to_list())
     candidate_diff_s = statistics.median(diff_times["candidate s"].to_list())
-    print(diff_times)
+    with pl.Config(tbl_rows=30):
+        print(diff_times)
     print(f"median per planet hour: Overpass {overpass_diff_s:.1f} s, candidate {candidate_diff_s:.1f} s")
     diff_times
     return candidate_diff_s, overpass_diff_s
@@ -958,6 +959,30 @@ def _(
     print(freshness)
     freshness
     return (freshness,)
+
+
+@app.cell
+def _(QUERIES, RESULTS, ask_candidate, ask_overpass, freshness, pl):
+    assert freshness["changed nodes in the box"] > 0, "no local edits in these hours; raise DIFF_HOURS"
+    _rows = []
+    for _name, _ql, _spec in QUERIES:
+        _o, _ = ask_overpass(_ql)
+        _c, _ = ask_candidate(_spec)
+        _rows.append(
+            {
+                "query": _name,
+                "elements": len(_o),
+                "equivalent after diff": _o == _c,
+                "only in Overpass": len(_o - _c),
+                "only in candidate": len(_c - _o),
+            }
+        )
+    after_diff = pl.DataFrame(_rows)
+    after_diff.write_csv(RESULTS / "after_diff.csv")
+    with pl.Config(tbl_rows=20, tbl_width_chars=200):
+        print(after_diff)
+    after_diff
+    return (after_diff,)
 
 
 @app.cell
