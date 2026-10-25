@@ -122,9 +122,7 @@ def base_ids(cur: Cursor, q: Query, kind: ElementType) -> set[int]:
         )
     elif kind == "way":
         stmt = sql.SQL("select way_id from ways_geo t where {} and {} and {}").format(
-            tag_filter("t.tags", q.tags),
-            spatial_filter(q, "t.geom"),
-            needs_exact_bbox(q, "t.geom"),
+            tag_filter("t.tags", q.tags), spatial_filter(q, "t.geom"), needs_exact_bbox(q, "t.geom")
         )
     else:
         assert q.tags, "relation queries need a tag filter"
