@@ -718,7 +718,7 @@ def _(
     _sides = side_by_side.set_index(["county", "layer"])
     _regrid_buildings = {_c: float(_sides.loc[(_c, "buildings"), "Regrid"].replace(",", "")) for _c in COUNTIES}
     _buildings = {_c: round(100 * _sides.loc[(_c, "buildings"), "public"] / _n) for _c, _n in _regrid_buildings.items()}
-    _fill = field_fill.set_index(["county", "field group"])
+    _fergus_use = field_fill[(field_fill["county"] == "Fergus MT") & (field_fill["field group"] == "land_use")].iloc[0]
     _firms = public_counts[public_counts["layer"] == "FIRM panels"].set_index("county")["latest date"]
     _thin = thin_fields.set_index("field")
     summary = {
@@ -756,8 +756,8 @@ def _(
     parcel layer was updated more recently than Regrid's copy. Fergus County's parcels and addresses are public
     through Montana, but we found no machine-readable zoning; Regrid reports
     {_sides.loc[("Fergus MT", "zoning"), "Regrid"]} parcels in a standardized zone there. Montana's parcels carry a
-    property type on {_fill.loc[("Fergus MT", "land_use"), "public fill %"]:.0f}% of parcels, where Regrid's land use
-    code is {_fill.loc[("Fergus MT", "land_use"), "Regrid fill %"]}% filled. Gordon County has no open parcels or
+    property type on {_fergus_use["public fill %"]:.0f}% of parcels, where Regrid's land use
+    code is {_fergus_use["Regrid fill %"]}% filled. Gordon County has no open parcels or
     addresses: Regrid has {_sides.loc[("Gordon GA", "parcels"), "Regrid"]} parcels with owners and values there,
     bought from a county that sells them, and {_sides.loc[("Gordon GA", "addresses"), "Regrid"]} addresses. Open
     buildings (Overture) reach {", ".join(f"{_p}%" for _p in _buildings.values())} of Regrid's licensed building
