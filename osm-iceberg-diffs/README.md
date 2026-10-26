@@ -154,8 +154,11 @@ and [osm-live-updates](https://github.com/ad-freiburg/osm-live-updates).
   Spark's `expire_snapshots` keeps anything newer than 5 days unless
   `older_than` is given. Spark writes a `.crc` file beside every file on a local
   disk; the counts skip them. DuckDB 2.0's `ATTACH` only takes REST catalogs, so
-  queries use `iceberg_scan` on the current metadata file. And
-  planet.openstreetmap.org dropped a connection mid-download, so downloads retry.
+  queries use `iceberg_scan` on the current metadata file.
+  planet.openstreetmap.org dropped a connection mid-download, so downloads
+  retry. Maven Central once answered 429 (rate limited) when Spark fetched the
+  Iceberg runtime, which killed a run 80 minutes in. Spark caches the jars in
+  `data/ivy`, so a rerun only needs them fetched once.
 
 ## What this doesn't show
 
