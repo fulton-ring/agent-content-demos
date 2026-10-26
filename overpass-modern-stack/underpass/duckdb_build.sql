@@ -24,9 +24,12 @@ WHERE w.kind = 'way';
 
 -- A relation's members in Overpass's JSON shape, and its geometry as the collection of its members'.
 CREATE TEMP TABLE members AS
-SELECT id, UNNEST(ref_types)::VARCHAR AS type, UNNEST(refs) AS ref, coalesce(UNNEST(ref_roles), '') AS role,
-       generate_subscripts(refs, 1) AS pos
-FROM raw WHERE kind = 'relation';
+SELECT id, type, ref, coalesce(role, '') AS role, pos  -- ST_ReadOSM gives NULL for an empty role; Overpass prints ""
+FROM (
+    SELECT id, UNNEST(ref_types)::VARCHAR AS type, UNNEST(refs) AS ref, UNNEST(ref_roles) AS role,
+           generate_subscripts(refs, 1) AS pos
+    FROM raw WHERE kind = 'relation'
+);
 
 CREATE TEMP TABLE member_geoms AS
 SELECT id, ST_Collect(list(geom)) AS geom
