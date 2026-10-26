@@ -102,7 +102,28 @@ and [osm-live-updates](https://github.com/ad-freiburg/osm-live-updates).
 
 ## What didn't work, and what we changed
 
-RESULTS_FAILURES
+- **Parsing the extract in Python was slow.** A pyosmium handler took 155 s
+  for 6.3 M nodes. DuckDB's `ST_ReadOSM` reads the same file in under a second,
+  so the import uses it, and pyosmium only reads diffs.
+- **Areas didn't match osm2pgsql at first.** `ST_BuildArea` builds whatever
+  closed rings it finds, so relations cut by the extract's edge got partial
+  areas that osm2pgsql (libosmium) refuses. Adding libosmium's rule (every way
+  end must meet another, and have a location) brought the sets into line.
+  What's left is listed under Results.
+- **Spark's compacted files made queries slower.** The tables didn't pin a
+  Parquet codec, so PyIceberg wrote zstd and Spark wrote gzip, and DuckDB's ten
+  queries took about 40% longer after compaction. `oi.TABLE_PROPERTIES` now
+  pins zstd.
+- **Data file size matters for diffs.** PyIceberg's default target file size is
+  512 MB, so the 143 MB `ways` table was one file, and every diff that touched a
+  way rewrote all of it. The tables now cap files at 16 MB.
+- **Smaller snags:** Spark's procedures read `'osm.t'` as catalog `osm`, table
+  `t` when the catalog and namespace share a name, so the calls use `osm.osm.t`.
+  Spark's `expire_snapshots` keeps anything newer than 5 days unless
+  `older_than` is given. Spark writes a `.crc` file beside every file on a local
+  disk; the counts skip them. DuckDB 2.0's `ATTACH` only takes REST catalogs, so
+  queries use `iceberg_scan` on the current metadata file. And
+  planet.openstreetmap.org dropped a connection mid-download, so downloads retry.
 
 ## What this doesn't show
 

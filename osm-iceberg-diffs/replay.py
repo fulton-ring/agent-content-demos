@@ -10,7 +10,7 @@ def _():
     import shutil
     import statistics
     import time
-    from datetime import datetime, timedelta
+    from datetime import UTC, datetime, timedelta
     from pathlib import Path
 
     import httpx
@@ -21,7 +21,7 @@ def _():
 
     import osm_iceberg as oi
 
-    return Path, SparkSession, datetime, httpx, mo, oi, os, osmium, pl, shutil, statistics, time, timedelta
+    return Path, SparkSession, UTC, datetime, httpx, mo, oi, os, osmium, pl, shutil, statistics, time, timedelta
 
 
 @app.cell
@@ -34,13 +34,17 @@ def _(mo):
     diffs that's 180 commits an hour. Left alone, the metadata, the snapshots
     and the small data files pile up, and queries have to read through them.
 
-    So we replay the same **1,000 minutely planet diffs** (about 17 hours from the
-    extract's snapshot) into two fresh Iceberg copies of the DC extract:
+    So we replay the same minutely planet diffs from the extract's snapshot on
+    into three fresh Iceberg copies of the DC extract:
 
-    - **left alone:** nothing but the diffs;
-    - **maintained:** PyIceberg deletes old metadata files as it commits, and
-      every 60 diffs (an hour of minutely diffs) Spark compacts small data files,
-      expires old snapshots and rewrites manifests.
+    - **left alone:** nothing but the diffs, for the first 300 (5 hours; it slows
+      down too much to run further in reasonable time);
+    - **PyIceberg only:** all 1,000 diffs (about 17 hours), with the settings
+      PyIceberg itself honours (merge manifests on commit, delete old
+      `metadata.json` files) and its `expire_snapshots` every 60 diffs;
+    - **PyIceberg + Spark:** the same settings, and every 60 diffs (an hour of
+      minutely diffs) Spark compacts small data files, expires old snapshots and
+      rewrites manifests.
 
     Every 50 diffs we record metadata files and bytes, data files and their
     average size, snapshots, and how long the ten queries from `hourly.py` take.
@@ -51,6 +55,7 @@ def _(mo):
 @app.cell
 def _(Path, oi, os):
     MINUTES = int(os.environ.get("MINUTES", "1000"))
+    LEFT_ALONE_MINUTES = int(os.environ.get("LEFT_ALONE_MINUTES", "300"))
     MAINTAIN_EVERY = int(os.environ.get("MAINTAIN_EVERY", "60"))
     CHECK_EVERY = int(os.environ.get("CHECK_EVERY", "50"))
     REPLICATION = "https://planet.openstreetmap.org/replication/minute"
@@ -62,13 +67,25 @@ def _(Path, oi, os):
     RESULTS.mkdir(exist_ok=True)
     PBF = DATA / "extract.osm.pbf"
     assert PBF.exists(), "run hourly.py first; it downloads the extract"
-    # PyIceberg can't expire or compact (see the README), but it does honour
-    # these: keep only the last 5 metadata.json files.
+    # PyIceberg can't compact or rewrite manifests (see the README), but it honours
+    # these: merge manifests as it appends, and keep only the last 5 metadata.json files.
     MAINTAINED_PROPERTIES = oi.TABLE_PROPERTIES | {
+        "commit.manifest-merge.enabled": "true",
         "write.metadata.delete-after-commit.enabled": "true",
         "write.metadata.previous-versions-max": "5",
     }
-    return (CHECK_EVERY, DATA, MAINTAINED_PROPERTIES, MAINTAIN_EVERY, MINUTES, MINUTE_DIR, PBF, REPLICATION, RESULTS)
+    return (
+        CHECK_EVERY,
+        DATA,
+        LEFT_ALONE_MINUTES,
+        MAINTAINED_PROPERTIES,
+        MAINTAIN_EVERY,
+        MINUTES,
+        MINUTE_DIR,
+        PBF,
+        REPLICATION,
+        RESULTS,
+    )
 
 
 @app.cell
@@ -140,8 +157,8 @@ def _(mo):
 
     PyIceberg 0.12 can only expire snapshots, and it then leaves their files on
     disk. It can't compact data files or rewrite manifests. DuckDB's iceberg
-    extension can't do any of the three. So maintenance runs in Spark 4.1 in
-    local mode, with Iceberg's Spark runtime and a JDBC catalog pointed at
+    extension can't do any of the three. So full maintenance runs in Spark 4.1
+    in local mode, with Iceberg's Spark runtime and a JDBC catalog pointed at
     PyIceberg's SQLite catalog file: both see the same tables. Per table:
 
     - `rewrite_data_files`: bin-packs small data files into 16 MB ones;
@@ -153,7 +170,7 @@ def _(mo):
 
 
 @app.cell
-def _(DATA, SparkSession, time):
+def _(DATA, SparkSession, UTC, datetime, oi, time):
     def spark_for(warehouse) -> SparkSession:
         """A local Spark session on the same catalog that PyIceberg writes."""
         return (
@@ -175,10 +192,10 @@ def _(DATA, SparkSession, time):
             .getOrCreate()
         )
 
-    def maintain(spark: SparkSession, tables: list[str]) -> dict[str, float]:
+    def maintain_with_spark(spark: SparkSession) -> dict[str, float]:
         """Compact, expire and rewrite manifests on each table; return seconds per step."""
         took = {"compact s": 0.0, "expire s": 0.0, "manifests s": 0.0}
-        for name in tables:
+        for name in oi.SCHEMAS:
             for step, sql in [
                 ("compact s", f"CALL osm.system.rewrite_data_files(table => 'osm.osm.{name}')"),
                 (
@@ -193,7 +210,14 @@ def _(DATA, SparkSession, time):
                 took[step] += time.monotonic() - t0
         return took
 
-    return maintain, spark_for
+    def expire_with_pyiceberg(catalog) -> dict[str, float]:
+        """PyIceberg's only maintenance: drop all but the current snapshot from each table's metadata."""
+        t0 = time.monotonic()
+        for name in oi.SCHEMAS:
+            catalog.load_table(f"osm.{name}").maintenance.expire_snapshots().older_than(datetime.now(UTC)).commit()
+        return {"expire s": time.monotonic() - t0}
+
+    return expire_with_pyiceberg, maintain_with_spark, spark_for
 
 
 @app.cell
@@ -233,40 +257,53 @@ def _(oi, statistics, time):
 
 @app.cell
 def _(
-    CHECK_EVERY, DATA, MAINTAIN_EVERY, PBF, maintain, minute_files, oi, query_ms, shutil, spark_for, table_stats, time
+    CHECK_EVERY,
+    DATA,
+    MAINTAIN_EVERY,
+    PBF,
+    expire_with_pyiceberg,
+    maintain_with_spark,
+    minute_files,
+    oi,
+    query_ms,
+    shutil,
+    spark_for,
+    table_stats,
+    time,
 ):
-    def replay(label: str, properties: dict[str, str], maintained: bool) -> tuple[list[dict], list[dict], list[dict]]:
-        """Import a fresh copy, apply every minutely diff; return per-diff, per-check and per-maintenance rows."""
-        warehouse = DATA / f"replay-{label}"
+    def replay(
+        label: str, properties: dict[str, str], minutes: int, maintenance: str | None
+    ) -> tuple[list, list, list]:
+        """Import a fresh copy, apply `minutes` diffs, maintaining with "pyiceberg" or "spark" every MAINTAIN_EVERY.
+
+        Returns per-diff, per-check and per-maintenance rows.
+        """
+        warehouse = DATA / f"replay-{label.replace(' ', '-').lower()}"
         shutil.rmtree(warehouse, ignore_errors=True)
         catalog = oi.open_catalog(warehouse)
         oi.create_tables(catalog, PBF, properties)
-        spark = spark_for(warehouse) if maintained else None
+        spark = spark_for(warehouse) if maintenance == "spark" else None
         diffs, checks, runs = [], [], []
         checks.append(
-            {"variant": label, "diffs applied": 0, "query ms": query_ms(catalog), **table_stats(catalog, warehouse)}
+            {"variant": label, "diffs applied": 0, "query ms": query_ms(catalog)} | table_stats(catalog, warehouse)
         )
-        for i, path in enumerate(minute_files, start=1):
+        for i, path in enumerate(minute_files[:minutes], start=1):
             t0 = time.monotonic()
             oi.apply_diff(catalog, path)
             diffs.append({"variant": label, "diff": i, "apply s": time.monotonic() - t0})
-            if spark is not None and i % MAINTAIN_EVERY == 0:
+            if maintenance and i % MAINTAIN_EVERY == 0:
                 before = table_stats(catalog, warehouse)
-                took = maintain(spark, list(oi.SCHEMAS))
+                took = maintain_with_spark(spark) if spark else expire_with_pyiceberg(catalog)
                 after = table_stats(catalog, warehouse)
                 runs.append(
-                    {"after diff": i, **took, "total s": sum(took.values())}
+                    {"variant": label, "after diff": i, **took, "total s": sum(took.values())}
                     | {f"{k} before": before[k] for k in ("live data files", "snapshots", "metadata files")}
                     | {f"{k} after": after[k] for k in ("live data files", "snapshots", "metadata files")}
                 )
             if i % CHECK_EVERY == 0:
                 checks.append(
-                    {
-                        "variant": label,
-                        "diffs applied": i,
-                        "query ms": query_ms(catalog),
-                        **table_stats(catalog, warehouse),
-                    }
+                    {"variant": label, "diffs applied": i, "query ms": query_ms(catalog)}
+                    | table_stats(catalog, warehouse)
                 )
                 print(label, checks[-1], flush=True)
         if spark is not None:
@@ -277,12 +314,15 @@ def _(
 
 
 @app.cell
-def _(MAINTAINED_PROPERTIES, RESULTS, oi, pl, replay):
-    _alone = replay("left-alone", oi.TABLE_PROPERTIES, maintained=False)
-    _kept = replay("maintained", MAINTAINED_PROPERTIES, maintained=True)
-    diffs = pl.DataFrame(_alone[0] + _kept[0])
-    checks = pl.DataFrame(_alone[1] + _kept[1])
-    maintenance = pl.DataFrame(_kept[2])
+def _(LEFT_ALONE_MINUTES, MAINTAINED_PROPERTIES, MINUTES, RESULTS, oi, pl, replay):
+    _variants = [
+        replay("left alone", oi.TABLE_PROPERTIES, LEFT_ALONE_MINUTES, None),
+        replay("PyIceberg only", MAINTAINED_PROPERTIES, MINUTES, "pyiceberg"),
+        replay("PyIceberg + Spark", MAINTAINED_PROPERTIES, MINUTES, "spark"),
+    ]
+    diffs = pl.DataFrame([row for v in _variants for row in v[0]])
+    checks = pl.DataFrame([row for v in _variants for row in v[1]])
+    maintenance = pl.DataFrame([row for v in _variants for row in v[2]], infer_schema_length=None)
     diffs.write_csv(RESULTS / "replay_diffs.csv")
     checks.write_csv(RESULTS / "replay_checks.csv")
     maintenance.write_csv(RESULTS / "replay_maintenance.csv")
@@ -295,7 +335,8 @@ def _(mo):
     ## Results
 
     **Apply time per minutely diff.** Under 60 s means Iceberg keeps up with a
-    minutely feed; the first and last hundred show whether it drifts.
+    minutely feed. Diffs 201 to 300 compare the three copies at the same point;
+    the last hundred show whether a copy drifts.
     """)
     return
 
@@ -307,6 +348,7 @@ def _(diffs, pl):
         pl.col("apply s").min().round(2).alias("min s"),
         pl.col("apply s").max().round(2).alias("max s"),
         pl.col("apply s").filter(pl.col("diff") <= 100).median().round(2).alias("median s, first 100"),
+        pl.col("apply s").filter(pl.col("diff").is_between(201, 300)).median().round(2).alias("median s, 201-300"),
         pl.col("apply s")
         .filter(pl.col("diff") > pl.col("diff").max() - 100)
         .median()
@@ -356,8 +398,8 @@ def _(checks, pl):
 @app.cell
 def _(mo):
     mo.md("""
-    **Maintenance cost.** One row per Spark run (every 60 diffs), summed over the
-    three tables, and what it cleared.
+    **Maintenance cost.** One row per run (every 60 diffs), summed over the three
+    tables, and what it cleared.
     """)
     return
 
@@ -384,10 +426,11 @@ def _(RESULTS, apply_summary, growth, maintenance, pl):
             f"{_row['live data files']} live data files (avg {_row['avg data file KB']} KB on disk), "
             f"{_row['snapshots']} snapshots; ten queries {_first['query ms']:.0f} ms at start, {_row['query ms']:.0f} ms at end"
         )
-    _lines.append(
-        f"maintenance: {maintenance.height} runs, median {maintenance['total s'].median():.1f} s "
-        f"(range {maintenance['total s'].min():.1f}-{maintenance['total s'].max():.1f})"
-    )
+    for _variant, _runs in maintenance.group_by("variant", maintain_order=True):
+        _lines.append(
+            f"maintenance, {_variant[0]}: {_runs.height} runs, median {_runs['total s'].median():.1f} s "
+            f"(range {_runs['total s'].min():.1f}-{_runs['total s'].max():.1f})"
+        )
     (RESULTS / "replay_summary.txt").write_text("\n".join(_lines) + "\n")
     print("\n".join(_lines))
     return
