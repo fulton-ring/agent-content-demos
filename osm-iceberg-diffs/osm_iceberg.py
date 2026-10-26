@@ -114,8 +114,12 @@ with points as (
   from (select id, unnest(nodes) as node_id, generate_subscripts(nodes, 1) as pos from pending_ways) u
   join pending_ways w using (id)
   join nodes n on n.id = u.node_id
+), kept as (
+  -- Like osm2pgsql, drop a point that repeats the one before it.
+  select * from points
+  qualify coalesce(not ST_Equals(pt, lag(pt) over (partition by id order by pos)), true)
 ), lines as (
-  select id, ST_MakeLine(list(pt order by pos)) as g from points group by id
+  select id, ST_MakeLine(list(pt order by pos)) as g from kept group by id
   having count(distinct (ST_X(pt), ST_Y(pt))) >= 2
 )
 select w.id, w.tags, w.nodes, ST_AsWKB(l.g) as geom,
