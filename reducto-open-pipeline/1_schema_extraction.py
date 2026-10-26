@@ -509,5 +509,27 @@ def _(extraction_runs, metrics):
     return
 
 
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ## What didn't work
+
+    - **Docling's text, then the model (B).** Most of its wrong values are on scans. Tesseract misreads
+      digits (on one made-up 1099 it read 18,607.71 as 186,607.71), and once a K-1 is Markdown, the box an
+      amount belongs to is easy to lose. The K-1 spike saw the same with olmOCR's text. On the three
+      born-digital K-1s, which have a text layer, B was nearly right. A better layout tool doesn't fix this;
+      showing the model the image does.
+    - **Docling's routing (C).** On one made-up 1099, Docling's OCR missed "Consolidated Form 1099" on the
+      summary page but read it on the detail page, so C sent the detail page. The model rightly found no
+      summary amounts there, and every box read as a blank that was accepted. The K-1 spike's whole-page check
+      ("the model read nothing on this page") would have sent it to review. Routing on OCR text needs a check
+      behind it.
+    - **The whole PDF (A).** On Blackstone's 11-page package, the VLM alone skipped rows on the K-1 page in
+      both runs: box 7, and coded rows whose amount is a dash. Routed to the one page (C, and the K-1 spike),
+      Gemini reads them. More pages of context made it worse, not better.
+    """)
+    return
+
+
 if __name__ == "__main__":
     app.run()

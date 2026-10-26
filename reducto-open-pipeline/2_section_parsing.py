@@ -410,5 +410,27 @@ def _(results):
     return
 
 
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ## What didn't work
+
+    - **Docling's outline is flat.** Every heading comes back at level 1, so the hierarchy has to come from the
+      heading numbers or a model. It also counts the cover lines and the table of contents as headings, and on
+      the scan it drops some headings' numbers ("Coordination" for "1.2 Coordination"). Passing Docling's
+      Markdown to Gemini fixed the levels and most of the extras.
+    - **Docling merges the rows of a table without rules between them.** On the 2024 Floodway Data page, its
+      table is one row whose cells are whole columns of numbers (see `screenshots/`). Gemini reading the page
+      image got every cell.
+    - **Docling can't read a page printed sideways.** The 1980 Flood Insurance Zone Data table comes out as
+      fragments. Worse, its OCR text never names the table, so the Docling-then-VLM pipeline couldn't find the
+      page and returned nothing, while Gemini given the whole PDF read every cell. Routing on Docling's text
+      fails on exactly the pages that need help most.
+    - **The printed table number disagrees with the contents** on the 1980 report (the contents' Table 4 is
+      printed "TABLE 3"). We asked for that table by its title and streams, not its number.
+    """)
+    return
+
+
 if __name__ == "__main__":
     app.run()
