@@ -34,6 +34,7 @@ with app.setup:
     OVERTURE_RELEASE = "2026-10-21.0"
     OVERTURE = f"s3://overturemaps-us-west-2/release/{OVERTURE_RELEASE}"
     COUNTIES = {"Wake NC": "37183", "Fergus MT": "30027", "Gordon GA": "13129"}
+    NUMERIC_FIELD_TYPES = ("esriFieldTypeDouble", "esriFieldTypeInteger", "esriFieldTypeSmallInteger")
     RATINGS = ["public and easy", "public but scattered", "proprietary"]
     TODAY = date.today()
     RUN_STARTED = time.perf_counter()
@@ -343,7 +344,7 @@ def _(get, regrid_parcels_tab):
     _no_census = sorted(set(_housing["geoid"]) - set(regrid_counties["geoid"]))
     mo.vstack(
         [
-            mo.ui.table(pd.Series(freshness).reset_index(names="measure"), selection=None),
+            mo.ui.table(pd.DataFrame(freshness.items(), columns=["measure", "value"]), selection=None),
             mo.md(f"**Counties with fewer than half as many parcels as homes** ({len(partial_counties)}):"),
             mo.ui.table(
                 partial_counties[["state", "county", "parcels", "HU100", "parcels_per_home", "last_refresh"]],
@@ -352,7 +353,8 @@ def _(get, regrid_parcels_tab):
             mo.md(
                 f"Census counties and county-equivalents with no row in the report: {len(_no_census)} "
                 f"({', '.join(_no_census)}). Connecticut's 8 old counties are expected: Regrid uses its 9 new "
-                "planning regions instead. The 60xxx and 69xxx codes are American Samoa and the Northern Mariana Islands."
+                "planning regions instead. The 60xxx and 69xxx codes are American Samoa and the Northern Mariana "
+                "Islands."
             ),
         ]
     )
@@ -403,14 +405,16 @@ def _(regrid_tabs):
 
     _zoning = regrid_tabs["zoning"].iloc[1:]
     _zoned_counties = int((_zoning["parcels_in_zone"].str.replace(",", "").astype(float) > 0).sum())
+    _zoning_page = "support.regrid.com/docs/standardized-zoning"
     claims = pd.DataFrame(
         [
-            ("buildings", "Matched Building Footprints", "156+ million (onboarding FAQ)", total("buildings", "buildings")),
+            ("buildings", "parcel-data-onboarding-faq", "156+ million", total("buildings", "buildings")),
             ("addresses", "regrid.com/api", "more than 73 million", total("addresses", "address_count")),
-            ("addresses", "regrid.com/validated-us-addresses", "more than 180 million", total("addresses", "address_count")),
-            ("zoning", "support.regrid.com/docs/standardized-zoning", "more than 2,500 counties", _zoned_counties),
-            ("zoning", "support.regrid.com/docs/standardized-zoning", "nearly 14,000 municipalities", total("zoning", "distinct_municipalities")),
-            ("zoning", "support.regrid.com/docs/standardized-zoning", "127.9 million parcels", total("zoning", "parcels_in_zone")),
+            ("addresses", "regrid.com/validated-us-addresses", "more than 180 million",
+             total("addresses", "address_count")),
+            ("zoning", _zoning_page, "more than 2,500 counties", _zoned_counties),
+            ("zoning", _zoning_page, "nearly 14,000 municipalities", total("zoning", "distinct_municipalities")),
+            ("zoning", _zoning_page, "127.9 million parcels", total("zoning", "parcels_in_zone")),
         ],
         columns=["layer", "page", "claim", "coverage report"],
     )  # fmt: skip
@@ -468,7 +472,8 @@ def _(get):
         _stats = json.dumps([{"statisticType": "max", "onStatisticField": field, "outStatisticFieldName": "m"}])
         _where = f"({where}) AND {field} < DATE '2100-01-01'"
         _reply = get(f"{url}/query", {"where": _where, "outStatistics": _stats, "f": "json"}).json()
-        _value = _reply["features"][0]["attributes"]["m"]
+        # Some servers upper-case the output name, so take the only attribute there is.
+        _value = next(iter(_reply["features"][0]["attributes"].values()))
         return datetime.fromtimestamp(_value / 1000, UTC).date().isoformat() if _value else ""
 
     return arcgis_count, arcgis_max_date
@@ -601,17 +606,20 @@ def _(county_shapes, overture_counts, public_counts, regrid_tabs):
     for _name, _shape in county_shapes.items():
         _geoid = _shape["geoid"]
         _public = public_counts[public_counts["county"] == _name].groupby("layer")["public count"].max()
+        _firm = public_counts.query("county == @_name and layer == 'FIRM panels'")["latest date"].max()
+        _addresses = max(_public.get("addresses") or 0, _overture.get((_name, "addresses"), 0))
         _rows += [
             (_name, "parcels", _public.get("parcels"), regrid_value("parcels", "geoid", _geoid, "parcel_count"),
-             "refreshed " + regrid_value("parcels", "geoid", _geoid, "last_refresh")),
-            (_name, "buildings", _overture.get((_name, "buildings")), regrid_value("buildings", "ed_geoid", _geoid, "buildings"),
-             "public = Overture"),
-            (_name, "addresses", max(_public.get("addresses") or 0, _overture.get((_name, "addresses"), 0)),
-             regrid_value("addresses", "geoid", _geoid, "address_count"), "public = larger of state/county and Overture"),
+             "Regrid refreshed " + regrid_value("parcels", "geoid", _geoid, "last_refresh")),
+            (_name, "buildings", _overture.get((_name, "buildings")),
+             regrid_value("buildings", "ed_geoid", _geoid, "buildings"), "public = Overture"),
+            (_name, "addresses", _addresses, regrid_value("addresses", "geoid", _geoid, "address_count"),
+             "public = larger of state or county points and Overture"),
             (_name, "zoning", _public.get("zoning"), regrid_value("zoning", "geoid", _geoid, "parcels_in_zone"),
              "Regrid zoning data date " + regrid_value("zoning", "geoid", _geoid, "last_date_modified")),
-            (_name, "flood zones", _public.get("flood zones"), regrid_value("parcels", "geoid", _geoid, "fema_flood_zone_pct") + "% of parcels",
-             "FIRM latest effective " + str(public_counts.query("county == @_name and layer == 'FIRM panels'")["latest date"].max())),
+            (_name, "flood zones", _public.get("flood zones"),
+             regrid_value("parcels", "geoid", _geoid, "fema_flood_zone_pct") + "% of parcels",
+             f"latest FIRM panel effective {_firm}"),
             (_name, "housing units (2020)", _shape["housing_units"], "", "Census, for scale"),
         ]  # fmt: skip
     side_by_side = pd.DataFrame(_rows, columns=["county", "layer", "public", "Regrid", "note"])
@@ -650,7 +658,7 @@ def _(get, regrid_tabs):
             if _field:
                 _kind = _types[_field]
                 _test = (
-                    f"{_field} > 0" if _kind in ("esriFieldTypeDouble", "esriFieldTypeInteger", "esriFieldTypeSmallInteger")
+                    f"{_field} > 0" if _kind in NUMERIC_FIELD_TYPES
                     else f"{_field} < DATE '2100-01-01'" if _kind == "esriFieldTypeDate"
                     else f"{_field} <> ''"
                 )  # fmt: skip
