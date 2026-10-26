@@ -134,13 +134,16 @@ with area_ways as (
   select r.id, ST_GeomFromWKB(w.geom) as g, w.nodes
   from (select id, unnest(members) as m from pending_relations where {IS_AREA}) r
   join ways w on w.id = r.m.ref and r.m.type = 'w' and w.geom is not null
-), open_rings as (
-  -- Like osm2pgsql (libosmium), build no area if a ring is left open: every way end must meet another.
+), broken as (
+  -- Like osm2pgsql (libosmium), build no area if a ring is left open: every way end
+  -- must meet another, and must have a location.
   select distinct id from (select id, unnest([nodes[1], nodes[-1]]) as e from area_ways)
   group by id, e having count(*) % 2 = 1
+  union
+  select a.id from (select id, unnest([nodes[1], nodes[-1]]) as e from area_ways) a anti join nodes on nodes.id = a.e
 ), areas as (
   select id, ST_BuildArea(ST_Collect(list(g))) as g from area_ways
-  where id not in (select id from open_rings) group by id
+  where id not in (select id from broken) group by id
 )
 select r.id, r.tags, r.members,
   case when not ST_IsEmpty(a.g) then ST_AsWKB(a.g) end as geom,

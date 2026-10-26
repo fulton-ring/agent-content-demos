@@ -84,16 +84,27 @@ def _(mo):
 
 
 @app.cell
-def _(MINUTES, MINUTE_DIR, PBF, REPLICATION, datetime, httpx, osmium, timedelta):
+def _(MINUTES, MINUTE_DIR, PBF, REPLICATION, datetime, httpx, osmium, time, timedelta):
     client = httpx.Client(timeout=60, follow_redirects=True)
 
     def seq_path(seq: int) -> str:
         return f"{REPLICATION}/{seq // 10**6:03d}/{seq // 1000 % 1000:03d}/{seq % 1000:03d}"
 
+    def fetch(url: str) -> bytes:
+        """GET with up to 5 tries and backoff: planet.openstreetmap.org sometimes drops a connection."""
+        for attempt in range(5):
+            try:
+                r = client.get(url)
+                r.raise_for_status()
+                return r.content
+            except httpx.HTTPError:
+                if attempt == 4:
+                    raise
+                time.sleep(2**attempt)
+        raise AssertionError("unreachable")
+
     def ends_at(url: str) -> tuple[int, datetime]:
-        r = client.get(url)
-        r.raise_for_status()
-        fields = dict(line.split("=", 1) for line in r.text.splitlines() if "=" in line)
+        fields = dict(line.split("=", 1) for line in fetch(url).decode().splitlines() if "=" in line)
         return int(fields["sequenceNumber"]), datetime.fromisoformat(fields["timestamp"].replace("\\", ""))
 
     snapshot = datetime.fromisoformat(
@@ -115,12 +126,7 @@ def _(MINUTES, MINUTE_DIR, PBF, REPLICATION, datetime, httpx, osmium, timedelta)
     for _seq in range(first_seq, first_seq + MINUTES):
         _path = MINUTE_DIR / f"{_seq}.osc.gz"
         if not _path.exists():
-            for _try in range(3):
-                _r = client.get(f"{seq_path(_seq)}.osc.gz")
-                if _r.status_code == 200:
-                    break
-            _r.raise_for_status()
-            _path.write_bytes(_r.content)
+            _path.write_bytes(fetch(f"{seq_path(_seq)}.osc.gz"))
         minute_files.append(_path)
     _, _last_end = ends_at(f"{seq_path(first_seq + MINUTES - 1)}.state.txt")
     print(f"{len(minute_files)} minutely diffs from {first_seq}, covering {snapshot} to {_last_end}")
