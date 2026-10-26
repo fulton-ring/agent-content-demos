@@ -1,149 +1,149 @@
 # Overpass on a modern stack
 
-Can tools GIS teams already run answer the queries people send to the
-[Overpass API](https://wiki.openstreetmap.org/wiki/Overpass_API) for one region,
-and stay fresh with OSM's replication diffs? The candidate is **osm2pgsql →
-PostGIS behind a 200-line FastAPI service** (`service.py`). The reference is
-Overpass from the `wiktorn/overpass-api` Docker image. Both load the same extract
-on the same machine, then get the same ten queries and the same diffs.
+Two spikes on one question: can tools GIS teams already run replace a self-hosted
+[Overpass API](https://wiki.openstreetmap.org/wiki/Overpass_API) for a region?
 
-**Verdict: yes, for common read queries on a region.** All ten returned exactly
-the same element IDs as Overpass, before and after the diffs. The candidate was
-faster on eight, level on one and slower on one (median 4.0×). It imported 8×
-faster (36 s against 287 s), used 37% less disk, and applied an hour of planet
-diffs a little faster (8.4 s against 11.5 s). It isn't Overpass QL: it takes a
-JSON equivalent of a subset, and 13 groups of QL features are missing.
-[Postpass](https://github.com/woodpeck/postpass) already runs this design in
-public, so the case for building our own is narrow.
+1. **#123, `benchmark.py`:** osm2pgsql → PostGIS behind a 200-line FastAPI service
+   (`service.py`), fed a JSON stand-in for QL. It returned the same element IDs as
+   Overpass on 10 of 10 queries, at a median 4.0× faster, and kept up with diffs.
+2. **#125, `ql_compiler.py`:** real Overpass QL, compiled to SQL for **PostGIS and
+   DuckDB**, by evaluating and patching the existing
+   [Underpass-API](https://github.com/teritorio/Underpass-API) and its parser
+   [overpass_parser_rust](https://github.com/teritorio/overpass_parser_rust).
+
+**#125 verdict: adopt Underpass-API and contribute to it; don't build a new one.** As shipped, it
+answered **0 of 31** answer-key queries on either backend: its backends have drifted
+from its parser. With our patch (+550/−283 lines of Rust) and 136 lines of SQL adapters,
+it matches Overpass's full output on **30 of 31 queries on both PostGIS and DuckDB**.
+PostGIS through Underpass-API's `/interpreter` has a median latency of 48 ms against
+Overpass's 431 ms, and **Overpass Turbo works against it unchanged**.
 
 ## Run it
 
-Needs Docker and [uv](https://docs.astral.sh/uv/). It took about 15–22 minutes and about
-6 GB of disk on a 4-core, 16 GB machine.
+Needs Docker and [uv](https://docs.astral.sh/uv/); `ql_compiler.py` also uses Node
+and Playwright for the Overpass Turbo screenshot (it skips it without them). On a
+4-core, 16 GB machine, `ql_compiler.py` took 28 minutes; at its peak we estimate about
+11 GB of disk (4 GB of images, 5 GB of databases, 1.4 GB in `data/`).
 
 ```sh
-./run.sh            # = uv run benchmark.py
-uv run marimo edit benchmark.py   # to read it as a notebook
+./run.sh                 # both notebooks, then the parser tests
+./run.sh ql_compiler     # only #125 (or: ./run.sh benchmark for only #123)
+uv run marimo edit ql_compiler.py   # to read one as a notebook
 ```
 
-`run.sh` downloads the extract and diffs into `data/` (git-ignored), imports
-into Overpass then PostGIS, runs the benchmark, writes `results/` (with the log)
-and removes both containers and their volumes. Optional settings: `EXTRACT_URL` (the queries assume DC), `RUNS`
-(timed runs per query, default 7) and `DIFF_HOURS` (default 16).
+Behind a TLS-intercepting proxy, set `DOCKER_CA_BUNDLE` to its CA file so the Rust
+and Debian builds inside Docker can fetch packages. Downloads and builds go to `data/`
+(git-ignored); results go to `results/` and `results/ql_compiler/`, with logs. Both
+notebooks remove their containers when done.
 
 ## Data
 
-- **Extract:** [BBBike's Washington DC extract](https://download.bbbike.org/osm/bbbike/WashingtonDC/):
-  65 MB, 6.3 M nodes, 0.96 M ways, covering DC, Arlington, Alexandria and parts
-  of Maryland. Our run used the **2026-10-24T00:00Z** snapshot; BBBike refreshes
-  it weekly. We'd have used a Geofabrik state extract as the issue suggested, but
-  `download.geofabrik.de` reset every connection from our sessions.
-- **Diffs:** the planet's hourly replication files from the snapshot on. BBBike
-  has no regional feed, so each is a whole planet hour (1–9 MB), an upper bound.
-- OSM data © OpenStreetMap contributors, [ODbL](https://opendatacommons.org/licenses/odbl/).
+[BBBike's Washington DC extract](https://download.bbbike.org/osm/bbbike/WashingtonDC/)
+(65 MB; DC, Arlington, Alexandria and parts of Maryland), snapshot
+**2026-10-24T00:00Z** in both spikes; BBBike refreshes it weekly. #123 also uses the
+planet's hourly diffs. OSM data © OpenStreetMap contributors, [ODbL](https://opendatacommons.org/licenses/odbl/).
 
-## Results
+## #125: an Overpass QL → SQL compiler on PostGIS and DuckDB
 
-From one run on a clean checkout. All outputs, including the log, are in `results/`.
+The answer key is 31 queries in `answer_key.py`: #123's ten with full output, the
+overpass-turbo wizard and example shapes, HIFLD-style pulls (substations, power lines,
+hospitals, fire stations in DC and Arlington), and set and recursion queries. Each
+runs on a local Overpass. A query **matches** when every element and every field
+(tags, coordinates, node lists, members, center, bounds, geometry) is the same, with
+coordinates allowed to differ by 1e-7° (Overpass rounds centres differently).
 
-| query | elements | same IDs | Overpass p50 ms | candidate p50 ms | speed-up |
-|---|---:|:---:|---:|---:|---:|
-| tag in bbox (nodes) | 197 | ✓ | 92 | 9 | 10.6× |
-| tag in bbox (nodes, ways, relations) | 51 | ✓ | 264 | 243 | 1.1× |
-| regex on a tag, whole extract | 151 | ✓ | 1,983 | 426 | 4.7× |
-| around a point (500 m) | 29 | ✓ | 63 | 7 | 8.5× |
-| area by name (parks in Alexandria) | 119 | ✓ | 1,136 | 209 | 5.4× |
-| ways with their nodes | 4,636 | ✓ | 239 | 39 | 6.2× |
-| recurse down from relations | 9,963 | ✓ | 496 | 164 | 3.0× |
-| recurse up from nodes | 43 | ✓ | 144 | 335 | **0.4×** |
-| substations in DC | 40 | ✓ | 725 | 222 | 3.3× |
-| hospitals in Arlington County | 1 | ✓ | 525 | 180 | 2.9× |
+| from one clean run (`results/ql_compiler/`) | Overpass | PostGIS | DuckDB |
+|---|---:|---:|---:|
+| queries matching Overpass, as shipped | — | 0/31 | 0/31 |
+| queries matching Overpass, patched | 31/31 | **30/31** | **30/31** |
+| median of per-query p50 latency | 431 ms | **48 ms** | 502 ms |
+| faster than Overpass on | — | 27/31 | 21/31 |
+| build from the extract | 4–5 min (#123) | 5.5 min, 2,984 MB | 54 s, 451 MB Parquet |
 
-| | Overpass | candidate |
-|---|---:|---:|
-| import time | 287 s | 36 s |
-| disk | 2,020 MB | 1,263 MB |
-| RAM at rest after queries (`docker stats`) | 245 MB | 1,280 MB |
-| peak during import, page cache included | 4,605 MB | 3,429 MB |
-| one planet hour of diffs, median of 16 (range) | 11.5 s (4.7–28.6) | 8.4 s (2.9–13.0) |
+- **As shipped** (`as_shipped.csv`), PostGIS failed on every tag filter: the parser
+  emits jsonb operators but Underpass-API's Osmosis schema stores hstore. DuckDB failed
+  on bbox SQL written for an older spatial extension, a `jsonb` type and other drift,
+  and crashed on a polygon. Four queries didn't parse: `around:r,lat,lon`, `[bbox:]`
+  and key regex.
+- **The one difference** in the patched run: for `out count`, Overpass adds
+  `"areas": "0"` when the query used an area. Our output leaves that key out.
+- **Slow spots** (`patched.csv`): on PostGIS, upward recursion (`<`, `<<`, `rel(bn)`;
+  1.1–3.8 s against 0.2 s) and key regex scan every relation or tag. On DuckDB,
+  `way(r)` takes 6.5 s, and most queries scan whole Parquet files. DuckDB runs
+  in-process; the other two are timed over HTTP.
+- **Build:** Osmosis load 119 s, Underpass-API `init.sql` 94 s and our adapter 118 s.
+  For DuckDB: QuackOSM 35 s (120 MB) and our tables from `ST_ReadOSM` 19 s.
+- **Out of scope:** attic, `[adiff:]`, `if`, `complete` and `make` now fail with
+  `unsupported Overpass QL feature: <name>`. `foreach` is an Underpass-API feature,
+  and it matched Overpass.
+- **Coverage** of the QL language reference (`coverage.csv`): 21 features yes,
+  7 partial, 9 no.
+- **Size** (`size.csv`, Rust without tests): the parser's shared grammar and logic is
+  2,251 lines, the PostgreSQL dialect 158, the DuckDB dialect 182 and the server 427.
+  We add 136 lines of SQL.
 
-- **Latency:** median of 7 timed runs after a warm-up, over HTTP, default settings.
-- **Recurse up** is the one loss: osm2pgsql's bucket index on way node lists is
-  built for updates; a plain GIN index would likely fix it, for more disk.
-- **RAM at rest** isn't like for like: PostgreSQL's figure includes its shared
-  buffers; Overpass reads through the OS cache, which `docker stats` doesn't count.
-- **Freshness:** the 16 hours created or changed 32 nodes inside the extract's
-  box (8 of them tagged). All 32 hold their final tags and coordinates on both
-  sides, and all ten queries still return identical IDs. Diff times are per
-  file in `results/diffs.csv`; the candidate's include the `osmium` step.
+![Overpass Turbo drawing DC's substations and power lines from the PostGIS endpoint](results/ql_compiler/overpass_turbo.png)
 
-## What didn't work, and what we changed
+**What we changed** (the table in the notebook has every item). The patches are in
+`underpass/`:
+- **Parser:** an end-of-input anchor. Without it, anything the parser didn't know was
+  silently dropped with everything after it. Also settings in any order, `[bbox:]`,
+  `around` with a point and a radius in metres (it was in degrees), key regex and `,i`,
+  and `._` as a statement.
+- **SQL:** one query per recursion operator (all four shared one hard-coded query),
+  recurse filters on real node lists and members, and output fields as Overpass prints
+  them. Area filters use `EXISTS`, polygons are closed, and DuckDB dialect fixes.
+- **Schema:** jsonb tags, members, and relation geometry as the collection of its
+  members' geometries, on both backends. DuckDB tables come from `ST_ReadOSM`, because
+  QuackOSM keeps no node lists or members.
+- **Server:** SQL errors become HTTP 400 instead of a panic and a dropped connection.
 
-- **Untagged member ways.** The first import missed 4 multipolygon relations
-  (3 parks, 1 substation) whose outer ways carry no tags; `process_untagged_way`
-  in `flex.lua` fixed it.
-- **A query-builder bug.** An unqualified `geom` in the area subquery bound to
-  the area's own geometry, so "hospitals in Arlington" returned every hospital.
-- **Overpass's Docker image needed two workarounds.** Its `init` mode only reads
-  `.osm.bz2`, so the PBF is re-compressed first, which takes most of the 287 s
-  import. With a named volume, `/db` is left readable only by the `overpass`
-  user, so every query failed with `Permission denied` until we `chmod 755 /db`.
-- **osm2pgsql refused raw planet diffs** ("node id … appears more than once");
-  `osmium merge-changes -s` collapses them first, as `osm2pgsql-replication` does.
-- **One hour of diffs proved nothing locally.** The hour after the snapshot,
-  midnight UTC, had no edits inside DC, so we apply 16 hours.
+**Why contribute rather than build.** The shape is right: one pest grammar, a typed
+tree and a dialect trait, which is what #125 asked for. The fixes are many but each is
+small. A new compiler would redo about 2,600 lines to reach the same place. The risks
+are a single maintainer, and that it isn't kept working against its own backends:
+there are no end-to-end tests, and 12 of the parser's 32 unit tests only pin SQL text.
+Our patch changes that text, so those 12 need new expected values before going upstream
+(all 32 test queries still parse). Next steps: upstream as small PRs, starting with the
+end-of-input anchor and the Osmosis jsonb fix, and add this answer key as their
+end-to-end test.
 
-## What the candidate can't do
+**A DuckDB community extension: not yet.** The compiler is Rust, and DuckDB
+extensions are C++ (or Rust through the C API). The same composition already works
+without one: `overpass2sql duckdb` gives SQL that can be wrapped and joined to any
+table, and Underpass-API has a WASM build.
 
-13 groups of QL features, listed with costs at the end of the notebook. Five
-are small additions on the same tables: role-aware recursion, `is_in`/`area(id)`,
-`out count`/CSV, `poly:` and set-based `around`, and untagged nodes in spatial
-filters. Five add up to a QL interpreter: the QL text itself, named sets,
-`foreach`/`if`/`complete`, `>>`/`<<`, and evaluators. Attic queries (`[date:]`,
-`[adiff:]`, `changed`) need a database that keeps history. Output is IDs only
-(`out ids`); `body` and `geom` would be cheap from these tables.
+**Licences.** Underpass-API is AGPL-3.0 (its `Cargo.toml` says MIT/Apache-2.0, but the
+`LICENSE` file is AGPL). The parser is MIT. `underpass/underpass_api.patch` and
+`underpass/postgres_views.sql` (adapted from its `view.sql`) are AGPL-3.0;
+`underpass/overpass_parser_rust.patch` is MIT. The notebook downloads both projects at
+pinned commits and applies the patches; no Underpass-API code is copied in. Serving a
+modified Underpass-API publicly means publishing its source, as this repo does.
+
+## #123: osm2pgsql → PostGIS against Overpass
+
+Same element IDs as Overpass on all ten queries, before and after diffs; faster on eight
+(median 4.0×), slower on recurse-up (0.4×), per `results/queries.csv`. Import 287 s against
+36 s; disk 2,020 MB against 1,263 MB; a planet hour of diffs in a median 11.5 s against
+8.4 s. `benchmark.py` has the method and what didn't work.
 
 ## What we looked at first
 
-- **[Postpass](https://github.com/woodpeck/postpass)** (Frederik Ramm, FOSSGIS)
-  is this design in production: osm2pgsql flex → PostGIS, SQL over HTTP,
-  updated every 5 minutes, queries queued by `EXPLAIN` cost, and supported by
-  Overpass Turbo. It does no history and takes SQL, not QL.
-- **[QLever](https://wiki.openstreetmap.org/wiki/QLever) + osm2rdf** is a SPARQL
-  endpoint for the planet, with `osm-live-updates` for diffs. Qloverleaf, a
-  closed proof of concept from June 2026, translates QL to SPARQL and hits the
-  same history and imperative-QL limits.
-- **[Underpass-API](https://github.com/teritorio/Underpass-API)** (Teritorio,
-  found after this spike) already compiles a subset of Overpass QL to SQL for
-  PostGIS (Osmosis schema) or DuckDB (QuackOSM), via the Rust parser
-  [overpass_parser_rust](https://github.com/teritorio/overpass_parser_rust). We
-  didn't benchmark it; #125 starts from it.
-- **[osm2pgsql](https://osm2pgsql.org/doc/manual.html)**'s middle tables (tags,
-  way node arrays, relation members) already are Overpass's data model, and
-  `osm2pgsql-replication` keeps them current. That's why the candidate is mostly
-  configuration, not new code.
-- **[OSM Express](https://github.com/bdon/OSMExpress)** has diffs but no query language; DuckDB's `ST_ReadOSM`, QuackOSM and Overture GeoParquet are rebuild-only.
-- **Overpass's [setup guide](https://dev.overpass-api.de/overpass-doc/en/more_info/setup.html)**: 350–400 GB for the planet (800 GB–1 TB with attic).
-
-## Worth building?
-
-- **For our own HIFLD Next and substation pulls: yes, as a thin layer.** Run
-  osm2pgsql with `osm2pgsql-replication` on the regions we need, and query
-  PostGIS directly or through this JSON shape. It answered every query we tried
-  identically and mostly faster, with tools we'd run anyway.
-- **As a public "Overpass replacement": no.** Postpass already is one for SQL,
-  and the hard part is Overpass QL compatibility, not storage or freshness.
-  Underpass-API has started on that; the next step is to measure how much of
-  real QL traffic it gets right, and extend it rather than write a new parser.
-  Attic queries stay on Overpass.
+Underpass-API and its parser (a port of the ANTLR-based
+[overpass_parser-rb](https://github.com/teritorio/overpass_parser-rb)), the subject of #125;
+[Postpass](https://github.com/woodpeck/postpass) (FOSSGIS: osm2pgsql → PostGIS over HTTP
+with SQL, not QL); QLever + osm2rdf and Qloverleaf (QL → SPARQL, a closed proof of concept);
+[OSM Express](https://github.com/bdon/OSMExpress); and DuckDB's `ST_ReadOSM`,
+[QuackOSM](https://github.com/kraina-ai/quackosm) and Overture GeoParquet (rebuild-only).
 
 ## What this doesn't show
 
-- **One region, one machine, default settings.** The planet is another scale:
-  osm2pgsql's manual asks for 64–128 GB RAM and 590–730 GB of disk with updates.
-- **No concurrency or load test**, and no per-query cost limits like Overpass's
-  dispatcher or Postpass's queues.
-- **Planet diffs, not a regional feed**, so both databases took in out-of-region
-  objects. We checked created and changed nodes in the box, not deletions or
-  way geometry.
-- **Ten queries.** Real traffic includes `out geom`, `out meta` and long scripts.
+- **One region, one machine, default settings, no load test.** No per-query cost limits
+  like Overpass's dispatcher.
+- **#125's adapters are built once.** Osmosis can apply diffs, but our relation
+  geometry and the DuckDB tables would need rebuilding, unlike #123's osm2pgsql setup.
+- **The answer key is ours.** The HIFLD-style pulls are our reconstruction: the repo's
+  HIFLD spikes use Overture, so there were no logged Overpass queries to copy.
+  `foreach`, `convert`, `bw`/`br` and relation `out geom` are barely tested or not at all.
+- **Size:** the folder's Python (about 1,970 lines across both spikes) is over the repo's
+  ~1,000-line target. `ql_compiler.py` is about half markdown and the coverage table.

@@ -1,4 +1,28 @@
 warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
 extract snapshot 2026-10-24T00:00:00Z
-built both parsers and the server in 103 s
-{'Osmosis load': '126 s', 'Underpass-API init.sql': '95 s', 'our adapter': '120 s'} database 2,985 MB
+built both parsers and the server in 104 s
+{'Osmosis load': '119 s', 'Underpass-API init.sql': '94 s', 'our adapter': '118 s'} database 2,984 MB
+{'QuackOSM GeoParquet': '35 s', 'our tables (ST_ReadOSM + QuackOSM areas)': '19 s', 'Underpass-API init.sql (as shipped)': '9 s'} {'QuackOSM GeoParquet': '120 MB', 'our tables': '451 MB'}
+31 answers, 29,055 elements in all
+{"calls":["http://127.0.0.1:9292/interpreter","status 200"],"status":"Loaded – nodes: 806, ways: 141, relations: 1Displayed – pois: 0, lines: 100, polygons: 40"}
+our parser patch: 12 files changed, 550 insertions(+), 283 deletions(-)
+shape: (3, 2)
+┌─────────┬───────┐
+│ status  ┆ count │
+│ ---     ┆ ---   │
+│ str     ┆ u32   │
+╞═════════╪═══════╡
+│ no      ┆ 9     │
+│ partial ┆ 7     │
+│ yes     ┆ 21    │
+└─────────┴───────┘
+Extract snapshot: 2026-10-24T00:00:00Z
+Answer key: 31 queries
+As shipped: DuckDB SQL error 23, DuckDB parse error 4, DuckDB wrong output 3, DuckDB DuckDB crashed 1, PostGIS SQL error 27, PostGIS parse error 4
+Patched: PostGIS 30/31 match, DuckDB 30/31 match
+Median of per-query p50s (ms): Overpass 431.0, PostGIS (Underpass-API) 48.0, DuckDB (patched parser) 502.0
+PostGIS build: Osmosis load 119 s, Underpass-API init.sql 94 s, our adapter 118 s; database 2,984 MB
+DuckDB build: QuackOSM GeoParquet 35 s, our tables (ST_ReadOSM + QuackOSM areas) 19 s, Underpass-API init.sql (as shipped) 9 s; QuackOSM GeoParquet 120 MB, our tables 451 MB
+Out of scope: attic date: unsupported Overpass QL feature: attic queries ([date:]); augmented diff: unsupported Overpass QL feature: augmented diffs ([adiff:]); foreach: runs; match against Overpass; if: unsupported Overpass QL feature: if; complete: unsupported Overpass QL feature: complete; make (evaluator): unsupported Overpass QL feature: make (evaluators)
+QL features: no 9, partial 7, yes 21
+removed the containers

@@ -539,6 +539,8 @@ def _(BUILD, DATA, DB_URL, PARSER_SHIPPED, QUERIES, answers, compare, json, pl, 
                 rows = [json.loads(r) for r in json.loads(run.stdout)]
         except psycopg.Error as e:
             return "SQL error: " + str(e).splitlines()[0][:120]
+        if not all(isinstance(r, dict) and "type" in r and "id" in r for r in rows):
+            return "not Overpass elements"
         return compare(answers[name], rows)
 
     _rows = [

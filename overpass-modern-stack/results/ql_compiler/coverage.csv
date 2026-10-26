@@ -1,0 +1,38 @@
+group,feature,status,note
+settings,[out:json],yes,""
+settings,"[out:xml], csv, custom, popup",no,JSON only
+settings,[timeout:],yes,becomes statement_timeout
+settings,[maxsize:],partial,"parsed, ignored"
+settings,[bbox:],yes,""
+settings,"[date:], [diff:], [adiff:]",no,needs history
+block,union ( ... ),yes,""
+block,difference ( ... - ... ),yes,""
+block,if,no,""
+block,foreach,yes,Underpass-API's; matches Overpass on our one test
+block,"for, complete, retro, compare",no,""
+statement,"item (._, .a)",yes,""
+statement,"recurse >, >>, <, <<",yes,""
+statement,"is_in, map_to_area",no,""
+statement,"timeline, local, make",no,""
+statement,convert,partial,Underpass-API's; not in the answer key
+query,"node, way, rel, nwr, area",yes,""
+query,"nw, nr, wr, derived",no,not in the grammar
+filter,"tag =, !=, exists, !exists",yes,""
+filter,"value regex ~, !~",yes,in PostgreSQL's or DuckDB's (RE2) regex dialect
+filter,"key regex ~""k""~""v""",yes,""
+filter,"case-insensitive ,i",yes,""
+filter,bbox,yes,""
+filter,"recurse n, w, r, bn, bw, br, with roles",yes,"bw, br untested"
+filter,input set (.a),yes,""
+filter,"id, id:",yes,""
+filter,"around (point, set)",partial,"several points are treated as points, not a polyline; set radius approximate on DuckDB"
+filter,poly,yes,""
+filter,"area (area.a), area(id)",yes,"way areas keep the way id, not id + 2400000000"
+filter,"pivot, newer, changed, user, uid, if:",no,""
+out,"ids, skel, body, tags",yes,""
+out,meta,partial,version and timestamp; no user names
+out,count,partial,no areas key
+out,"center, bb",yes,""
+out,geom,partial,ways yes; relation member geometry no
+out,"qt, asc",partial,accepted; order not guaranteed
+out,"limit (out 10), noids",no,""
