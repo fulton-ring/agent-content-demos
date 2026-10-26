@@ -13,7 +13,7 @@ Everything is in one marimo notebook, [`layers.py`](layers.py). The ratings, wit
 ## How to run it
 
 ```bash
-./run.sh     # needs uv; ~5 min the first time (Overture buildings from S3), ~2 min after
+./run.sh     # needs uv; ~4 min the first time (mostly Overture buildings from S3), ~1.5 min after
 ```
 
 To read it as a notebook: `uv run marimo edit layers.py`. Downloads go to `data/` (not committed); results to
@@ -68,13 +68,14 @@ GIS file sold at $300 a layer).
 - Product pages disagree with the report and with each other (`output/regrid_claims.csv`): addresses are "more than
   73 million" on one page and "more than 180 million" on another (the report has 180.1 million).
 
-**The three counties** (`output/county_side_by_side.csv`, `output/county_field_fill.csv`):
+**The three counties** (`output/county_side_by_side.csv`, `output/county_field_fill.csv`; public addresses are the larger of
+state or county points and Overture):
 
 | | Wake NC public / Regrid | Fergus MT public / Regrid | Gordon GA public / Regrid |
 |---|---|---|---|
 | Parcels | 439,398 / 435,472 | 20,862 / 20,831 | none official / 28,899 |
 | Buildings (Overture) | 418,892 / 474,941 | 17,602 / 24,297 | 33,517 / 43,195 |
-| Addresses | 674,404 / 582,793 | 9,614 / 9,215 | 0 / 31,415 |
+| Addresses | 674,404 / 582,793 | 8,676 / 9,215 | 0 / 31,415 |
 | Zoning | 15 town and county layers / 434,361 parcels | none found / 2,937 parcels | city only / 28,874 parcels |
 | Latest FIRM panel | 2022-07-19 | 2010-07-22 | 2008-09-26 |
 
@@ -90,6 +91,8 @@ GIS file sold at $300 a layer).
 - **Open buildings** reach 72–88% of Regrid's licensed building counts.
 
 ## What the spike shows
+
+![The notebook's summary](output/summary_screenshot.png)
 
 **Of Regrid's layers, 30% are free and national, 42% are public but scattered and 27% are proprietary. Two thirds
 of Mireye's fields are free and national, and nearly all the rest is Regrid's parcel layer.** An open rebuild
