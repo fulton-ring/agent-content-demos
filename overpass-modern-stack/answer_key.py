@@ -55,18 +55,21 @@ QUERIES: list[tuple[str, str]] = [
         "difference",
         f'[out:json];(nwr["amenity"="school"]({CORE}); - nwr["operator:type"="private"]({CORE}););out ids;',
     ),
-    ("nodes of named set", f'[out:json];way["power"="line"]({CORE})->.lines;node(w.lines)["power"="tower"];out ids;'),
+    (
+        "nodes of named set",
+        f'[out:json];way["highway"="primary"]({CORE})->.roads;node(w.roads)["highway"="traffic_signals"];out ids;',
+    ),
     ("ways of relations", f'[out:json];rel["route"="subway"]({CORE});way(r);out ids;'),
     ("relations of nodes by role", f'[out:json];node["railway"="stop"]({CORE});rel(bn:"stop");out ids;'),
     ("recurse down fully", f'[out:json];rel["route"="subway"]({CORE});>>;out ids;'),
-    ("recurse up fully", f'[out:json];node["power"="tower"]({CORE});<<;out ids;'),
+    ("recurse up fully", f'[out:json];node["railway"="station"]["station"="subway"]({CORE});<<;out ids;'),
 ]
 
 # Out of scope by the issue: each should fail with an error that names the feature.
 UNSUPPORTED: list[tuple[str, str]] = [
     ("attic date", '[out:json][date:"2024-01-01T00:00:00Z"];node(1);out;'),
     ("augmented diff", '[out:json][adiff:"2024-01-01T00:00:00Z"];node(1);out;'),
-    ("foreach", f'[out:json];way["highway"="primary"]({CORE});foreach{{(._;>;);out;}}'),
+    ("foreach", f'[out:json];way["highway"="primary"]({CORE});foreach(node(w);out ids;);'),
     ("if", '[out:json];node(1);if (count(nodes) > 0) { out; }'),
     ("complete", f'[out:json];node["amenity"="cafe"]({CORE});complete{{nwr(around:10);}};out;'),
     ("make (evaluator)", '[out:json];node(1);make stat n=count(nodes);out;'),

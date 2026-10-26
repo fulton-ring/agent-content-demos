@@ -1,0 +1,1183 @@
+diff --git a/overpass.pest b/overpass.pest
+index 56c76e5..796ba2c 100644
+--- a/overpass.pest
++++ b/overpass.pest
+@@ -18,9 +18,14 @@ STRING = { SIMPLE_QUOTED_STRING | DOUBLE_QUOTED_STRING | UNQUOTED_STRING | numbe
+ osm_id = { INTEGER }
+ number = { FLOAT | INTEGER }
+ 
+-metadata = { "[" ~ "out:json" ~ "]" ~ ( "[" ~ "timeout:" ~ number ~ "]" )? }
++setting_out = { "out:json" }
++setting_timeout = { "timeout:" ~ number }
++setting_maxsize = { "maxsize:" ~ number }
++setting_bbox = { "bbox:" ~ filter_bbox }
++metadata = { ( "[" ~ ( setting_out | setting_timeout | setting_maxsize | setting_bbox ) ~ "]" )+ }
+ 
+-selector = { "[" ~ not? ~ key ~ (operator ~ value)? ~ "]" }
++selector = { "[" ~ not? ~ key_regex? ~ key ~ (operator ~ value)? ~ "]" }
++key_regex = { "~" }
+ not = { "!" }
+ key = @{ (STRING | "_" | ":" | "-")+ }
+ value = @{ (!"]" ~ ANY)+ }
+@@ -34,7 +39,8 @@ filter_recurse = { filter_recurse_type ~ DOT_ID? ~ (":" ~ key)? }
+ filter_area = { "area" ~ DOT_ID }
+ filter_around_core = { DOT_ID }
+ filter_around_radius = { number }
+-filter_around = { "around" ~ filter_around_core ~ ":" ~ filter_around_radius }
++filter_around_point = { number ~ "," ~ number }
++filter_around = { "around" ~ filter_around_core? ~ ":" ~ filter_around_radius ~ ("," ~ filter_around_point)* }
+ filter = { "(" ~ ( filter_bbox | filter_poly | filter_osm_id | filter_osm_ids | filter_area | filter_around | filter_recurse ) ~ ")" }
+ 
+ asignation = { "->" ~ DOT_ID }
+@@ -55,16 +61,18 @@ convert_suppress_key  = { "!" ~ key }
+ convert_tag_item = { convert_key_eval | convert_generic_copy | convert_suppress_key }
+ convert = { "convert" ~ object_type ~ convert_tag_item ~ ("," ~ convert_tag_item)* }
+ 
+-query_object = { object_type ~ DOT_ID? ~ ( selector | filter )* ~ asignation? }
+-query_recurse = { DOT_ID? ~ ( "<" | "<<" | ">" | ">>" ) ~ asignation? }
++query_object = { (object_type ~ DOT_ID? | DOT_ID) ~ ( selector | filter )* ~ asignation? }
++recurse_op = { "<<" | ">>" | "<" | ">" }
++query_recurse = { DOT_ID? ~ recurse_op ~ asignation? }
+ query_difference = { "-" }
+ query_union = { "(" ~ (query_sequence ~ ";" ) ~ ( query_difference? ~ query_sequence ~ ";" )* ~ ")" ~ asignation? }
+ query_foreach = { "foreach" ~ DOT_ID? ~ asignation? ~ "(" ~ subrequest ~ ")" }
+ query_sequence = { query_object | query_recurse | query_union | query_foreach | convert }
+ 
+ out_geom = { "geom" | "center" | "bb" }
+-out_level_of_details = { "ids" | "skel" | "body" | "tags" | "meta" }
+-out = { DOT_ID? ~ "out" ~ out_geom? ~ out_level_of_details? }
++out_level_of_details = { "ids" | "skel" | "body" | "tags" | "meta" | "count" }
++out_order = { "qt" | "asc" }
++out = { DOT_ID? ~ "out" ~ (out_geom | out_level_of_details | out_order)* }
+ 
+ subrequest = { ((query_sequence | out) ~ ";")+  }
+-request = { (WHITESPACE | COMMENT)* ~ (metadata ~ ";" )? ~ subrequest }
++request = { SOI ~ (WHITESPACE | COMMENT)* ~ (metadata ~ ";" )? ~ subrequest ~ EOI }
+diff --git a/src/overpass_parser/filters.rs b/src/overpass_parser/filters.rs
+index 1ac5e81..f9b2a94 100644
+--- a/src/overpass_parser/filters.rs
++++ b/src/overpass_parser/filters.rs
+@@ -14,8 +14,9 @@ use super::{Rule, subrequest::SubrequestJoin};
+ #[derivative(Default)]
+ #[derive(Debug, Clone)]
+ pub struct FilterAround {
+-    pub core: Box<str>,
++    pub core: Option<Box<str>>,
+     pub radius: f64,
++    pub points: Vec<(f64, f64)>,
+ }
+ 
+ #[derive(Derivative)]
+@@ -98,9 +99,17 @@ impl Filter {
+                                 around.core = around_inner
+                                     .into_inner()
+                                     .find(|p| p.as_rule() == Rule::ID)
+-                                    .map(|p| p.as_str())
+-                                    .unwrap()
+-                                    .into();
++                                    .map(|p| p.as_str().into());
++                            }
++                            Rule::filter_around_point => {
++                                let xy: Vec<f64> = around_inner
++                                    .as_str()
++                                    .split(',')
++                                    .filter_map(|s| s.trim().parse().ok())
++                                    .collect();
++                                if xy.len() == 2 {
++                                    around.points.push((xy[0], xy[1]));
++                                }
+                             }
+                             Rule::filter_around_radius => {
+                                 if let Ok(radius) = around_inner.as_str().parse::<f64>() {
+@@ -168,20 +177,9 @@ impl Filter {
+         sql_dialect: &(dyn SqlDialect + Send + Sync),
+         table: &str,
+         bbox: (f64, f64, f64, f64),
+-        srid: &str,
++        _srid: &str,
+     ) -> String {
+-        sql_dialect.st_intersects_extent_with_geom(
+-            table,
+-            sql_dialect
+-                .st_transform(
+-                    &format!(
+-                        "ST_Envelope('SRID=4326;LINESTRING({} {}, {} {})'::geometry)",
+-                        bbox.1, bbox.0, bbox.3, bbox.2
+-                    ),
+-                    srid,
+-                )
+-                .as_str(),
+-        )
++        sql_dialect.bbox_clause(table, bbox)
+     }
+ 
+     fn poly_clauses(
+@@ -190,6 +188,11 @@ impl Filter {
+         poly: &[(f64, f64)],
+         srid: &str,
+     ) -> (SubrequestJoin, SubrequestJoin) {
++        // Overpass closes the ring itself; PostGIS and DuckDB need it closed.
++        let mut poly = poly.to_vec();
++        if poly.first() != poly.last() {
++            poly.push(poly[0]);
++        }
+         let coords = poly
+             .iter()
+             .map(|&(lat, lon)| format!("{lon} {lat}"))
+@@ -233,26 +236,15 @@ FROM
+     fn around_clause(
+         sql_dialect: &(dyn SqlDialect + Send + Sync),
+         set: &str,
+-        srid: &str,
++        default_set: &str,
+         around: &FilterAround,
+     ) -> String {
+-        let join = sql_dialect.st_subdivide(
+-            &sql_dialect.st_dump_geom(&sql_dialect.st_transform_reverse(
+-                &sql_dialect.st_buffer(
+-                    &sql_dialect.st_transform(&sql_dialect.st_union_agg("geom"), srid),
+-                    around.radius,
+-                ),
+-                srid,
+-            )),
+-            1000,
+-        );
+-        let on = sql_dialect.st_intersects_with_geom("subdivided_geom", &format!("{set}.geom"));
+-
+-        format!(
+-            "JOIN (SELECT {join} AS geom FROM _{}) AS subdivided_geom ON
+-    {on}",
+-            around.core
+-        )
++        if around.points.is_empty() {
++            let core = around.core.as_deref().unwrap_or(default_set);
++            sql_dialect.around_set(set, core, around.radius)
++        } else {
++            sql_dialect.around_points(set, &around.points, around.radius)
++        }
+     }
+ 
+     fn area_id_clause(
+@@ -260,78 +252,84 @@ FROM
+         set: &str,
+         area_id: &str,
+     ) -> SubrequestJoin {
++        if sql_dialect.is_precompute() {
++            return SubrequestJoin {
++                precompute_set: None,
++                precompute: Some(vec![area_id.to_string()]),
++                from: None,
++                clauses: sql_dialect
++                    .st_intersects_with_geom(set, sql_dialect.table_precompute_geom(area_id).as_str()),
++            };
++        }
++        // EXISTS rather than a join, so an element in several of the areas comes out once.
+         SubrequestJoin {
+             precompute_set: None,
+-            precompute: sql_dialect
+-                .is_precompute()
+-                .then(|| vec![area_id.to_string()]),
+-            from: (!sql_dialect.is_precompute()).then(|| format!("JOIN _{area_id} ON true")),
+-            clauses: sql_dialect
+-                .st_intersects_with_geom(set, sql_dialect.table_precompute_geom(area_id).as_str()),
++            precompute: None,
++            from: None,
++            clauses: format!(
++                "EXISTS (SELECT 1 FROM _{area_id} AS area WHERE {})",
++                sql_dialect.st_intersects_with_geom(set, "area.geom")
++            ),
+         }
+     }
+ 
+     fn role_sql(
+         sql_dialect: &(dyn SqlDialect + Send + Sync),
+         role: Option<&str>,
+-        set: &str,
++        prefix: &str,
+     ) -> String {
+-        let mut role_sql = "".to_string();
+-        if let Some(role) = role
+-            && !role.is_empty()
+-        {
+-            role_sql = format!(
+-                " AND jsonb_build_array(jsonb_build_object('type', {set}.osm_type, 'ref', {set}.id, {}, {role})) <@ {set}.members",
+-                sql_dialect.escape_literal(role)
+-            );
++        match role {
++            Some(role) => format!(" AND {prefix}role = {}", sql_dialect.escape_literal(role)),
++            None => "".to_string(),
+         }
+-        role_sql
+     }
+ 
++    /// Recurse filters such as `node(w)`, `way(r)`, `rel(bn)`: a condition on `set` relative to the input set.
+     fn recurse_clause(
+         sql_dialect: &(dyn SqlDialect + Send + Sync),
+         recurse_type: &str,
+         role: Option<&str>,
+         set: &str,
+-        default_set: &str,
++        input: &str,
+     ) -> String {
++        let long_type = format!(
++            "CASE {set}.osm_type WHEN 'n' THEN 'node' WHEN 'w' THEN 'way' ELSE 'relation' END"
++        );
+         match recurse_type {
+-            // forward from ways: select nodes that are members of ways in the input set
++            // Nodes of the input ways.
+             "w" => format!(
+-                "JOIN _{default_set} AS w ON w.osm_type = 'w' AND {set}.osm_type = 'n' AND array[{set}.id] <@ w.nodes"
++                "{set}.osm_type = 'n' AND {set}.id IN (SELECT UNNEST(w.nodes) FROM _{input} AS w WHERE w.osm_type = 'w')"
+             ),
+-            // forward from relations: select elements that are members of relations in the input set
++            // Members of the input relations.
+             "r" => {
+-                let mut role_sql = "".to_string();
+-                if let Some(role) = role
+-                    && !role.is_empty()
+-                {
+-                    role_sql = format!(" AND m.role = {}", sql_dialect.escape_literal(role));
+-                }
++                let (join, m) = sql_dialect.members_join("r", "rm");
+                 format!(
+-                    "JOIN _{default_set} AS r ON r.osm_type = 'r'
+-    JOIN LATERAL jsonb_to_recordset(r.members) AS m(type text, ref bigint, role text) ON m.type = {set}.osm_type AND m.ref = {set}.id{role_sql}"
++                    "EXISTS (SELECT 1 FROM _{input} AS r {join} WHERE r.osm_type = 'r' AND {m}ref = {set}.id AND {m}type = {long_type}{})",
++                    Self::role_sql(sql_dialect, role, &m)
+                 )
+             }
+-            // backward from nodes: select ways/relations that contain nodes from the input set
+-            "bn" => format!(
+-                "JOIN _{default_set} AS bn ON bn.osm_type = 'n' AND (
+-    {set}.osm_type = 'w' AND array[bn.id] <@ {set}.nodes OR
+-    {set}.osm_type = 'r' AND array[bn.id] <@ osm_base_idx_nodes_members({set}.members, 'n'){}
+-)",
+-                Self::role_sql(sql_dialect, role, set)
+-            ),
+-            // backward from ways: select relations that contain ways from the input set
+-            "bw" => format!(
+-                "JOIN _{default_set} AS bw ON {set}.osm_type = 'w' AND bw.osm_type = 'r' AND array[bw.id] <@ osm_base_idx_nodes_members({set}.members, 'w'){}",
+-                Self::role_sql(sql_dialect, role, set)
+-            ),
+-            // backward from relations: select relations that contain relations from the input set
+-            "br" => {
+-                format!(
+-                    "JOIN _{default_set} AS br ON {set}.osm_type = 'r' AND br.osm_type = 'r' AND array[br.id] <@ osm_base_idx_nodes_members({set}.members, 'r'){}",
+-                    Self::role_sql(sql_dialect, role, set)
+-                )
++            // Ways and relations that have an input node; relations that have an input way or relation.
++            "bn" | "bw" | "br" => {
++                let (osm_type, member_type) = match recurse_type {
++                    "bn" => ("n", "node"),
++                    "bw" => ("w", "way"),
++                    _ => ("r", "relation"),
++                };
++                let (join, m) = sql_dialect.members_join("parent", "pm");
++                let in_relation = format!(
++                    "{set}.osm_type = 'r' AND EXISTS (SELECT 1 FROM (SELECT {set}.members) AS parent {join} WHERE {m}type = '{member_type}' AND {m}ref IN (SELECT id FROM _{input} WHERE osm_type = '{osm_type}'){})",
++                    Self::role_sql(sql_dialect, role, &m)
++                );
++                if recurse_type == "bn" && role.is_none() {
++                    let in_way = sql_dialect.list_overlaps_ids(
++                        &format!("{set}.nodes"),
++                        &format!("_{input}"),
++                        "osm_type = 'n'",
++                    );
++                    format!("(({set}.osm_type = 'w' AND {in_way}) OR ({in_relation}))")
++                } else {
++                    format!("({in_relation})")
++                }
+             }
+             _ => panic!("Invalid or Not Implemented recurse type: {recurse_type}"),
+         }
+@@ -375,22 +373,22 @@ FROM
+             clauses.push(SubrequestJoin {
+                 precompute_set: None,
+                 precompute: None,
+-                from: Some(Self::around_clause(sql_dialect, set, srid, around)),
+-                clauses: "true".to_string(),
++                from: None,
++                clauses: Self::around_clause(sql_dialect, set, default_set, around),
+             });
+         }
+         if let Some(recurse) = &self.recurse {
+             clauses.push(SubrequestJoin {
+                 precompute_set: None,
+                 precompute: None,
+-                from: Some(Self::recurse_clause(
++                from: None,
++                clauses: Self::recurse_clause(
+                     sql_dialect,
+                     &recurse.recurse_type,
+                     recurse.role.as_deref(),
+                     set,
+                     recurse.set.as_deref().unwrap_or(default_set),
+-                )),
+-                clauses: "true".to_string(),
++                ),
+             });
+         }
+ 
+diff --git a/src/overpass_parser/mod.rs b/src/overpass_parser/mod.rs
+index 599975c..e15801a 100644
+--- a/src/overpass_parser/mod.rs
++++ b/src/overpass_parser/mod.rs
+@@ -19,10 +19,44 @@ use request::Request;
+ #[grammar = "overpass.pest"]
+ pub struct OverpassParser;
+ 
++/// Overpass QL features this compiler doesn't support, by a pattern that finds them in the query.
++const UNSUPPORTED: [(&str, &str); 17] = [
++    (r"\[\s*date\s*:", "attic queries ([date:])"),
++    (r"\[\s*adiff\s*:", "augmented diffs ([adiff:])"),
++    (r"\[\s*diff\s*:", "diffs ([diff:])"),
++    (r"\[\s*out\s*:\s*(xml|csv|custom|popup)", "output formats other than [out:json]"),
++    (r"\bif\s*[(:]", "if"),
++    (r"\bcomplete\b", "complete"),
++    (r"\bretro\b", "retro"),
++    (r"\bcompare\b", "compare"),
++    (r"\bmake\b", "make (evaluators)"),
++    (r"\bis_in\b", "is_in"),
++    (r"\bmap_to_area\b", "map_to_area"),
++    (r"\btimeline\b", "timeline"),
++    (r"\blocal\b", "local"),
++    (r"\bpivot\b", "pivot"),
++    (r"\(\s*changed\b", "changed"),
++    (r"\(\s*(user|uid|newer)\s*:", "user, uid and newer filters"),
++    (r"\bout\b[^;]*\b(tags|count)\b[^;]*\b(geom|bb|center)\b", "out with both count/tags and geometry"),
++];
++
+ pub fn parse_query(query: &str) -> Result<Request, pest::error::Error<Rule>> {
+     match OverpassParser::parse(Rule::request, query) {
+         Ok(mut pairs) => Request::from_pest(pairs.next().unwrap()),
+-        Err(e) => Err(e),
++        Err(e) => {
++            let feature = UNSUPPORTED
++                .iter()
++                .find(|(pattern, _)| regex::Regex::new(pattern).unwrap().is_match(query));
++            match feature {
++                Some((_, name)) => Err(pest::error::Error::new_from_pos(
++                    pest::error::ErrorVariant::CustomError {
++                        message: format!("unsupported Overpass QL feature: {name}"),
++                    },
++                    pest::Position::from_start(query),
++                )),
++                None => Err(e),
++            }
++        }
+     }
+ }
+ 
+diff --git a/src/overpass_parser/out.rs b/src/overpass_parser/out.rs
+index 6f353fd..faf8bc3 100644
+--- a/src/overpass_parser/out.rs
++++ b/src/overpass_parser/out.rs
+@@ -12,7 +12,7 @@ use super::Rule;
+ pub struct Out {
+     pub set: Option<Box<str>>,
+ 
+-    #[derivative(Default(value = "\"geom\".into()"))]
++    #[derivative(Default(value = "\"\".into()"))]
+     pub geom: Box<str>,
+ 
+     #[derivative(Default(value = "\"body\".into()"))]
+@@ -33,6 +33,7 @@ impl Out {
+                 Rule::out_level_of_details => {
+                     out.level_of_details = inner_pair.as_str().into();
+                 }
++                Rule::out_order => {}
+                 _ => {
+                     return Err(pest::error::Error::new_from_span(
+                         pest::error::ErrorVariant::CustomError {
+@@ -52,116 +53,63 @@ impl Out {
+         srid: &str,
+         default_set: &str,
+     ) -> String {
+-        let way_member_nodes = matches!(self.level_of_details.as_ref(), "skel" | "body" | "meta");
+-        let relations_members = matches!(self.level_of_details.as_ref(), "skel" | "body" | "meta");
+-        let tags = matches!(self.level_of_details.as_ref(), "body" | "tags" | "meta");
+-        let meta = self.level_of_details.as_ref() == "meta";
+-
+-        let json_strip_nulls = sql_dialect.json_strip_nulls();
+-        let json_build_object = sql_dialect.json_build_object();
+-        let st_dump_points = sql_dialect.st_dump_points();
+-        let st_transform_reverse = sql_dialect.st_transform_reverse("geom", srid);
+-        let st_asgeojson = sql_dialect.st_asgeojson(&st_transform_reverse, 7);
+-        let jsonb_agg = sql_dialect.jsonb_agg();
+-
+-        let meta_fields = if meta {
+-            ",\n    'timestamp', created,
+-    'version', version,
+-    'changeset', changeset,
+-    'user', \"user\",
+-    'uid', uid"
+-        } else {
+-            ""
+-        };
++        let from = format!("_{}", self.set.clone().unwrap_or(default_set.into()));
++        let obj = sql_dialect.json_build_object();
++        let g = sql_dialect.st_transform_reverse("geom", srid);
++        let level = self.level_of_details.as_ref();
++        let geom = self.geom.as_ref();
++
++        if level == "count" {
++            let count = |t: &str| format!("CAST(count(*) FILTER (WHERE osm_type = '{t}') AS VARCHAR)");
++            return format!(
++                "SELECT {obj}('type', 'count', 'id', 0, 'tags', {obj}('nodes', {}, 'ways', {}, 'relations', {}, 'total', CAST(count(*) AS VARCHAR))) AS j FROM {from}",
++                count("n"),
++                count("w"),
++                count("r")
++            );
++        }
+ 
+-        let geom_center = if self.geom.as_ref() == "center" {
+-            format!(
+-                ",
+-    'center', CASE osm_type = 'w' OR osm_type = 'r'
+-        WHEN true THEN {json_build_object}(
+-            'lon', ST_X(ST_PointOnSurface({st_transform_reverse}))::numeric,
+-            'lat', ST_Y(ST_PointOnSurface({st_transform_reverse}))::numeric
++        // Fields as Overpass prints them, by level of detail (ids, skel, body, tags, meta) and geometry (center, bb, geom).
++        let mut fields = vec![
++            "'type', CASE osm_type WHEN 'n' THEN 'node' WHEN 'w' THEN 'way' WHEN 'r' THEN 'relation' WHEN 'a' THEN 'area' END".to_string(),
++            "'id', id".to_string(),
++        ];
++        if matches!(level, "skel" | "body" | "meta") || !geom.is_empty() {
++            fields.push(format!("'lat', CASE osm_type WHEN 'n' THEN {} END", sql_dialect.round7(&format!("ST_Y({g})"))));
++            fields.push(format!("'lon', CASE osm_type WHEN 'n' THEN {} END", sql_dialect.round7(&format!("ST_X({g})"))));
++        }
++        if level == "meta" {
++            fields.push("'timestamp', created, 'version', version, 'changeset', changeset, 'user', \"user\", 'uid', uid".to_string());
++        }
++        if geom == "center" {
++            fields.push(format!(
++                "'center', CASE WHEN osm_type IN ('w', 'r') AND geom IS NOT NULL THEN {obj}('lat', {}, 'lon', {}) END",
++                sql_dialect.round7(&format!("(ST_YMin({g}) + ST_YMax({g})) / 2")),
++                sql_dialect.round7(&format!("(ST_XMin({g}) + ST_XMax({g})) / 2"))
++            ));
++        }
++        if geom == "bb" || geom == "geom" {
++            fields.push(format!(
++                "'bounds', CASE WHEN osm_type IN ('w', 'r') AND geom IS NOT NULL THEN {} END",
++                sql_dialect.json_build_bbox("geom", srid)
++            ));
++        }
++        if matches!(level, "skel" | "body" | "meta") {
++            fields.push("'nodes', nodes".to_string());
++        }
++        if geom == "geom" {
++            fields.push(format!("'geometry', CASE osm_type WHEN 'w' THEN {} END", sql_dialect.way_geometry_points(&g)));
++        }
++        if matches!(level, "skel" | "body" | "meta") {
++            fields.push("'members', members".to_string());
++        }
++        if matches!(level, "body" | "tags" | "meta") {
++            fields.push(format!("'tags', {}", sql_dialect.empty_tags_to_null("tags")));
++        }
++        format!(
++            "SELECT {} AS j FROM {from}",
++            sql_dialect.json_strip_nulls_of(&format!("{obj}(\n    {}\n)", fields.join(",\n    ")))
+         )
+-    END"
+-            )
+-        } else {
+-            "".to_string()
+-        };
+-
+-        let geom_bb_geom = if self.geom.as_ref() == "bb" || self.geom.as_ref() == "geom" {
+-            format!(
+-                ",
+-    'bounds', CASE osm_type = 'w' OR osm_type = 'r'
+-    WHEN true THEN {}
+-    END",
+-                sql_dialect
+-                    .json_build_bbox("geom", srid)
+-                    .replace("\n", "\n    ")
+-            )
+-        } else {
+-            "".to_string()
+-        };
+-        let geom = if self.geom.as_ref() == "geom" {
+-            let a = ",
+-    'geometry', CASE osm_type
+-        WHEN 'w' THEN ";
+-
+-            let w = if let Some(st_dump_points) = st_dump_points {
+-                format!(
+-                    "(SELECT \
+-{jsonb_agg}({json_build_object}(\
+-'lon', ST_X({st_transform_reverse})::numeric, \
+-'lat', ST_Y({st_transform_reverse})::numeric)) \
+-FROM {st_dump_points}(geom))",
+-                )
+-                .to_string()
+-            } else {
+-                format!(
+-                    "
+-        replace(replace(replace(replace(replace((
+-            CASE ST_GeometryType(geom)
+-            WHEN 'LINESTRING' THEN {st_asgeojson}->'coordinates'
+-            ELSE {st_asgeojson}->'coordinates'->0
+-            END
+-        )::text, {}",
+-                    " '[', '{\"lon\":'), \
+-',', ',\"lat\":'), \
+-'{\"lon\":{\"lon\":', '[{\"lon\":'), \
+-'],\"lat\":{\"lon\":', '},{\"lon\":'), \
+-']]', '}]')::json"
+-                )
+-            };
+-
+-            format!(
+-                "{a}{w}
+-        ELSE {st_asgeojson}::jsonb
+-    END"
+-            )
+-        } else {
+-            "".to_string()
+-        };
+-        let way_member_nodes_field = if way_member_nodes {
+-            ",\n    'nodes', nodes"
+-        } else {
+-            ""
+-        };
+-
+-        let relations_members_field = if relations_members {
+-            ",\n    'members', members"
+-        } else {
+-            ""
+-        };
+-
+-        let tags_field = if tags { ",\n    'tags', tags" } else { "" };
+-
+-        format!("SELECT
+-    {json_strip_nulls}({json_build_object}(
+-    'type', CASE osm_type WHEN 'n' THEN 'node' WHEN 'w' THEN 'way' WHEN 'r' THEN 'relation' WHEN 'a' THEN 'area' END,
+-    'id', id,
+-    'lon', CASE osm_type WHEN 'n' THEN ST_X({st_transform_reverse})::numeric END,
+-    'lat', CASE osm_type WHEN 'n' THEN ST_Y({st_transform_reverse})::numeric END{meta_fields}{geom_center}{geom_bb_geom}{geom}{way_member_nodes_field}{relations_members_field}{tags_field})) AS j
+-FROM
+-    _{}", self.set.clone().unwrap_or(default_set.into()))
+     }
+ }
+ 
+diff --git a/src/overpass_parser/query_objects.rs b/src/overpass_parser/query_objects.rs
+index c3186e5..f371d53 100644
+--- a/src/overpass_parser/query_objects.rs
++++ b/src/overpass_parser/query_objects.rs
+@@ -99,7 +99,7 @@ impl Query for QueryObjects {
+                 format!("{from}_by_geom")
+             }
+         } else if self.set == Some("_".into()) {
+-            default_set.into()
++            format!("_{default_set}")
+         } else {
+             p = format!("_{}", self.set.as_ref().unwrap());
+             p
+@@ -107,7 +107,8 @@ impl Query for QueryObjects {
+ 
+         let mut where_clauses = Vec::new();
+ 
+-        if self.object_type.as_ref() == "nwr" {
++        // A bare `.set` statement (object_type empty) keeps every element type, like `nwr`.
++        if self.object_type.is_empty() || self.object_type.as_ref() == "nwr" {
+         } else if self.object_type.as_ref() != "area" {
+             where_clauses.push(format!(
+                 "{from_table}.osm_type = '{}'",
+diff --git a/src/overpass_parser/query_recurse.rs b/src/overpass_parser/query_recurse.rs
+index 94778f5..4993a76 100644
+--- a/src/overpass_parser/query_recurse.rs
++++ b/src/overpass_parser/query_recurse.rs
+@@ -23,7 +23,7 @@ impl Query for QueryRecurse {
+                 Rule::ID => {
+                     query_recurse.set = Some(inner_pair.as_str().into());
+                 }
+-                Rule::query_recurse => {
++                Rule::recurse_op => {
+                     query_recurse.recurse = inner_pair.as_str().into();
+                 }
+                 Rule::asignation => {
+@@ -54,7 +54,7 @@ impl Query for QueryRecurse {
+ 
+     fn to_sql(
+         &self,
+-        _sql_dialect: &(dyn SqlDialect + Send + Sync),
++        sql_dialect: &(dyn SqlDialect + Send + Sync),
+         _srid: &str,
+         default_set: &str,
+     ) -> Vec<SubrequestJoin> {
+@@ -63,47 +63,86 @@ impl Query for QueryRecurse {
+         } else {
+             default_set
+         };
++        let input = format!("_{from}");
++        let (rj, rm) = sql_dialect.members_join("r", "rm");
++        // Members of the given type of the relations in `rels` (a query returning relation ids).
++        let members_of = |rels: &str, member_type: &str| {
++            format!(
++                "SELECT {rm}ref FROM relation_by_id AS r {rj} WHERE r.id IN ({rels}) AND {rm}type = '{member_type}'"
++            )
++        };
++        let input_ids = |osm_type: &str| format!("SELECT id FROM {input} WHERE osm_type = '{osm_type}'");
++
++        let clauses = match self.recurse.as_ref() {
++            // Down: member ways of input relations; their nodes, member nodes and nodes of input ways.
++            ">" | ">>" => {
++                let rels = if self.recurse.as_ref() == ">>" {
++                    // All relations reachable from the input relations, input included.
++                    format!(
++                        "WITH RECURSIVE down_rels(id) AS ({} UNION SELECT {rm}ref FROM down_rels JOIN relation_by_id AS r ON r.id = down_rels.id {rj} WHERE {rm}type = 'relation') SELECT id FROM down_rels",
++                        input_ids("r")
++                    )
++                } else {
++                    input_ids("r")
++                };
++                // `>>` returns the whole relation closure, input relations included.
++                let child_rels = if self.recurse.as_ref() == ">>" {
++                    format!("SELECT * FROM relation_by_id WHERE id IN ({rels})\nUNION ALL\n")
++                } else {
++                    "".to_string()
++                };
++                let ways = members_of(&rels, "way");
++                format!(
++                    "{child_rels}SELECT * FROM way_by_id WHERE id IN ({ways})
++UNION ALL
++SELECT * FROM node_by_id WHERE id IN (
++    SELECT UNNEST(nodes) FROM {input} WHERE osm_type = 'w'
++    UNION SELECT UNNEST(w.nodes) FROM way_by_id AS w WHERE w.id IN ({ways})
++    UNION {}
++)",
++                    members_of(&rels, "node")
++                )
++            }
++            // Up: ways using input nodes; relations with an input node or way, or one of those ways, as member.
++            "<" | "<<" => {
++                let up_ways = format!(
++                    "SELECT * FROM way_by_id AS w WHERE {}",
++                    sql_dialect.list_overlaps_ids("w.nodes", &input, "osm_type = 'n'")
++                );
++                let (pj, pm) = sql_dialect.members_join("p", "pm");
++                // `<<` also climbs from input relations to their parents.
++                let parent_of_rels = if self.recurse.as_ref() == "<<" {
++                    format!(" OR\n    ({pm}type = 'relation' AND {pm}ref IN ({}))", input_ids("r"))
++                } else {
++                    "".to_string()
++                };
++                let first_rels = format!(
++                    "SELECT p.id FROM relation_by_id AS p {pj} WHERE
++    ({pm}type = 'node' AND {pm}ref IN ({})) OR
++    ({pm}type = 'way' AND ({pm}ref IN ({}) OR {pm}ref IN (SELECT id FROM ({up_ways}) AS uw))){parent_of_rels}",
++                    input_ids("n"),
++                    input_ids("w"),
++                );
++                // `<<` returns the whole relation closure upwards, input relations included.
++                let rels = if self.recurse.as_ref() == "<<" {
++                    format!(
++                        "WITH RECURSIVE up_rels(id) AS ({first_rels} UNION {} UNION SELECT p.id FROM up_rels JOIN relation_by_id AS p ON true {pj} WHERE {pm}type = 'relation' AND {pm}ref = up_rels.id) SELECT id FROM up_rels",
++                        input_ids("r")
++                    )
++                } else {
++                    first_rels
++                };
++                format!("{up_ways}\nUNION ALL\nSELECT * FROM relation_by_id WHERE id IN ({rels})")
++            }
++            other => panic!("Invalid recurse operator: {other}"),
++        };
+ 
+-        vec!(SubrequestJoin{
++        vec![SubrequestJoin {
+             precompute_set: None,
+             precompute: None,
+             from: None,
+-            clauses: format!("SELECT
+-    way.*
+-FROM
+-    _{from} AS way
+-    JOIN node_by_id AS node ON
+-        node.id = ANY(way.nodes)
+-WHERE
+-    way.osm_type = 'w'
+-UNION ALL
+-SELECT
+-    node.*
+-FROM
+-    _{from} AS relation
+-    JOIN LATERAL (
+-        SELECT * FROM jsonb_to_recordset(members) AS t(ref bigint, role text, type text) WHERE type = 'n'
+-    ) AS members ON
+-        members.type = 'w'
+-    JOIN node_by_id AS node ON
+-        node.id = members.ref
+-WHERE
+-    relation.osm_type = 'r'
+-UNION ALL
+-SELECT
+-    way.*
+-FROM
+-    _{from} AS relation
+-    JOIN LATERAL (
+-        SELECT * FROM jsonb_to_recordset(members) AS t(ref bigint, role text, type text) WHERE type = 'w'
+-    ) AS members ON
+-        true
+-    JOIN way_by_id AS way ON
+-        way.id = members.ref
+-WHERE
+-    relation.osm_type = 'r'"
+-           )
+-        })
++            clauses,
++        }]
+     }
+ }
+ 
+diff --git a/src/overpass_parser/request.rs b/src/overpass_parser/request.rs
+index 26d6374..bf50c02 100644
+--- a/src/overpass_parser/request.rs
++++ b/src/overpass_parser/request.rs
+@@ -13,6 +13,7 @@ pub struct Request {
+     #[derivative(Default(value = "Some(160)"))]
+     pub timeout: Option<u32>,
+     pub subrequest: Subrequest,
++    pub bbox: Option<(f64, f64, f64, f64)>,
+ }
+ 
+ impl Request {
+@@ -21,11 +22,31 @@ impl Request {
+         for inner in pair.into_inner() {
+             match inner.as_rule() {
+                 Rule::metadata => {
+-                    request.timeout = inner
+-                        .into_inner()
+-                        .find(|p| p.as_rule() == Rule::number)
+-                        .map(|p| p.as_str().parse::<u32>().ok().unwrap());
++                    for setting in inner.into_inner() {
++                        match setting.as_rule() {
++                            Rule::setting_timeout => {
++                                request.timeout = setting
++                                    .into_inner()
++                                    .find(|p| p.as_rule() == Rule::number)
++                                    .and_then(|p| p.as_str().parse::<f64>().ok())
++                                    .map(|t| t as u32);
++                            }
++                            Rule::setting_bbox => {
++                                let coords: Vec<f64> = setting
++                                    .into_inner()
++                                    .as_str()
++                                    .split(',')
++                                    .filter_map(|s| s.trim().parse().ok())
++                                    .collect();
++                                if coords.len() == 4 {
++                                    request.bbox = Some((coords[0], coords[1], coords[2], coords[3]));
++                                }
++                            }
++                            _ => {}
++                        }
++                    }
+                 }
++                Rule::EOI => {}
+                 Rule::subrequest => {
+                     match Subrequest::from_pest(inner) {
+                         Ok(subrequest) => request.subrequest = subrequest,
+@@ -51,7 +72,11 @@ impl Request {
+         srid: &str,
+         _finalizer: Option<&str>,
+     ) -> Vec<String> {
+-        let mut select = self.subrequest.to_sql(sql_dialect, srid, "_");
++        let mut subrequest = self.subrequest.clone();
++        if let Some(bbox) = self.bbox {
++            subrequest.apply_global_bbox(bbox);
++        }
++        let mut select = subrequest.to_sql(sql_dialect, srid, "_");
+         let timeout = sql_dialect.statement_timeout(self.timeout.unwrap_or(180).min(500) * 1000);
+         if let Some(t) = timeout {
+             select.insert(0, t);
+diff --git a/src/overpass_parser/selectors.rs b/src/overpass_parser/selectors.rs
+index cda3909..b08c01a 100644
+--- a/src/overpass_parser/selectors.rs
++++ b/src/overpass_parser/selectors.rs
+@@ -18,6 +18,8 @@ pub struct Selector {
+     pub operator: Option<Box<str>>,
+     pub value: Option<Box<str>>,
+     pub value_regex: Option<Regex>,
++    pub key_regex: bool,
++    pub case_insensitive: bool,
+ }
+ 
+ impl Selector {
+@@ -38,6 +40,9 @@ impl Selector {
+                 Rule::not => {
+                     selector.not = inner_pair.as_str() == "!";
+                 }
++                Rule::key_regex => {
++                    selector.key_regex = true;
++                }
+                 Rule::key => {
+                     selector.key = Self::unquote(inner_pair.as_str()).into();
+                 }
+@@ -45,7 +50,13 @@ impl Selector {
+                     selector.operator = Some(inner_pair.as_str().into());
+                 }
+                 Rule::value => {
+-                    let value = Self::unquote(inner_pair.as_str());
++                    let mut raw = inner_pair.as_str().trim();
++                    // `["name"~"x",i]`: case-insensitive regex.
++                    if let Some(stripped) = raw.strip_suffix(",i").or_else(|| raw.strip_suffix(", i")) {
++                        selector.case_insensitive = true;
++                        raw = stripped.trim();
++                    }
++                    let value = Self::unquote(raw);
+                     let operator = selector.operator.as_deref().unwrap();
+                     if operator == "~" || operator == "!~" {
+                         selector.value_regex = Regex::new(value).ok();
+@@ -111,6 +122,11 @@ impl Selector {
+         table: &str,
+         _srid: &str,
+     ) -> String {
++        if self.key_regex {
++            let value = self.value_regex.as_ref().map(|r| r.as_str()).unwrap_or("");
++            let sql = sql_dialect.tag_key_regex(table, &self.key, value, self.case_insensitive);
++            return if self.not || self.operator.as_deref() == Some("!~") { format!("NOT {sql}") } else { sql };
++        }
+         let key = sql_dialect.hash_exists(table, &self.key);
+         if self.operator.is_none() {
+             if self.not { format!("NOT {key}") } else { key }
+@@ -146,18 +162,16 @@ impl Selector {
+                 }
+                 "~" => {
+                     format!(
+-                        "({} AND {} ~ {})",
++                        "({} AND {})",
+                         key,
+-                        sql_dialect.hash_get(table, &self.key),
+-                        value
++                        sql_dialect.regex_match(&sql_dialect.hash_get(table, &self.key), &value, self.case_insensitive)
+                     )
+                 }
+                 "!~" => {
+                     format!(
+-                        "(NOT {} OR {} !~ {})",
++                        "(NOT {} OR NOT {})",
+                         key,
+-                        sql_dialect.hash_get(table, &self.key),
+-                        value
++                        sql_dialect.regex_match(&sql_dialect.hash_get(table, &self.key), &value, self.case_insensitive)
+                     )
+                 }
+                 _ => {
+diff --git a/src/overpass_parser/subrequest.rs b/src/overpass_parser/subrequest.rs
+index 02ba905..f2b9b70 100644
+--- a/src/overpass_parser/subrequest.rs
++++ b/src/overpass_parser/subrequest.rs
+@@ -39,6 +39,31 @@ impl QueryType {
+     }
+ }
+ 
++impl QueryType {
++    /// `[bbox:...]`: add the global bbox to every element query that has no input set or bbox of its own.
++    pub fn apply_global_bbox(&mut self, bbox: (f64, f64, f64, f64)) {
++        match self {
++            QueryType::QueryObjects(query) => {
++                if query.set.is_none()
++                    && query.object_type.as_ref() != "area"
++                    && !query.filters.filters.iter().any(|f| f.bbox.is_some())
++                {
++                    query.filters.filters.push(crate::overpass_parser::filters::Filter {
++                        bbox: Some(bbox),
++                        ..Default::default()
++                    });
++                }
++            }
++            QueryType::QueryUnion(query) => {
++                for q in query.queries.iter_mut() {
++                    q.1.apply_global_bbox(bbox);
++                }
++            }
++            _ => {}
++        }
++    }
++}
++
+ impl Query for QueryType {
+     fn from_pest(pair: Pair<Rule>) -> Result<Box<Self>, pest::error::Error<Rule>> {
+         match pair.as_rule() {
+@@ -108,6 +133,14 @@ pub struct Subrequest {
+ }
+ 
+ impl Subrequest {
++    pub fn apply_global_bbox(&mut self, bbox: (f64, f64, f64, f64)) {
++        for q in self.queries.iter_mut() {
++            if let SubrequestType::QueryType(query_type) = q.as_mut() {
++                query_type.apply_global_bbox(bbox);
++            }
++        }
++    }
++
+     pub fn from_pest(pair: Pair<Rule>) -> Result<Self, pest::error::Error<Rule>> {
+         let mut subrequest = Subrequest::default();
+         for inner in pair.into_inner() {
+diff --git a/src/sql_dialect/duckdb.rs b/src/sql_dialect/duckdb.rs
+index 5578d87..2363384 100644
+--- a/src/sql_dialect/duckdb.rs
++++ b/src/sql_dialect/duckdb.rs
+@@ -12,6 +12,82 @@ pub mod duckdb {
+             format!("'{}'", string.replace('\'', "''"))
+         }
+ 
++        fn regex_match(&self, expr: &str, regex: &str, case_insensitive: bool) -> String {
++            if case_insensitive {
++                format!("regexp_matches({expr}, {regex}, 'i')")
++            } else {
++                format!("regexp_matches({expr}, {regex})")
++            }
++        }
++
++        fn tag_key_regex(&self, table: &str, key: &str, value: &str, case_insensitive: bool) -> String {
++            let k = self.regex_match("e.key", &self.escape_literal(key), case_insensitive);
++            let v = self.regex_match("e.value", &self.escape_literal(value), case_insensitive);
++            format!("len(list_filter(map_entries({table}.tags), lambda e: {k} AND {v})) > 0")
++        }
++
++        fn bbox_clause(&self, table: &str, bbox: (f64, f64, f64, f64)) -> String {
++            let (s, w, n, e) = bbox;
++            format!(
++                "{table}.bbox.xmin <= {e} AND {table}.bbox.xmax >= {w} AND {table}.bbox.ymin <= {n} AND {table}.bbox.ymax >= {s} AND
++ST_Intersects({table}.geom, ST_MakeEnvelope({w}, {s}, {e}, {n}))"
++            )
++        }
++
++        fn around_points(&self, table: &str, points: &[(f64, f64)], radius: f64) -> String {
++            let parts: Vec<String> = points
++                .iter()
++                .map(|(lat, lon)| {
++                    // Prefilter on the bbox in degrees, then measure in an equidistant projection centred on the point.
++                    let dlat = radius / 111_320.0 * 1.2;
++                    let dlon = radius / (111_320.0 * lat.to_radians().cos().max(0.05)) * 1.2;
++                    format!(
++                        "({table}.bbox.xmin <= {} AND {table}.bbox.xmax >= {} AND {table}.bbox.ymin <= {} AND {table}.bbox.ymax >= {} AND
++ST_DWithin(ST_Transform({table}.geom, 'EPSG:4326', '+proj=aeqd +lat_0={lat} +lon_0={lon} +units=m', always_xy := true), ST_Point(0, 0), {radius}))",
++                        lon + dlon, lon - dlon, lat + dlat, lat - dlat
++                    )
++                })
++                .collect();
++            format!("({})", parts.join(" OR "))
++        }
++
++        fn around_set(&self, table: &str, set: &str, radius: f64) -> String {
++            // Approximate: distance between the two geometries' centroids on the spheroid.
++            format!(
++                "EXISTS (SELECT 1 FROM _{set} AS around_core WHERE ST_DWithin_Spheroid(ST_Centroid(around_core.geom), ST_Centroid({table}.geom), {radius}))"
++            )
++        }
++
++        fn members_join(&self, alias: &str, as_name: &str) -> (String, String) {
++            (
++                format!("CROSS JOIN LATERAL (SELECT UNNEST({alias}.members) AS m) AS {as_name}"),
++                format!("{as_name}.m."),
++            )
++        }
++
++        fn list_overlaps_ids(&self, list: &str, table: &str, cond: &str) -> String {
++            format!("list_has_any({list}, (SELECT list(id) FROM {table} WHERE {cond}))")
++        }
++
++        fn json_strip_nulls_of(&self, object: &str) -> String {
++            // A JSON merge patch drops the keys whose value is null.
++            format!("json_merge_patch('{{}}', {object})")
++        }
++
++        fn empty_tags_to_null(&self, tags: &str) -> String {
++            format!("CASE WHEN cardinality({tags}) > 0 THEN {tags} END")
++        }
++
++        fn way_geometry_points(&self, geom: &str) -> String {
++            format!(
++                "list_transform(ST_Dump(ST_Points({geom})), lambda p: {{'lat': ROUND(ST_Y(p.geom), 7), 'lon': ROUND(ST_X(p.geom), 7)}})"
++            )
++        }
++
++        fn round7(&self, expr: &str) -> String {
++            format!("ROUND({expr}, 7)")
++        }
++
+         fn statement_timeout(&self, _timeout: u32) -> Option<String> {
+             None
+         }
+@@ -32,21 +108,16 @@ pub mod duckdb {
+         }
+ 
+         fn precompute(&self, set: &str, sql: &str) -> Option<Vec<String>> {
++            // Geometry in a session variable crashes DuckDB 1.4, so the union goes to a one-row temp table.
+             Some(vec![
+                 format!("CREATE TEMP TABLE _{set} AS\n{sql}\n;"),
+                 format!(
+-                    "SET variable _{set}_bbox = (
+-    SELECT
+-        STRUCT_PACK(
+-            xmin := min(bbox.xmin),
+-            ymin := min(bbox.ymin),
+-            xmax := max(bbox.xmax),
+-            ymax := max(bbox.ymax),
+-            geom := ST_Union_Agg(geom)
+-        ) AS bbox_geom
+-    FROM
+-        _{set}
+-)
++                    "CREATE TEMP TABLE _{set}_union AS
++SELECT
++    ST_Union_Agg(geom) AS geom,
++    min(bbox.xmin) AS xmin, min(bbox.ymin) AS ymin, max(bbox.xmax) AS xmax, max(bbox.ymax) AS ymax
++FROM
++    _{set}
+ ;"
+                 ),
+             ])
+@@ -115,20 +186,14 @@ pub mod duckdb {
+         }
+ 
+         fn table_precompute_geom(&self, other: &str) -> String {
+-            format!("getvariable('_{other}_bbox').geom")
++            format!("_{other}_union")
+         }
+ 
+         fn st_intersects_with_geom(&self, table: &str, other: &str) -> String {
+-            [
+-                self.st_intersects_extent_with_geom(table, other.replace(".geom", "").as_str()),
+-                format!(
+-                    "ST_Intersects(
+-    {other},
+-    {table}.geom
+-)"
+-                ),
+-            ]
+-            .join(" AND\n")
++            // `other` is a precomputed set's union table (see `precompute`).
++            format!(
++                "EXISTS (SELECT 1 FROM {other} AS u WHERE {table}.bbox.xmin <= u.xmax AND {table}.bbox.xmax >= u.xmin AND {table}.bbox.ymin <= u.ymax AND {table}.bbox.ymax >= u.ymin AND ST_Intersects(u.geom, {table}.geom))"
++            )
+         }
+ 
+         fn st_intersects_extent_with_geom(&self, table: &str, other: &str) -> String {
+diff --git a/src/sql_dialect/postgres.rs b/src/sql_dialect/postgres.rs
+index 6fc65b7..e6a30ec 100644
+--- a/src/sql_dialect/postgres.rs
++++ b/src/sql_dialect/postgres.rs
+@@ -19,6 +19,75 @@ pub mod postgres {
+             }
+         }
+ 
++        fn regex_match(&self, expr: &str, regex: &str, case_insensitive: bool) -> String {
++            format!("{expr} {} {regex}", if case_insensitive { "~*" } else { "~" })
++        }
++
++        fn tag_key_regex(&self, table: &str, key: &str, value: &str, case_insensitive: bool) -> String {
++            let op = if case_insensitive { "~*" } else { "~" };
++            format!(
++                "EXISTS (SELECT 1 FROM jsonb_each_text({table}.tags) AS kv WHERE kv.key {op} {} AND kv.value {op} {})",
++                self.escape_literal(key),
++                self.escape_literal(value)
++            )
++        }
++
++        fn bbox_clause(&self, table: &str, bbox: (f64, f64, f64, f64)) -> String {
++            let (s, w, n, e) = bbox;
++            format!("ST_Intersects({table}.geom, ST_MakeEnvelope({w}, {s}, {e}, {n}, 4326))")
++        }
++
++        fn around_points(&self, table: &str, points: &[(f64, f64)], radius: f64) -> String {
++            let parts: Vec<String> = points
++                .iter()
++                .map(|(lat, lon)| {
++                    // Index-friendly prefilter in degrees (generous), then the exact distance in metres.
++                    let deg = radius / (111_320.0 * lat.to_radians().cos().max(0.05)) * 1.2;
++                    let p = format!("ST_SetSRID(ST_MakePoint({lon}, {lat}), 4326)");
++                    format!(
++                        "(ST_DWithin({table}.geom, {p}, {deg}) AND ST_DWithin({table}.geom::geography, {p}::geography, {radius}))"
++                    )
++                })
++                .collect();
++            format!("({})", parts.join(" OR "))
++        }
++
++        fn around_set(&self, table: &str, set: &str, radius: f64) -> String {
++            format!(
++                "EXISTS (SELECT 1 FROM _{set} AS around_core WHERE ST_DWithin(around_core.geom, {table}.geom, {deg}) AND ST_DWithin(around_core.geom::geography, {table}.geom::geography, {radius}))",
++                deg = radius / 20_000.0
++            )
++        }
++
++        fn members_join(&self, alias: &str, as_name: &str) -> (String, String) {
++            (
++                format!("CROSS JOIN LATERAL jsonb_to_recordset({alias}.members) AS {as_name}(type text, ref bigint, role text)"),
++                format!("{as_name}."),
++            )
++        }
++
++        fn list_overlaps_ids(&self, list: &str, table: &str, cond: &str) -> String {
++            format!("{list} && ARRAY(SELECT id FROM {table} WHERE {cond})")
++        }
++
++        fn json_strip_nulls_of(&self, object: &str) -> String {
++            format!("jsonb_strip_nulls({object})")
++        }
++
++        fn empty_tags_to_null(&self, tags: &str) -> String {
++            format!("NULLIF({tags}, '{{}}'::jsonb)")
++        }
++
++        fn way_geometry_points(&self, geom: &str) -> String {
++            format!(
++                "(SELECT jsonb_agg(jsonb_build_object('lat', ROUND(ST_Y(dp.geom)::numeric, 7), 'lon', ROUND(ST_X(dp.geom)::numeric, 7)) ORDER BY dp.path) FROM ST_DumpPoints({geom}) AS dp)"
++            )
++        }
++
++        fn round7(&self, expr: &str) -> String {
++            format!("ROUND(({expr})::numeric, 7)")
++        }
++
+         fn statement_timeout(&self, timeout: u32) -> Option<String> {
+             Some(format!("SET statement_timeout = {timeout};"))
+         }
+diff --git a/src/sql_dialect/sql_dialect.rs b/src/sql_dialect/sql_dialect.rs
+index 16f4b38..5ceb300 100644
+--- a/src/sql_dialect/sql_dialect.rs
++++ b/src/sql_dialect/sql_dialect.rs
+@@ -3,6 +3,39 @@ pub trait SqlDialect: Send + Sync {
+         format!("'{}'", string.replace('\'', "''"))
+     }
+ 
++    /// `{expr}` matches the regex literal `{regex}` anywhere (Overpass semantics), optionally ignoring case.
++    fn regex_match(&self, expr: &str, regex: &str, case_insensitive: bool) -> String;
++
++    /// `[~"key"~"value"]`: some tag's key matches `key` and its value matches `value`.
++    fn tag_key_regex(&self, table: &str, key: &str, value: &str, case_insensitive: bool) -> String;
++
++    /// A bbox filter: `table.geom` intersects (south, west, north, east).
++    fn bbox_clause(&self, table: &str, bbox: (f64, f64, f64, f64)) -> String;
++
++    /// `table.geom` is within `radius` metres of any of `points` (lat, lon).
++    fn around_points(&self, table: &str, points: &[(f64, f64)], radius: f64) -> String;
++
++    /// `table.geom` is within `radius` metres of any element of `set`.
++    fn around_set(&self, table: &str, set: &str, radius: f64) -> String;
++
++    /// A lateral join exposing `{alias}.members` as rows; returns (join SQL, prefix for type/ref/role).
++    fn members_join(&self, alias: &str, as_name: &str) -> (String, String);
++
++    /// The list `list` shares an element with the ids of `table` rows matching `cond`.
++    fn list_overlaps_ids(&self, list: &str, table: &str, cond: &str) -> String;
++
++    /// A JSON object expression with its null-valued keys removed.
++    fn json_strip_nulls_of(&self, object: &str) -> String;
++
++    /// NULL when the tags are empty, so `tags` is left out as Overpass does.
++    fn empty_tags_to_null(&self, tags: &str) -> String;
++
++    /// A way's geometry as Overpass's `[{"lat":..,"lon":..}, ...]`.
++    fn way_geometry_points(&self, geom: &str) -> String;
++
++    /// A coordinate rounded to 7 decimals, as Overpass prints them.
++    fn round7(&self, expr: &str) -> String;
++
+     fn statement_timeout(&self, timeout: u32) -> Option<String>;
+ 
+     fn make_geom_fields(&self) -> String;
