@@ -37,14 +37,15 @@ def _(mo):
     So we replay the same minutely planet diffs from the extract's snapshot on
     into three fresh Iceberg copies of the DC extract:
 
-    - **left alone:** nothing but the diffs, for the first 300 (5 hours; it slows
-      down too much to run further in reasonable time);
-    - **PyIceberg only:** all 1,000 diffs (about 17 hours), with the settings
-      PyIceberg itself honours (merge manifests on commit, delete old
-      `metadata.json` files) and its `expire_snapshots` every 60 diffs;
-    - **PyIceberg + Spark:** the same settings, and every 60 diffs (an hour of
-      minutely diffs) Spark compacts small data files, expires old snapshots and
-      rewrites manifests.
+    - **left alone:** nothing but the diffs;
+    - **PyIceberg only:** the settings PyIceberg itself honours (merge manifests
+      on commit, delete old `metadata.json` files), and its `expire_snapshots`
+      every 60 diffs (an hour of minutely diffs);
+    - **PyIceberg + Spark:** the same settings, and every 60 diffs Spark compacts
+      small data files, expires old snapshots and rewrites manifests.
+
+    The first two slow down so much that we stop them after 300 diffs (5 hours
+    of edits); the third replays all 1,000 (about 17 hours).
 
     Every 50 diffs we record metadata files and bytes, data files and their
     average size, snapshots, and how long the ten queries from `hourly.py` take.
@@ -55,7 +56,7 @@ def _(mo):
 @app.cell
 def _(Path, oi, os):
     MINUTES = int(os.environ.get("MINUTES", "1000"))
-    LEFT_ALONE_MINUTES = int(os.environ.get("LEFT_ALONE_MINUTES", "300"))
+    SHORT_MINUTES = int(os.environ.get("SHORT_MINUTES", "300"))  # for the two copies without compaction
     MAINTAIN_EVERY = int(os.environ.get("MAINTAIN_EVERY", "60"))
     CHECK_EVERY = int(os.environ.get("CHECK_EVERY", "50"))
     REPLICATION = "https://planet.openstreetmap.org/replication/minute"
@@ -77,7 +78,7 @@ def _(Path, oi, os):
     return (
         CHECK_EVERY,
         DATA,
-        LEFT_ALONE_MINUTES,
+        SHORT_MINUTES,
         MAINTAINED_PROPERTIES,
         MAINTAIN_EVERY,
         MINUTES,
@@ -314,10 +315,10 @@ def _(
 
 
 @app.cell
-def _(LEFT_ALONE_MINUTES, MAINTAINED_PROPERTIES, MINUTES, RESULTS, oi, pl, replay):
+def _(SHORT_MINUTES, MAINTAINED_PROPERTIES, MINUTES, RESULTS, oi, pl, replay):
     _variants = [
-        replay("left alone", oi.TABLE_PROPERTIES, LEFT_ALONE_MINUTES, None),
-        replay("PyIceberg only", MAINTAINED_PROPERTIES, MINUTES, "pyiceberg"),
+        replay("left alone", oi.TABLE_PROPERTIES, SHORT_MINUTES, None),
+        replay("PyIceberg only", MAINTAINED_PROPERTIES, SHORT_MINUTES, "pyiceberg"),
         replay("PyIceberg + Spark", MAINTAINED_PROPERTIES, MINUTES, "spark"),
     ]
     diffs = pl.DataFrame([row for v in _variants for row in v[0]])

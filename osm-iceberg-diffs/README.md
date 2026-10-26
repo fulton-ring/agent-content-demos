@@ -61,7 +61,39 @@ diff. Iceberg commits one table at a time, so a diff is three commits, not one.
 
 ## Results
 
-RESULTS_TABLES
+From one run on a clean checkout. All outputs, including logs, are in `results/`.
+
+### Hourly diffs, Iceberg against PostGIS (`hourly.py`)
+
+| | Iceberg (PyIceberg + DuckDB) | PostGIS (osm2pgsql) |
+|---|---:|---:|
+| import time | 10 s | 28 s |
+| disk after import | 269 MB | 1,263 MB |
+| one planet hour of diffs, median of 16 (range) | 7.2 s (3.1–10.6) | 6.3 s (1.8–10.3) |
+| changed nodes in the box current after 16 hours | 32 of 32 | 32 of 32 |
+| #124's ten queries, same IDs as the other side | 10 of 10 before, 10 of 10 after | |
+
+- **Diff time includes the geometry update.** The Iceberg median splits into
+  about 2.3 s reading the file with pyosmium, 1.0 s for nodes, 2.6 s for ways
+  and 0.6 s for relations (`results/diffs.csv`). Per diff it rebuilt 0–100 way
+  lines because a node moved, and 0–4 areas because a member way changed.
+  PostGIS's time includes simplifying the file and starting osm2pgsql's
+  container, as in #124.
+- **Both sides slow down over the 16 hours**, because both store everything
+  the planet diffs create, so there are more rows to replace each hour.
+- **Derived geometry stays correct.** All 27 ways in the box that the diffs
+  changed, or whose nodes they moved, have exactly the same line as
+  osm2pgsql's (to 1e-7°). Of the named areas, 1,305 of Iceberg's 1,314 match
+  osm2pgsql's 1,311 (1,306 in an earlier run). Most of the rest are DC
+  multipolygons whose outer rings touch or overlap, where `ST_BuildArea` and
+  libosmium disagree. The others are out-of-region relations from the planet
+  diffs whose ways are missing nodes. None of them changes a query result.
+- **Queries are slower on DuckDB**, at 124–1,012 ms against 3–326 ms (p50,
+  in-process; `results/queries_before.csv`). DuckDB scans the files with no
+  spatial index, and area lookups are the slowest. Latency wasn't the
+  question here, and these aren't tuned.
+
+REPLAY_RESULTS
 
 ## What the tools can do today
 
