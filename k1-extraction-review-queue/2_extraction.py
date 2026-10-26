@@ -876,7 +876,7 @@ async def _(Runner, read_all, read_document):
         )
         run["served_by"] = sorted(runner.served_by)
         print(f"{name}: served by {', '.join(run['served_by']) or 'nothing'}")
-        if run["served_by"] != ["Crusoe"]:
+        if set(run["served_by"]) - {"Crusoe"}:
             raise RuntimeError(f"{name} was served by {run['served_by']}, not only by the pinned host")
         return run
 

@@ -15,9 +15,9 @@ It compares five current vision-language models, three of them open-weight, and 
 ## Run it
 
 ```
-./run.sh               # the whole comparison
+./run.sh               # the whole comparison, including the three Gemma re-runs below
 ./run.sh --screenshots # also retakes screenshots/ from Gemini 3.8 Flash's review screen
-./run.sh --gemma-google # only Gemma 4 31B with Google's recommended settings, three times (about $0.15)
+./run.sh --gemma-google # only Gemma 4 31B with Google's recommended settings, three times (about $0.13)
 ```
 
 You need:
@@ -91,7 +91,7 @@ Run 1 to 3 costs leave out failed retries; later runs count every attempt. Gemma
 
 ### Gemma 4 31B with Google's recommended settings
 
-Is Gemma's F down to the model or to how we called it ([#106](https://github.com/fulton-ring/agent-content-demos/issues/106))? We called it at temperature 0, with the default image budget, on whichever OpenRouter host was picked. `./run.sh --gemma-google` re-runs only Gemma 4 31B, three times, with [Google's recommended](https://ai.google.dev/gemma/docs/core/model_card_4) temperature 1.0, top_p 0.95 and top_k 64. The calls are pinned to one host at full precision, Crusoe (bf16); most of OpenRouter's hosts serve it at fp4 or fp8. The prompt, schema, review rules and scoring are unchanged (`2_extraction.py`, section 5b). From a run on 2026-10-25, which took 31 minutes and cost $0.13 for all three runs:
+Is Gemma's F down to the model or to how we called it ([#106](https://github.com/fulton-ring/agent-content-demos/issues/106))? We called it at temperature 0, with the default image budget, on whichever OpenRouter host was picked. `./run.sh --gemma-google` re-runs only Gemma 4 31B, three times, with [Google's recommended](https://ai.google.dev/gemma/docs/core/model_card_4) temperature 1.0, top_p 0.95 and top_k 64. The calls are pinned to one host at full precision, Crusoe (bf16); most of OpenRouter's hosts serve it at fp4 or fp8. The prompt, schema, review rules and scoring are unchanged (`2_extraction.py`, section 5b). From a run on 2026-10-25, which took 31 minutes (69 in a review re-run, because of rate limits) and cost $0.13 for all three runs:
 
 | Gemma 4 31B | Values right | Accepted without review | Wrong but accepted | Sent to review (STMT) | Cost per document |
 |---|---|---|---|---|---|
@@ -100,11 +100,11 @@ Is Gemma's F down to the model or to how we called it ([#106](https://github.com
 | Google's settings, Crusoe bf16, run 2 | 417 of 753 | 648 | 236 | 105 (3) | $0.0013 |
 | Google's settings, Crusoe bf16, run 3 | 420 of 736 | 653 | 238 | 83 (4) | $0.0015 |
 
-**It stays an F.** Wrong but accepted is 227 to 238, inside the 197 to 278 of runs 1 to 11. It gets more values right (417 to 427, against 380) but sends fewer to review, so just as many wrong values get through. On the made-up forms it is nearly right: 0 to 6 wrong accepted values in each group. The errors are on the three real K-1s and their scans. There it reads the digits correctly and puts them in the wrong box. Box 20's rows land in boxes 13 and 14, box 16's in 4 and 5, and box 10's in 11. Of the 64 to 71 wrong values it accepted in each run, all but 3 to 6 are a number that is on the key, in another box. Another 147 to 153 are boxes on the key it never reported, which read as blank, and in 128 to 135 of those it had put the number in another box.
+**It stays an F.** Wrong but accepted is 227 to 238, inside the 197 to 278 of runs 1 to 11. It gets more values right (417 to 427, against 380) but sends fewer to review, so just as many wrong values get through. On the made-up forms it is nearly right: 0 to 6 wrong accepted values in each group. The errors are on the three real K-1s and their scans. There it reads the digits correctly and puts them in the wrong box. Box 20's rows land in boxes 13 and 14, box 16's in 4 and 5, and box 10's in 11. Of the 64 to 71 wrong values it accepted in boxes on the key in each run, all but 3 to 6 are a number that is on the key, in another box; its other wrong accepted values are in boxes that are blank on the key. Another 147 to 153 are boxes on the key it never reported, which read as blank, and in 128 to 135 of those it had put the number in another box. These box-shift counts were tallied by hand from `output/*/extracted.json`, not by a notebook cell; a review re-run on 2026-10-26 found the same pattern (60 to 72 wrong values in key boxes, all but 3 to 5 shifted from another box).
 
 **The image budget couldn't be raised.** Gemma 4 turns an image into 70, 140, 280 (the default), 560 or 1120 tokens, and Google says to use a higher budget for reading small text. vLLM takes the budget as `mm_processor_kwargs.max_soft_tokens`, and OpenRouter has no parameter of its own for it. We sent a 1700 × 2200 page with budgets of 70 and 1120 to seven hosts: Crusoe, Novita, Parasail, DeepInfra, CoreWeave, SiliconFlow and Chutes. Every host reported the same prompt size whichever budget we sent, so each one ignored it. Every Gemma run here and above therefore saw a K-1 page at about 700 × 900 pixels. A higher budget might help it keep the box grid apart, but it's not available through OpenRouter. Testing it needs a host we run ourselves.
 
-Crusoe was rate-limited upstream on 69 calls, which were refused without charge and retried, so model time per document (36 to 50 s) isn't comparable with the table above. Gemma ran out of its 8,000 output tokens 3 times and finished after retries. `gemma-google-settings.md` has the breakdown by kind of document from this run.
+Crusoe was rate-limited upstream on 69 calls, which were refused without charge and retried. On a busier day 5 to 9 documents per run can fail after six attempts; run `./run.sh --gemma-google` again and it retries only those, reusing the answers saved in `output/answers/`, until the Failed documents column is 0. The rate limits also mean model time per document (36 to 50 s) isn't comparable with the table above. Gemma ran out of its 8,000 output tokens 3 times and finished after retries. `gemma-google-settings.md` has the breakdown by kind of document from this run.
 
 ## What it doesn't show
 
