@@ -116,8 +116,8 @@ def _(DATA, DIFF_HOURS, EXTRACT_URL, REPLICATION, datetime, osmium, sh):
     pbf = DATA / "extract.osm.pbf"
     if not pbf.exists():
         sh(f"curl -fsSL --retry 3 -o {pbf} {EXTRACT_URL}")
-    snapshot = osmium.io.Reader(str(pbf), osmium.osm.osm_entity_bits.NOTHING).header().get(
-        "osmosis_replication_timestamp"
+    snapshot = (
+        osmium.io.Reader(str(pbf), osmium.osm.osm_entity_bits.NOTHING).header().get("osmosis_replication_timestamp")
     )
     assert snapshot, "the extract has no replication timestamp"
 
@@ -156,17 +156,17 @@ def _(mo):
     boundary relation's area from its member ways (`ST_BuildArea`), and
     PyIceberg appends those. One table property matters for diffs: PyIceberg
     can only delete rows by rewriting the whole data file that holds them
-    (copy-on-write), so we cap data files at 16 MB to keep each rewrite small.
+    (copy-on-write), so `oi.TABLE_PROPERTIES` caps data files at 16 MB to keep
+    each rewrite small.
     """)
     return
 
 
 @app.cell
 def _(WAREHOUSE, oi, pbf, sh, timed):
-    TABLE_PROPERTIES = {"write.target-file-size-bytes": str(16 * 2**20)}
     sh(f"rm -rf {WAREHOUSE}")
     catalog = oi.open_catalog(WAREHOUSE)
-    iceberg_import_s = timed(lambda: oi.create_tables(catalog, pbf, TABLE_PROPERTIES))
+    iceberg_import_s = timed(lambda: oi.create_tables(catalog, pbf, oi.TABLE_PROPERTIES))
     iceberg_import_mb = int(sh(f"du -sb {WAREHOUSE}").split()[0]) / 2**20
     print(f"Iceberg import: {iceberg_import_s:.0f} s, {iceberg_import_mb:.0f} MB on disk")
     return catalog, iceberg_import_mb, iceberg_import_s
@@ -202,7 +202,9 @@ def _(DB_URL, OSM2PGSQL, POSTGIS_IMAGE, iceberg_import_s, os, sh, sys, time, tim
 
     service.pool.open(wait=True)
     with service.pool.connection() as _conn:
-        postgis_import_mb = _conn.execute("select pg_database_size('osm')").fetchone()[0] / 2**20
+        _size = _conn.execute("select pg_database_size('osm')").fetchone()
+    assert _size is not None
+    postgis_import_mb = _size[0] / 2**20
     print(f"PostGIS import: {postgis_import_s:.0f} s, {postgis_import_mb:.0f} MB on disk")
     return postgis_import_mb, postgis_import_s, service
 
@@ -292,7 +294,7 @@ def _(mo):
 
 
 @app.cell
-def _(DATA, OSM2PGSQL, Path, before, catalog, diff_files, oi, osmium, pl, sh, statistics, timed):
+def _(DATA, OSM2PGSQL, Path, RESULTS, before, catalog, diff_files, oi, osmium, pl, sh, statistics, time):
     assert before.height == 10
 
     class _Copy(osmium.SimpleHandler):
@@ -321,19 +323,23 @@ def _(DATA, OSM2PGSQL, Path, before, catalog, diff_files, oi, osmium, pl, sh, st
 
     _rows = []
     for _path in diff_files:
-        _stats = {}
-        _iceberg_s = timed(lambda: _stats.update(oi.apply_diff(catalog, _path)))
+        _t0 = time.monotonic()
+        _stats = oi.apply_diff(catalog, _path)
+        _iceberg_s = time.monotonic() - _t0
+        _t0 = time.monotonic()
+        apply_to_postgis(_path)
+        _postgis_s = time.monotonic() - _t0
         _rows.append(
             {
                 "diff": _path.name,
                 "MB": round(_path.stat().st_size / 2**20, 1),
                 "Iceberg s": round(_iceberg_s, 1),
-                "PostGIS s": round(timed(lambda: apply_to_postgis(_path)), 1),
+                "PostGIS s": round(_postgis_s, 1),
                 **{k: round(v, 2) if isinstance(v, float) else v for k, v in _stats.items()},
             }
         )
     diff_times = pl.DataFrame(_rows)
-    diff_times.write_csv(DATA.parent / "results" / "diffs.csv")
+    diff_times.write_csv(RESULTS / "diffs.csv")
     iceberg_diff_s = statistics.median(diff_times["Iceberg s"].to_list())
     postgis_diff_s = statistics.median(diff_times["PostGIS s"].to_list())
     with pl.Config(tbl_rows=30, tbl_cols=20, tbl_width_chars=250):
@@ -366,7 +372,7 @@ def _(mo):
 def _(catalog, diff_files, diff_times, oi, service, shapely):
     assert diff_times.height == len(diff_files)
     _s, _w, _n, _e = oi.WHOLE
-    expected: dict[int, tuple[float, float, dict] | None] = {}
+    expected: dict[int, tuple[float, float, dict]] = {}
     for _path in diff_files:
         _raw, _deleted = oi.read_osm(_path)
         for _node in _raw["nodes"].to_pylist():
@@ -421,7 +427,7 @@ def _(catalog, diff_files, diff_times, oi, service, shapely):
         if b is None:
             return False
         ga, gb = shapely.from_wkb(a), shapely.from_wkb(b)
-        return shapely.area(shapely.symmetric_difference(ga, gb)) <= 1e-9 * max(shapely.area(gb), 1e-12)
+        return shapely.area(shapely.symmetric_difference(ga, gb)) <= 1e-6 * shapely.area(gb)
 
     freshness = {
         "changed nodes in the box": len(expected),

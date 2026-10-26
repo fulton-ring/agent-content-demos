@@ -11,6 +11,7 @@ from pathlib import Path
 import duckdb
 import osmium
 import pyarrow as pa
+from osmium.osm import Node, OSMObject, Relation, Way
 from pyiceberg.catalog.sql import SqlCatalog
 from pyiceberg.expressions import In
 from pyiceberg.table import Table
@@ -19,23 +20,21 @@ TAGS = pa.map_(pa.string(), pa.string())
 MEMBER = pa.struct([("type", pa.string()), ("ref", pa.int64()), ("role", pa.string())])
 BBOX = [("xmin", pa.float64()), ("ymin", pa.float64()), ("xmax", pa.float64()), ("ymax", pa.float64())]
 SCHEMAS = {
-    "nodes": pa.schema(
-        [("id", pa.int64()), ("lat", pa.float64()), ("lon", pa.float64()), ("tags", TAGS)]
-    ),
+    "nodes": pa.schema([("id", pa.int64()), ("lat", pa.float64()), ("lon", pa.float64()), ("tags", TAGS)]),
     # geom is WKB: a linestring for every way with two or more known nodes.
     "ways": pa.schema(
-        [("id", pa.int64()), ("tags", TAGS), ("nodes", pa.list_(pa.int64()))]
-        + [("geom", pa.binary())]
-        + BBOX
+        [("id", pa.int64()), ("tags", TAGS), ("nodes", pa.list_(pa.int64()))] + [("geom", pa.binary())] + BBOX
     ),
     # geom is WKB: the area of a named multipolygon or boundary relation, else null.
     "relations": pa.schema(
-        [("id", pa.int64()), ("tags", TAGS), ("members", pa.list_(MEMBER))]
-        + [("geom", pa.binary())]
-        + BBOX
+        [("id", pa.int64()), ("tags", TAGS), ("members", pa.list_(MEMBER))] + [("geom", pa.binary())] + BBOX
     ),
 }
-KIND = {"nodes": "node", "ways": "way", "relations": "relation"}
+# PyIceberg deletes rows by rewriting the whole data file that holds them
+# (copy-on-write), so smaller files make each diff cheaper. The codec is pinned
+# because PyIceberg and Spark default to different ones (zstd and gzip), and
+# gzip files made DuckDB's queries about 40% slower.
+TABLE_PROPERTIES = {"write.target-file-size-bytes": str(16 * 2**20), "write.parquet.compression-codec": "zstd"}
 
 
 def open_catalog(warehouse: Path) -> SqlCatalog:
@@ -54,21 +53,21 @@ class _Collector(osmium.SimpleHandler):
         self.rows: dict[str, list[dict]] = {name: [] for name in SCHEMAS}
         self.deleted: dict[str, list[int]] = {name: [] for name in SCHEMAS}
 
-    def _keep(self, name: str, obj: osmium.osm.OSMObject, row: dict) -> None:
+    def _keep(self, name: str, obj: OSMObject, row: dict) -> None:
         if obj.deleted:
             self.deleted[name].append(obj.id)
         else:
             tags = [(t.k, t.v) for t in obj.tags] or None  # untagged is null, as ST_ReadOSM gives it
             self.rows[name].append({"id": obj.id, "tags": tags, **row})
 
-    def node(self, n: osmium.osm.Node) -> None:
+    def node(self, n: Node) -> None:
         loc = n.location
         self._keep("nodes", n, {"lat": loc.lat, "lon": loc.lon} if loc.valid() else {})
 
-    def way(self, w: osmium.osm.Way) -> None:
+    def way(self, w: Way) -> None:
         self._keep("ways", w, {"nodes": [nr.ref for nr in w.nodes]})
 
-    def relation(self, r: osmium.osm.Relation) -> None:
+    def relation(self, r: Relation) -> None:
         self._keep("relations", r, {"members": [(m.type, m.ref, m.role) for m in r.members]})
 
 
@@ -129,15 +128,19 @@ from pending_ways w left join lines l using (id)
 
 # Areas for named multipolygon and boundary relations, built from their member
 # ways' lines, as osm2pgsql's flex style does for the PostGIS side.
-RELATION_GEOMETRY = """
-with is_area as (
-  select id from pending_relations
-  where tags['name'] is not null and tags['type'] in ('multipolygon', 'boundary')
+IS_AREA = "tags['name'] is not null and tags['type'] in ('multipolygon', 'boundary')"
+RELATION_GEOMETRY = f"""
+with area_ways as (
+  select r.id, ST_GeomFromWKB(w.geom) as g, w.nodes
+  from (select id, unnest(members) as m from pending_relations where {IS_AREA}) r
+  join ways w on w.id = r.m.ref and r.m.type = 'w' and w.geom is not null
+), open_rings as (
+  -- Like osm2pgsql (libosmium), build no area if a ring is left open: every way end must meet another.
+  select distinct id from (select id, unnest([nodes[1], nodes[-1]]) as e from area_ways)
+  group by id, e having count(*) % 2 = 1
 ), areas as (
-  select m.id, ST_BuildArea(ST_Collect(list(ST_GeomFromWKB(w.geom)))) as g
-  from (select id, unnest(members) as m from pending_relations where id in (select id from is_area)) m
-  join ways w on w.id = m.m.ref and m.m.type = 'w' and w.geom is not null
-  group by m.id
+  select id, ST_BuildArea(ST_Collect(list(g))) as g from area_ways
+  where id not in (select id from open_rings) group by id
 )
 select r.id, r.tags, r.members,
   case when not ST_IsEmpty(a.g) then ST_AsWKB(a.g) end as geom,
@@ -157,14 +160,16 @@ READ_EXTRACT = {
 }
 
 
-def create_tables(catalog: SqlCatalog, pbf: Path, properties: dict[str, str]) -> None:
+def create_tables(catalog: SqlCatalog, pbf: Path, properties: dict[str, str] = TABLE_PROPERTIES) -> None:
     """Import an extract: nodes, then ways with their lines, then relations with their areas."""
     for name in SCHEMAS:
         if catalog.table_exists(f"osm.{name}"):
             catalog.purge_table(f"osm.{name}")
         catalog.create_table(f"osm.{name}", schema=SCHEMAS[name], properties=properties)
     con = connect()
-    raw = {name: con.sql(q.format(pbf=pbf)).to_arrow_table().cast(_raw_schema(name)) for name, q in READ_EXTRACT.items()}
+    raw = {
+        name: con.sql(q.format(pbf=pbf)).to_arrow_table().cast(_raw_schema(name)) for name, q in READ_EXTRACT.items()
+    }
     catalog.load_table("osm.nodes").append(raw["nodes"].sort_by("id"))
     refresh_views(con, catalog)
     con.register("pending_ways", raw["ways"])
@@ -183,7 +188,7 @@ def _replace(table: Table, ids: list[int], rows: pa.Table) -> None:
     """One commit: drop the rows with these IDs, append the new rows."""
     with table.transaction() as tx:
         if ids:
-            tx.delete(In("id", ids))
+            tx.delete(In(term="id", literals=ids))
         if rows.num_rows:
             tx.append(rows.sort_by("id"))
 
@@ -226,7 +231,9 @@ def apply_diff(catalog: SqlCatalog, path: Path) -> dict[str, float | int]:
     ).to_arrow_table()
     con.register("dependents", dependents)
     con.register("pending_ways", pa.concat_tables([raw["ways"], dependents.cast(raw["ways"].schema)]))
-    old_ways = _ids(con, "select id from ways where id in (select id from changed_ways) or id in (select id from dependents)")
+    old_ways = _ids(
+        con, "select id from ways where id in (select id from changed_ways) or id in (select id from dependents)"
+    )
     _replace(catalog.load_table("osm.ways"), old_ways, _derive(con, WAY_GEOMETRY, "ways"))
     refresh_views(con, catalog)
     stats["ways s"] = time.monotonic() - t0
@@ -235,17 +242,20 @@ def apply_diff(catalog: SqlCatalog, path: Path) -> dict[str, float | int]:
     con.register("rewritten_ways", pa.table({"id": pa.array(old_ways, pa.int64())}))
     changed_rels = set(raw["relations"]["id"].to_pylist()) | deleted["relations"]
     con.register("changed_rels", pa.table({"id": pa.array(sorted(changed_rels), pa.int64())}))
-    # Unchanged areas whose member ways were rewritten need their area rebuilt.
+    # Unchanged area relations whose member ways were rewritten need their area rebuilt.
     area_dependents = con.sql(
-        "select id, tags, members from relations where geom is not null"
+        f"select id, tags, members from relations where {IS_AREA}"
         " and id not in (select id from changed_rels)"
         " and id in (select id from (select id, unnest(members) as m from relations)"
         "            where m.type = 'w' and m.ref in (select id from rewritten_ways))"
     ).to_arrow_table()
     con.register("area_dependents", area_dependents)
-    con.register("pending_relations", pa.concat_tables([raw["relations"], area_dependents.cast(raw["relations"].schema)]))
+    con.register(
+        "pending_relations", pa.concat_tables([raw["relations"], area_dependents.cast(raw["relations"].schema)])
+    )
     old_rels = _ids(
-        con, "select id from relations where id in (select id from changed_rels) or id in (select id from area_dependents)"
+        con,
+        "select id from relations where id in (select id from changed_rels) or id in (select id from area_dependents)",
     )
     _replace(catalog.load_table("osm.relations"), old_rels, _derive(con, RELATION_GEOMETRY, "relations"))
     stats["relations s"] = time.monotonic() - t0
@@ -276,17 +286,33 @@ QUERIES: list[tuple[str, dict]] = [
     ("regex tag, whole extract", {"type": "nwr", "tags": [_tag("name", "^Starbucks", "~")], "bbox": WHOLE}),
     (
         "around a point",
-        {"type": "node", "tags": [_tag("amenity", "restaurant")], "around": {"lat": 38.8977, "lon": -77.0365, "radius_m": 500}},
+        {
+            "type": "node",
+            "tags": [_tag("amenity", "restaurant")],
+            "around": {"lat": 38.8977, "lon": -77.0365, "radius_m": 500},
+        },
     ),
     (
         "area by name",
-        {"type": "nwr", "tags": [_tag("leisure", "park")], "area": [_tag("name", "Alexandria"), _tag("admin_level", "6")]},
+        {
+            "type": "nwr",
+            "tags": [_tag("leisure", "park")],
+            "area": [_tag("name", "Alexandria"), _tag("admin_level", "6")],
+        },
     ),
     ("ways with their nodes", {"type": "way", "tags": [_tag("highway", "primary")], "bbox": CORE, "recurse": "down"}),
-    ("recurse down (relations)", {"type": "relation", "tags": [_tag("route", "subway")], "bbox": CORE, "recurse": "down"}),
+    (
+        "recurse down (relations)",
+        {"type": "relation", "tags": [_tag("route", "subway")], "bbox": CORE, "recurse": "down"},
+    ),
     (
         "recurse up (nodes)",
-        {"type": "node", "tags": [_tag("railway", "station"), _tag("station", "subway")], "bbox": CORE, "recurse": "up"},
+        {
+            "type": "node",
+            "tags": [_tag("railway", "station"), _tag("station", "subway")],
+            "bbox": CORE,
+            "recurse": "up",
+        },
     ),
     (
         "substations in DC",
@@ -333,7 +359,8 @@ def _spatial_sql(spec: dict, geom: str) -> str:
         a = spec["around"]
         return f"ST_DWithin_Spheroid({geom}, ST_Point({a['lon']}, {a['lat']}), {a['radius_m']})"
     if spec.get("area"):
-        return f"exists (select 1 from areas a where {_tags_sql('a.tags', spec['area'])} and ST_Intersects(a.geom, {geom}))"
+        area_tags = _tags_sql("a.tags", spec["area"])
+        return f"exists (select 1 from areas a where {area_tags} and ST_Intersects(a.geom, {geom}))"
     return "true"
 
 
@@ -359,10 +386,10 @@ def iceberg_ids(con: duckdb.DuckDBPyConnection, spec: dict) -> set[tuple[str, in
         f" and w.geom is not null and {_spatial_sql(spec, 'ST_GeomFromWKB(w.geom)')}",
         # A relation matches a spatial filter when a tagged member node or a member way does.
         "relation": f"""
-            with r as (select id, unnest(members) as m from relations where {_tags_sql('tags', spec['tags'])})
+            with r as (select id, unnest(members) as m from relations where {_tags_sql("tags", spec["tags"])})
             select r.id from r join nodes n on r.m.type = 'n' and n.id = r.m.ref where {tagged_node}
             union select r.id from r join ways w on r.m.type = 'w' and w.id = r.m.ref
-            where w.geom is not null and {_spatial_sql(spec, 'ST_GeomFromWKB(w.geom)')}""",
+            where w.geom is not null and {_spatial_sql(spec, "ST_GeomFromWKB(w.geom)")}""",
     }
     ids = {kind: set(_ids(con, sql[kind])) if kind in kinds else set() for kind in ["node", "way", "relation"]}
     if spec.get("recurse") == "down":
@@ -399,6 +426,7 @@ def _recurse_up(con: duckdb.DuckDBPyConnection, ids: dict[str, set[int]]) -> Non
         _ids(
             con,
             f"select distinct id from (select id, unnest(members) as m from relations)"
-            f" where (m.type = 'n' and list_contains({nodes}, m.ref)) or (m.type = 'w' and list_contains({ways}, m.ref))",
+            f" where (m.type = 'n' and list_contains({nodes}, m.ref))"
+            f" or (m.type = 'w' and list_contains({ways}, m.ref))",
         )
     )

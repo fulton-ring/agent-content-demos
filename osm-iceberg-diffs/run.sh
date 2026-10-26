@@ -7,3 +7,4 @@ cd "$(dirname "$0")"
 uv sync --quiet
 mkdir -p results
 uv run hourly.py 2>&1 | tee results/hourly.log
+uv run replay.py 2>&1 | tee results/replay.log

@@ -49,10 +49,10 @@ def _(mo):
 
 
 @app.cell
-def _(Path, os):
+def _(Path, oi, os):
     MINUTES = int(os.environ.get("MINUTES", "1000"))
     MAINTAIN_EVERY = int(os.environ.get("MAINTAIN_EVERY", "60"))
-    CHECK_EVERY = 50
+    CHECK_EVERY = int(os.environ.get("CHECK_EVERY", "50"))
     REPLICATION = "https://planet.openstreetmap.org/replication/minute"
     HERE = Path(__file__).resolve().parent
     DATA = HERE / "data"
@@ -62,25 +62,13 @@ def _(Path, os):
     RESULTS.mkdir(exist_ok=True)
     PBF = DATA / "extract.osm.pbf"
     assert PBF.exists(), "run hourly.py first; it downloads the extract"
-    BASE_PROPERTIES = {"write.target-file-size-bytes": str(16 * 2**20)}
-    # PyIceberg can't expire or compact on its own terms (see the README), but it
-    # does honour these: keep only the last 5 metadata.json files.
-    MAINTAINED_PROPERTIES = BASE_PROPERTIES | {
+    # PyIceberg can't expire or compact (see the README), but it does honour
+    # these: keep only the last 5 metadata.json files.
+    MAINTAINED_PROPERTIES = oi.TABLE_PROPERTIES | {
         "write.metadata.delete-after-commit.enabled": "true",
         "write.metadata.previous-versions-max": "5",
     }
-    return (
-        BASE_PROPERTIES,
-        CHECK_EVERY,
-        DATA,
-        MAINTAINED_PROPERTIES,
-        MAINTAIN_EVERY,
-        MINUTES,
-        MINUTE_DIR,
-        PBF,
-        REPLICATION,
-        RESULTS,
-    )
+    return (CHECK_EVERY, DATA, MAINTAINED_PROPERTIES, MAINTAIN_EVERY, MINUTES, MINUTE_DIR, PBF, REPLICATION, RESULTS)
 
 
 @app.cell
@@ -210,7 +198,8 @@ def _(oi, statistics, time):
         stats |= {"live data files": 0, "snapshots": 0}
         for name in oi.SCHEMAS:
             for kind in ("metadata", "data"):
-                files = [p for p in (warehouse / "osm" / name / kind).rglob("*") if p.is_file()]
+                # Spark writes through Hadoop's local filesystem, which adds a .crc beside each file; skip those.
+                files = [p for p in (warehouse / "osm" / name / kind).rglob("*") if p.is_file() and p.suffix != ".crc"]
                 stats[f"{kind} files"] += len(files)
                 stats[f"{kind} MB"] += sum(p.stat().st_size for p in files) / 2**20
             table = catalog.load_table(f"osm.{name}")
@@ -237,7 +226,9 @@ def _(oi, statistics, time):
 
 
 @app.cell
-def _(CHECK_EVERY, DATA, MAINTAIN_EVERY, PBF, maintain, minute_files, oi, query_ms, shutil, spark_for, table_stats, time):
+def _(
+    CHECK_EVERY, DATA, MAINTAIN_EVERY, PBF, maintain, minute_files, oi, query_ms, shutil, spark_for, table_stats, time
+):
     def replay(label: str, properties: dict[str, str], maintained: bool) -> tuple[list[dict], list[dict], list[dict]]:
         """Import a fresh copy, apply every minutely diff; return per-diff, per-check and per-maintenance rows."""
         warehouse = DATA / f"replay-{label}"
@@ -246,7 +237,9 @@ def _(CHECK_EVERY, DATA, MAINTAIN_EVERY, PBF, maintain, minute_files, oi, query_
         oi.create_tables(catalog, PBF, properties)
         spark = spark_for(warehouse) if maintained else None
         diffs, checks, runs = [], [], []
-        checks.append({"variant": label, "diffs applied": 0, "query ms": query_ms(catalog), **table_stats(catalog, warehouse)})
+        checks.append(
+            {"variant": label, "diffs applied": 0, "query ms": query_ms(catalog), **table_stats(catalog, warehouse)}
+        )
         for i, path in enumerate(minute_files, start=1):
             t0 = time.monotonic()
             oi.apply_diff(catalog, path)
@@ -262,7 +255,12 @@ def _(CHECK_EVERY, DATA, MAINTAIN_EVERY, PBF, maintain, minute_files, oi, query_
                 )
             if i % CHECK_EVERY == 0:
                 checks.append(
-                    {"variant": label, "diffs applied": i, "query ms": query_ms(catalog), **table_stats(catalog, warehouse)}
+                    {
+                        "variant": label,
+                        "diffs applied": i,
+                        "query ms": query_ms(catalog),
+                        **table_stats(catalog, warehouse),
+                    }
                 )
                 print(label, checks[-1], flush=True)
         if spark is not None:
@@ -273,8 +271,8 @@ def _(CHECK_EVERY, DATA, MAINTAIN_EVERY, PBF, maintain, minute_files, oi, query_
 
 
 @app.cell
-def _(BASE_PROPERTIES, MAINTAINED_PROPERTIES, RESULTS, pl, replay):
-    _alone = replay("left-alone", BASE_PROPERTIES, maintained=False)
+def _(MAINTAINED_PROPERTIES, RESULTS, oi, pl, replay):
+    _alone = replay("left-alone", oi.TABLE_PROPERTIES, maintained=False)
     _kept = replay("maintained", MAINTAINED_PROPERTIES, maintained=True)
     diffs = pl.DataFrame(_alone[0] + _kept[0])
     checks = pl.DataFrame(_alone[1] + _kept[1])
@@ -303,7 +301,11 @@ def _(diffs, pl):
         pl.col("apply s").min().round(2).alias("min s"),
         pl.col("apply s").max().round(2).alias("max s"),
         pl.col("apply s").filter(pl.col("diff") <= 100).median().round(2).alias("median s, first 100"),
-        pl.col("apply s").filter(pl.col("diff") > pl.col("diff").max() - 100).median().round(2).alias("median s, last 100"),
+        pl.col("apply s")
+        .filter(pl.col("diff") > pl.col("diff").max() - 100)
+        .median()
+        .round(2)
+        .alias("median s, last 100"),
         (pl.col("apply s") > 60).sum().alias("diffs over 60 s"),
     )
     print(apply_summary)
@@ -367,7 +369,9 @@ def _(RESULTS, apply_summary, growth, maintenance, pl):
     _end = growth.group_by("variant", maintain_order=True).agg(pl.all().last())
     _start = growth.group_by("variant", maintain_order=True).agg(pl.all().first())
     _lines = []
-    for _row, _first, _apply in zip(_end.iter_rows(named=True), _start.iter_rows(named=True), apply_summary.iter_rows(named=True), strict=True):
+    for _row, _first, _apply in zip(
+        _end.iter_rows(named=True), _start.iter_rows(named=True), apply_summary.iter_rows(named=True), strict=True
+    ):
         _lines.append(
             f"{_row['variant']}: apply median {_apply['median s']} s (max {_apply['max s']}); after "
             f"{_row['diffs applied']} diffs {_row['metadata files']} metadata files / {_row['metadata MB']} MB, "
