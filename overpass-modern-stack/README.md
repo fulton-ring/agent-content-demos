@@ -18,7 +18,7 @@ public, so the case for building our own is narrow.
 
 ## Run it
 
-Needs Docker and [uv](https://docs.astral.sh/uv/). It took 16–22 minutes and about
+Needs Docker and [uv](https://docs.astral.sh/uv/). It took about 15–22 minutes and about
 6 GB of disk on a 4-core, 16 GB machine.
 
 ```sh
@@ -27,8 +27,8 @@ uv run marimo edit benchmark.py   # to read it as a notebook
 ```
 
 `run.sh` downloads the extract and diffs into `data/` (git-ignored), imports
-into Overpass then PostGIS, runs the benchmark, writes `results/` and stops both
-containers. Optional settings: `EXTRACT_URL` (the queries assume DC), `RUNS`
+into Overpass then PostGIS, runs the benchmark, writes `results/` (with the log)
+and removes both containers and their volumes. Optional settings: `EXTRACT_URL` (the queries assume DC), `RUNS`
 (timed runs per query, default 7) and `DIFF_HOURS` (default 16).
 
 ## Data
@@ -38,9 +38,8 @@ containers. Optional settings: `EXTRACT_URL` (the queries assume DC), `RUNS`
   of Maryland. Our run used the **2026-10-24T00:00Z** snapshot; BBBike refreshes
   it weekly. We'd have used a Geofabrik state extract as the issue suggested, but
   `download.geofabrik.de` reset every connection from our sessions.
-- **Diffs:** the planet's hourly replication files, starting at the snapshot.
-  BBBike has no regional feed, so each is a whole planet hour (1–9 MB), an upper
-  bound on a regional feed's work.
+- **Diffs:** the planet's hourly replication files from the snapshot on. BBBike
+  has no regional feed, so each is a whole planet hour (1–9 MB), an upper bound.
 - OSM data © OpenStreetMap contributors, [ODbL](https://opendatacommons.org/licenses/odbl/).
 
 ## Results
@@ -69,12 +68,10 @@ From one run on a clean checkout. All outputs, including the log, are in `result
 | one planet hour of diffs, median of 16 (range) | 11.5 s (4.7–28.6) | 8.4 s (2.9–13.0) |
 
 - **Latency:** median of 7 timed runs after a warm-up, over HTTP, default settings.
-- **Recurse up** is the one loss. It uses osm2pgsql's bucket index on way node
-  lists, which is built for updates; a plain GIN index on `nodes` would likely
-  fix it, for more disk.
+- **Recurse up** is the one loss: osm2pgsql's bucket index on way node lists is
+  built for updates; a plain GIN index would likely fix it, for more disk.
 - **RAM at rest** isn't like for like: PostgreSQL's figure includes its shared
-  buffers and active cache; Overpass reads through the OS cache, which
-  `docker stats` doesn't count.
+  buffers; Overpass reads through the OS cache, which `docker stats` doesn't count.
 - **Freshness:** the 16 hours created or changed 32 nodes inside the extract's
   box (8 of them tagged). All 32 hold their final tags and coordinates on both
   sides, and all ten queries still return identical IDs. Diff times are per
@@ -82,19 +79,17 @@ From one run on a clean checkout. All outputs, including the log, are in `result
 
 ## What didn't work, and what we changed
 
-- **Untagged member ways.** The first import missed 4 multipolygon relations in
-  the area queries (3 parks, 1 substation): their outer ways carry no tags, and
-  osm2pgsql skips those unless the style handles them. `process_untagged_way` in
-  `flex.lua` fixed it.
+- **Untagged member ways.** The first import missed 4 multipolygon relations
+  (3 parks, 1 substation) whose outer ways carry no tags; `process_untagged_way`
+  in `flex.lua` fixed it.
 - **A query-builder bug.** An unqualified `geom` in the area subquery bound to
   the area's own geometry, so "hospitals in Arlington" returned every hospital.
 - **Overpass's Docker image needed two workarounds.** Its `init` mode only reads
   `.osm.bz2`, so the PBF is re-compressed first, which takes most of the 287 s
   import. With a named volume, `/db` is left readable only by the `overpass`
   user, so every query failed with `Permission denied` until we `chmod 755 /db`.
-- **osm2pgsql refused raw planet diffs** ("node id … appears more than once").
-  `osmium merge-changes -s` collapses repeated versions first, as
-  `osm2pgsql-replication` does.
+- **osm2pgsql refused raw planet diffs** ("node id … appears more than once");
+  `osmium merge-changes -s` collapses them first, as `osm2pgsql-replication` does.
 - **One hour of diffs proved nothing locally.** The hour after the snapshot,
   midnight UTC, had no edits inside DC, so we apply 16 hours.
 
@@ -127,13 +122,8 @@ filters. Five add up to a QL interpreter: the QL text itself, named sets,
   way node arrays, relation members) already are Overpass's data model, and
   `osm2pgsql-replication` keeps them current. That's why the candidate is mostly
   configuration, not new code.
-- **[OSM Express](https://github.com/bdon/OSMExpress)** applies minutely diffs
-  but has no query language. **DuckDB spatial**'s `ST_ReadOSM`, QuackOSM and
-  Overture's monthly GeoParquet are rebuild-only, so we didn't build on them.
-- **Overpass's [setup guide](https://dev.overpass-api.de/overpass-doc/en/more_info/setup.html)**
-  and the [wiktorn image](https://github.com/wiktorn/Overpass-API): 350–400 GB
-  for the planet (800 GB–1 TB with attic); the public instance asks users to
-  stay under about 10,000 queries and 1 GB a day.
+- **[OSM Express](https://github.com/bdon/OSMExpress)** has diffs but no query language; DuckDB's `ST_ReadOSM`, QuackOSM and Overture GeoParquet are rebuild-only.
+- **Overpass's [setup guide](https://dev.overpass-api.de/overpass-doc/en/more_info/setup.html)**: 350–400 GB for the planet (800 GB–1 TB with attic).
 
 ## Worth building?
 

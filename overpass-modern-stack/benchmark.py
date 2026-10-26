@@ -177,7 +177,7 @@ def _(mo):
 
 @app.cell
 def _(DATA, OVERPASS_IMAGE, peak_mem_mb, sh, snapshot, time, wait_until):
-    sh("docker rm -f ovp pg", may_fail=True)
+    sh("docker rm -fv ovp pg", may_fail=True)
     sh("docker volume rm -f ovp_db", may_fail=True)
     _t0 = time.monotonic()
     sh(
@@ -712,7 +712,7 @@ def _(RESULTS, after_diff, candidate_diff_s, freshness, overpass_diff_s, query_r
     (RESULTS / "summary.txt").write_text(_summary)
     print(_summary)
     service.terminate()
-    sh("docker stop ovp pg", may_fail=True)
+    sh("docker rm -fv ovp pg && docker volume rm -f ovp_db", may_fail=True)
     return
 
 

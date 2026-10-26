@@ -4,4 +4,5 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 uv sync --quiet
-uv run benchmark.py
+mkdir -p results
+uv run benchmark.py 2>&1 | tee results/run.log
