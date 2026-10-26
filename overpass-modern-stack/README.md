@@ -15,14 +15,14 @@ Two spikes on one question: can tools GIS teams already run replace a self-hoste
 answered **0 of 31** answer-key queries on either backend: its backends have drifted
 from its parser. With our patch (+550/−283 lines of Rust) and 136 lines of SQL adapters,
 it matches Overpass's full output on **30 of 31 queries on both PostGIS and DuckDB**.
-PostGIS through Underpass-API's `/interpreter` has a median latency of 48 ms against
-Overpass's 431 ms, and **Overpass Turbo works against it unchanged**.
+PostGIS through Underpass-API's `/interpreter` has a median latency of 44 ms against
+Overpass's 422 ms, and **Overpass Turbo works against it unchanged**.
 
 ## Run it
 
 Needs Docker and [uv](https://docs.astral.sh/uv/); `ql_compiler.py` also uses Node
 and Playwright for the Overpass Turbo screenshot (it skips it without them). On a
-4-core, 16 GB machine, `ql_compiler.py` took 28 minutes; at its peak we estimate about
+4-core, 16 GB machine, `ql_compiler.py` took about 20 minutes from a clean checkout; at its peak we estimate about
 11 GB of disk (4 GB of images, 5 GB of databases, 1.4 GB in `data/`).
 
 ```sh
@@ -56,9 +56,9 @@ coordinates allowed to differ by 1e-7° (Overpass rounds centres differently).
 |---|---:|---:|---:|
 | queries matching Overpass, as shipped | — | 0/31 | 0/31 |
 | queries matching Overpass, patched | 31/31 | **30/31** | **30/31** |
-| median of per-query p50 latency | 431 ms | **48 ms** | 502 ms |
-| faster than Overpass on | — | 27/31 | 21/31 |
-| build from the extract | 4–5 min (#123) | 5.5 min, 2,984 MB | 54 s, 451 MB Parquet |
+| median of per-query p50 latency | 422 ms | **44 ms** | 477 ms |
+| faster than Overpass on | — | 27/31 | 20/31 |
+| build from the extract | 4–5 min (#123) | 5.5 min, 2,984 MB | 59 s, 451 MB Parquet |
 
 - **As shipped** (`as_shipped.csv`), PostGIS failed on every tag filter: the parser
   emits jsonb operators but Underpass-API's Osmosis schema stores hstore. DuckDB failed
@@ -68,11 +68,11 @@ coordinates allowed to differ by 1e-7° (Overpass rounds centres differently).
 - **The one difference** in the patched run: for `out count`, Overpass adds
   `"areas": "0"` when the query used an area. Our output leaves that key out.
 - **Slow spots** (`patched.csv`): on PostGIS, upward recursion (`<`, `<<`, `rel(bn)`;
-  1.1–3.8 s against 0.2 s) and key regex scan every relation or tag. On DuckDB,
-  `way(r)` takes 6.5 s, and most queries scan whole Parquet files. DuckDB runs
+  1.1–3.9 s against 0.1–0.3 s) and key regex scan every relation or tag. On DuckDB,
+  `way(r)` takes 6.3 s, and most queries scan whole Parquet files. DuckDB runs
   in-process; the other two are timed over HTTP.
-- **Build:** Osmosis load 119 s, Underpass-API `init.sql` 94 s and our adapter 118 s.
-  For DuckDB: QuackOSM 35 s (120 MB) and our tables from `ST_ReadOSM` 19 s.
+- **Build:** Osmosis load 115 s, Underpass-API `init.sql` 99 s and our adapter 114 s.
+  For DuckDB: QuackOSM 42 s (120 MB) and our tables from `ST_ReadOSM` 17 s.
 - **Out of scope:** attic, `[adiff:]`, `if`, `complete` and `make` now fail with
   `unsupported Overpass QL feature: <name>`. `foreach` is an Underpass-API feature,
   and it matched Overpass.
