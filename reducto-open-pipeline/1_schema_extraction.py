@@ -20,18 +20,20 @@ with app.setup:
     from docling.datamodel.pipeline_options import PdfPipelineOptions, TesseractCliOcrOptions
     from docling.document_converter import DocumentConverter, PdfFormatOption
     from pydantic import BaseModel, Field, create_model
-    from pydantic_ai import Agent, BinaryContent
-    from pydantic_ai.models.openrouter import OpenRouterModelSettings
+    from pydantic_ai import BinaryContent
+
+    import model_call
 
     HERE = Path(__file__).parent
     K1 = HERE.parent / "k1-extraction-review-queue"
     OUT = Path(os.environ.get("REDUCTO_OUTPUT_DIR", HERE / "output"))
     K1_OUT = OUT / "k1"  # the K-1 spike's own output folder layout, so its scoring notebook reads our runs
     SAMPLES = K1_OUT / "samples"
-    MODEL = "openrouter:google/gemini-3.8-flash"
+    MODEL = model_call.MODEL
 
     sys.path.insert(0, str(K1))
-    from amounts import parse_value  # the K-1 spike's reading of a printed amount, unchanged
+    # The K-1 spike's reading of a printed amount, unchanged. ty can't see the folder added to sys.path above.
+    from amounts import parse_value  # ty: ignore[unresolved-import]
 
 
 @app.cell(hide_code=True)
@@ -187,9 +189,9 @@ def _():
             payer_ein=(Value | None, Field(description="Part I item A: the employer identification number.")),
             payer_name=(Value | None, Field(description="Part I item B: the name only, without the address.")),
             boxes=(
-                list[row],
+                list[row],  # ty: ignore[invalid-type-form]
                 Field(
-                    description="Every Part III box with something printed in it. A coded box "  # ty: ignore[invalid-type-form]
+                    description="Every Part III box with something printed in it. A coded box "
                     "gives one row per printed code line."
                 ),
             ),
@@ -201,7 +203,7 @@ def _():
         wash: Value = Field(description="Wash sale loss disallowed")
         gain: Value = Field(description="Gain or loss")
 
-    Brokerage1099 = create_model(
+    Brokerage1099 = create_model(  # ty: ignore[no-matching-overload]
         "Brokerage1099",
         __doc__="The summary amounts of a consolidated brokerage Form 1099.",
         **{k.replace(" ", "_"): (Value | None, Field(None, description=f"1099-{k}")) for k in BROKER_LINES},
@@ -219,8 +221,9 @@ def _():
 
     The instructions are the K-1 spike's, with the box labels of all three K-1 forms, since pipelines A and B
     don't know the form in advance. Settings are also the K-1 spike's: temperature 0, low thinking, 8,000 output
-    tokens, and up to four attempts per call. Every attempt's cost is OpenRouter's own figure. Answers are saved
-    in `output/answers/`, so a re-run doesn't pay again; delete that folder for a fresh run.
+    tokens, and up to four attempts per call (`model_call.py`, which the section-parsing notebook shares). Every
+    attempt's cost is OpenRouter's own figure. Answers are saved in `output/answers/`, so a re-run doesn't pay
+    again; delete that folder for a fresh run.
     """)
     return
 
@@ -244,47 +247,14 @@ def _(FORMS, K1_LABELS):
         "amount (every line in a coded box has one), including lines whose amount is a dash and lines coded '*' "
         "with STMT. For a brokerage 1099, read the summary amounts."
     )
-    _settings = OpenRouterModelSettings(
-        temperature=0, max_tokens=8000, thinking="low", openrouter_usage={"include": True}
-    )
-    _agent = Agent(MODEL, output_type=list(FORMS.values()), instructions=INSTRUCTIONS, retries=2)
     _slots = asyncio.Semaphore(8)
-    _names = {model.__name__: form for form, model in FORMS.items()}
+    _forms = {model.__name__: form for form, model in FORMS.items()}
 
     async def ask(pipeline: str, doc: str, parts: list[Any]) -> dict[str, Any]:
-        """One extraction call, saved to disk: the form, the typed answer, and every attempt's cost and time."""
+        """One extraction call: the form the model chose, its typed answer, and its cost and time."""
         saved = OUT / "answers" / pipeline / f"{Path(doc).stem}.json"
-        if saved.exists():
-            return json.loads(saved.read_text())
-        spent = {"usd": 0.0, "seconds": 0.0, "failed_attempts": 0}
-        async with _slots:
-            for attempt in range(4):
-                t0 = time.time()
-                try:
-                    result = await _agent.run([PROMPT, *parts], model_settings=_settings)
-                except Exception as e:  # rate limits, network errors, malformed output after retries
-                    spent["seconds"] += time.time() - t0
-                    spent["failed_attempts"] += 1
-                    print(f"{pipeline} {doc}: attempt {attempt + 1} failed: {type(e).__name__}: {str(e)[:120]}")
-                    if attempt == 3:
-                        raise
-                    await asyncio.sleep(10 * (attempt + 1))
-                    continue
-                spent["seconds"] += time.time() - t0
-                spent["usd"] += sum(
-                    float((m.provider_details or {}).get("cost") or 0)
-                    for m in result.new_messages()
-                    if hasattr(m, "provider_details")
-                )
-                answer = {
-                    "form": _names[type(result.output).__name__],
-                    "output": result.output.model_dump(mode="json"),
-                    **spent,
-                }
-                saved.parent.mkdir(parents=True, exist_ok=True)
-                saved.write_text(json.dumps(answer, indent=1))
-                return answer
-        raise AssertionError("unreachable")
+        answer = await model_call.ask(saved, list(FORMS.values()), INSTRUCTIONS, [PROMPT, *parts], _slots)
+        return {**answer, "form": _forms[answer["type"]]}
 
     return (ask,)
 
