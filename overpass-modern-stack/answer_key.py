@@ -43,18 +43,24 @@ QUERIES: list[tuple[str, str]] = [
     ("tag absent", f'[out:json];node["amenity"="bench"][!"name"]({CORE});out skel;'),
     ("key regex", f'[out:json];node[~"^disused:"~"."]({CORE});out tags;'),
     ("around, tag exists", '[out:json];node["tourism"](around:300,38.8895,-77.0353);out body;'),
-    ("polygon", '[out:json];node["amenity"="cafe"](poly:"38.89 -77.04 38.91 -77.04 38.91 -77.01 38.89 -77.01");out ids;'),
+    (
+        "polygon",
+        '[out:json];node["amenity"="cafe"](poly:"38.89 -77.04 38.91 -77.04 38.91 -77.01 38.89 -77.01");out ids;',
+    ),
     # infrastructure pulls (HIFLD-style)
     ("area by id: substations", '[out:json];area(3600162069)->.dc;nwr["power"="substation"](area.dc);out center;'),
-    ("power lines in DC", f'[out:json];{DC_AREA}(way["power"="line"](area.dc);way["power"="minor_line"](area.dc););out geom;'),
-    ("power assets in Arlington", f'[out:json];{ARLINGTON_AREA}nwr["power"~"^(substation|plant|generator)$"](area.a);out tags;'),
+    (
+        "power lines in DC",
+        f'[out:json];{DC_AREA}(way["power"="line"](area.dc);way["power"="minor_line"](area.dc););out geom;',
+    ),
+    (
+        "power assets in Arlington",
+        f'[out:json];{ARLINGTON_AREA}nwr["power"~"^(substation|plant|generator)$"](area.a);out tags;',
+    ),
     ("hospitals and clinics in DC", f'[out:json];{DC_AREA}nwr["amenity"~"^(hospital|clinic)$"](area.dc);out center;'),
     ("count fire stations in DC", f'[out:json];{DC_AREA}nwr["amenity"="fire_station"](area.dc);out count;'),
     # sets and recursion
-    (
-        "difference",
-        f'[out:json];(nwr["amenity"="school"]({CORE}); - nwr["operator:type"="private"]({CORE}););out ids;',
-    ),
+    ("difference", f'[out:json];(nwr["amenity"="school"]({CORE}); - nwr["operator:type"="private"]({CORE}););out ids;'),
     (
         "nodes of named set",
         f'[out:json];way["highway"="primary"]({CORE})->.roads;node(w.roads)["highway"="traffic_signals"];out ids;',
@@ -70,7 +76,7 @@ UNSUPPORTED: list[tuple[str, str]] = [
     ("attic date", '[out:json][date:"2024-01-01T00:00:00Z"];node(1);out;'),
     ("augmented diff", '[out:json][adiff:"2024-01-01T00:00:00Z"];node(1);out;'),
     ("foreach", f'[out:json];way["highway"="primary"]({CORE});foreach(node(w);out ids;);'),
-    ("if", '[out:json];node(1);if (count(nodes) > 0) { out; }'),
+    ("if", "[out:json];node(1);if (count(nodes) > 0) { out; }"),
     ("complete", f'[out:json];node["amenity"="cafe"]({CORE});complete{{nwr(around:10);}};out;'),
-    ("make (evaluator)", '[out:json];node(1);make stat n=count(nodes);out;'),
+    ("make (evaluator)", "[out:json];node(1);make stat n=count(nodes);out;"),
 ]

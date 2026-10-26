@@ -1,3 +1,4 @@
+// Usage: node turbo_screenshot.js <server url ending in /> <png path>
 // Opens overpass-turbo.eu with a query whose {{data:overpass,server=...}} points at the local Underpass-API.
 const { chromium } = require('playwright');
 (async () => {
@@ -12,7 +13,10 @@ area["name"="District of Columbia"]["admin_level"="4"]->.dc;
 out body;
 >;
 out skel qt;`;
-  const browser = await chromium.launch({ args: ['--proxy-server=' + process.env.HTTPS_PROXY, '--proxy-bypass-list=127.0.0.1;localhost'] });
+  // Behind an outbound proxy, send the page through it but keep the local endpoint direct.
+  const proxy = process.env.HTTPS_PROXY;
+  const args = proxy ? ['--proxy-server=' + proxy, '--proxy-bypass-list=127.0.0.1;localhost'] : [];
+  const browser = await chromium.launch({ args });
   const page = await browser.newPage({ viewport: { width: 1400, height: 900 }, ignoreHTTPSErrors: true });
   const calls = [];
   page.on('request', r => { if (r.url().includes('interpreter')) calls.push(r.url().slice(0, 60)); });
