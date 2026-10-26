@@ -505,25 +505,25 @@ def _(get):
 def _(arcgis_count, arcgis_max_date, county_shapes):
     _sources = pd.read_csv(INVENTORY / "county_sources.csv", dtype=str).fillna("")
     _results = []
-    for _row in _sources.itertuples():
+    for _row in _sources.to_dict("records"):
         _started = time.perf_counter()
         _count, _latest, _error = None, "", ""
-        if _row.url:
+        if _row["url"]:
             try:
-                _count = arcgis_count(_row.url, _row.where, _row.layers, county_shapes[_row.county]["box"])
-                if _row.date_field:
-                    _latest = arcgis_max_date(_row.url, _row.where, _row.date_field)
+                _count = arcgis_count(_row["url"], _row["where"], _row["layers"], county_shapes[_row["county"]]["box"])
+                if _row["date_field"]:
+                    _latest = arcgis_max_date(_row["url"], _row["where"], _row["date_field"])
             except (requests.RequestException, RuntimeError, KeyError) as _e:
                 _error = f"failed: {type(_e).__name__}"
         _results.append(
             {
-                "county": _row.county,
-                "layer": _row.layer,
-                "source": _row.source,
+                "county": _row["county"],
+                "layer": _row["layer"],
+                "source": _row["source"],
                 "public count": _count,
                 "latest date": _latest,
                 "seconds": round(time.perf_counter() - _started, 1),
-                "note": _error or _row.note,
+                "note": _error or _row["note"],
             }
         )
     public_counts = pd.DataFrame(_results)
@@ -606,7 +606,9 @@ def _(county_shapes, overture_counts, public_counts, regrid_tabs):
     for _name, _shape in county_shapes.items():
         _geoid = _shape["geoid"]
         _public = public_counts[public_counts["county"] == _name].groupby("layer")["public count"].max()
-        _firm = public_counts.query("county == @_name and layer == 'FIRM panels'")["latest date"].max()
+        _firm = public_counts.loc[
+            (public_counts["county"] == _name) & (public_counts["layer"] == "FIRM panels"), "latest date"
+        ].max()
         _addresses = max(_public.get("addresses") or 0, _overture.get((_name, "addresses"), 0))
         _rows += [
             (_name, "parcels", _public.get("parcels"), regrid_value("parcels", "geoid", _geoid, "parcel_count"),
@@ -632,8 +634,8 @@ def _(county_shapes, overture_counts, public_counts, regrid_tabs):
 def _():
     mo.md(r"""
     **Which parcel fields the public layers carry.** For each public parcel layer we count the parcels where a field
-    is filled (non-empty text, a number above 0, a real date). We set that against Regrid's fill rate for the same
-    field in the same county. Owner fields are counted, never read.
+    is filled (text that isn't empty, a number above 0, a real date). We set that against Regrid's fill rate for the
+    same field in the same county. Owner fields are counted, never read.
     """)
     return
 
@@ -647,11 +649,13 @@ def _(get, regrid_tabs):
     _sources = pd.read_csv(INVENTORY / "county_sources.csv", dtype=str).fillna("")
     _sources = _sources[(_sources["layer"] == "parcels") & (_sources["url"] != "")]
     _rows = []
-    for _row in _sources.itertuples():
-        _types = {_f["name"]: _f["type"] for _f in get(_row.url, {"f": "json"}).json()["fields"]}
-        _total = get(f"{_row.url}/query", {"where": _row.where, "returnCountOnly": "true", "f": "json"}).json()["count"]
-        _mapping = dict(_pair.split(":") for _pair in _row.fields.split(";"))
-        _regrid = regrid_tabs["parcels"][regrid_tabs["parcels"]["geoid"] == COUNTIES[_row.county]].iloc[0]
+    for _row in _sources.to_dict("records"):
+        _types = {_f["name"]: _f["type"] for _f in get(_row["url"], {"f": "json"}).json()["fields"]}
+        _total = get(f"{_row['url']}/query", {"where": _row["where"], "returnCountOnly": "true", "f": "json"}).json()[
+            "count"
+        ]
+        _mapping = dict(_pair.split(":") for _pair in _row["fields"].split(";"))
+        _regrid = regrid_tabs["parcels"][regrid_tabs["parcels"]["geoid"] == COUNTIES[_row["county"]]].iloc[0]
         for _group, _column in _regrid_field.items():
             _field = _mapping.get(_group, "")
             _filled = None
@@ -660,35 +664,31 @@ def _(get, regrid_tabs):
                 _test = (
                     f"{_field} > 0" if _kind in NUMERIC_FIELD_TYPES
                     else f"{_field} < DATE '2100-01-01'" if _kind == "esriFieldTypeDate"
-                    else f"{_field} <> ''"
+                    # Some servers treat '' as NULL, so `<> ''` matches nothing there; CHAR_LENGTH works on all.
+                    else f"CHAR_LENGTH({_field}) > 0"
                 )  # fmt: skip
                 _reply = get(
-                    f"{_row.url}/query",
+                    f"{_row['url']}/query",
                     {
-                        "where": f"({_row.where}) AND {_field} IS NOT NULL AND {_test}",
+                        "where": f"({_row['where']}) AND {_field} IS NOT NULL AND {_test}",
                         "returnCountOnly": "true",
                         "f": "json",
                     },
                 ).json()
                 _filled = round(100 * _reply["count"] / _total)
             _rows.append(
-                {"county": _row.county, "source": _row.source, "field group": _group,
+                {"county": _row["county"], "source": _row["source"], "field group": _group,
                  "public fill %": _filled, "Regrid fill %": int(_regrid[_column + "_pct"])}
             )  # fmt: skip
     field_fill = pd.DataFrame(_rows)
     field_fill.to_csv(OUT / "county_field_fill.csv", index=False)
-    mo.ui.table(
-        field_fill.pivot_table(
-            index="field group", columns=["county", "source"], values=["public fill %"], aggfunc="first"
-        )
-        .join(
-            field_fill.drop_duplicates(["county", "field group"])
-            .pivot(index="field group", columns="county", values="Regrid fill %")
-            .add_prefix("Regrid ")
-        )
-        .reset_index(),
-        selection=None,
+    _public = field_fill.pivot(index="field group", columns="source", values="public fill %")
+    _regrid = (
+        field_fill.drop_duplicates(["county", "field group"])
+        .pivot(index="field group", columns="county", values="Regrid fill %")
+        .add_prefix("Regrid, ")
     )
+    mo.ui.table(_public.join(_regrid).reset_index(), selection=None)
     return (field_fill,)
 
 
@@ -702,6 +702,7 @@ def _():
 
 @app.cell
 def _(
+    field_fill,
     freshness,
     mireye_counts,
     mireye_fields,
@@ -714,8 +715,10 @@ def _(
     vendor_match,
 ):
     _vendor_fields = int((mireye_fields["source"] == "PARCEL_VENDOR").sum())
-    _gordon = side_by_side[side_by_side["county"] == "Gordon GA"].set_index("layer")
-    _fergus_zoning = side_by_side.query("county == 'Fergus MT' and layer == 'zoning'").iloc[0]
+    _sides = side_by_side.set_index(["county", "layer"])
+    _regrid_buildings = {_c: float(_sides.loc[(_c, "buildings"), "Regrid"].replace(",", "")) for _c in COUNTIES}
+    _buildings = {_c: round(100 * _sides.loc[(_c, "buildings"), "public"] / _n) for _c, _n in _regrid_buildings.items()}
+    _fill = field_fill.set_index(["county", "field group"])
     _firms = public_counts[public_counts["layer"] == "FIRM panels"].set_index("county")["latest date"]
     _thin = thin_fields.set_index("field")
     summary = {
@@ -728,7 +731,6 @@ def _(
         "small counties with < half as many parcels as homes": len(partial_counties),
     }
     pd.Series(summary).to_csv(OUT / "summary.csv", header=["value"])
-    _fergus_regrid_zoning = _fergus_zoning["Regrid"]
     mo.md(
         f"""
     **The catalog.** Of Regrid's {len(regrid_layers)} layers, {regrid_counts["public and easy"]} are public and easy,
@@ -750,12 +752,17 @@ def _(
     filled nationwide and 0% in {_thin.loc["taxamt", "counties at 0%"]} counties; FEMA flood zone is 0% in
     {_thin.loc["fema_flood_zone", "counties at 0%"]} counties, though the layer is free.
 
-    **The counties.** Wake County publishes everything Regrid sells there except the licensed add-ons. Fergus
-    County's parcels and addresses are public through Montana, but we found no machine-readable zoning; Regrid
-    reports {_fergus_regrid_zoning} parcels in a standardized zone there. Gordon County has no open parcels or
-    addresses: Regrid has {_gordon.loc["parcels", "Regrid"]} parcels and
-    {_gordon.loc["addresses", "Regrid"]} addresses there, which an open rebuild can't match. The FEMA maps are old in
-    two of the three: the latest FIRM panel dates are {", ".join(f"{_c} {_d}" for _c, _d in _firms.items())}.
+    **The counties.** Wake County publishes everything Regrid sells there except the licensed add-ons, and its own
+    parcel layer was updated more recently than Regrid's copy. Fergus County's parcels and addresses are public
+    through Montana, but we found no machine-readable zoning; Regrid reports
+    {_sides.loc[("Fergus MT", "zoning"), "Regrid"]} parcels in a standardized zone there. Montana's parcels carry a
+    property type on {_fill.loc[("Fergus MT", "land_use"), "public fill %"]:.0f}% of parcels, where Regrid's land use
+    code is {_fill.loc[("Fergus MT", "land_use"), "Regrid fill %"]}% filled. Gordon County has no open parcels or
+    addresses: Regrid has {_sides.loc[("Gordon GA", "parcels"), "Regrid"]} parcels with owners and values there,
+    bought from a county that sells them, and {_sides.loc[("Gordon GA", "addresses"), "Regrid"]} addresses. Open
+    buildings (Overture) reach {", ".join(f"{_p}%" for _p in _buildings.values())} of Regrid's licensed building
+    counts in the three counties. The FEMA maps are old in two of the three: the latest FIRM panel dates are
+    {", ".join(f"{_c} {_d}" for _c, _d in _firms.items())}.
     """
     )
     return (summary,)
@@ -774,7 +781,9 @@ def _():
       the same. Regrid's fill rates and ours count slightly different things ("filled" vs "valid").
     - **Freshness is a proxy.** No service reports an edit date, so we use the newest date field (sale date, update
       date). Montana's cadastral has no date field at all; its metadata says it's published monthly.
-    - **What failed.** `api.census.gov` now needs a key, so housing units come from TIGERweb. The National Address
+    - **What failed.** Some ArcGIS servers treat an empty string as NULL, so `field <> ''` matched nothing and our
+      first run showed Wake's own parcels with 0% owners; `CHAR_LENGTH(field) > 0` works everywhere.
+      `api.census.gov` now needs a key, so housing units come from TIGERweb. The National Address
       Database times out on any attribute filter, so we query it by bounding box, which also counts neighbours.
       Wake's own address service has no date field. Old Montana `gisservicemt.gov` URLs return an HTML "moved" page.
     - **Not tested:** Mireye's values. Its Fetch call needs a key from a sign-up, so we rated its catalog without
