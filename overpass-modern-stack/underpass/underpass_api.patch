@@ -1,0 +1,139 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index 058684f..fca8943 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -1194,7 +1194,6 @@ checksum = "42f5e15c9953c5e4ccceeb2e7382a716482c34515315f7b03532b8b4e8393d2d"
+ [[package]]
+ name = "overpass_parser_rust"
+ version = "0.1.0"
+-source = "git+https://github.com/teritorio/overpass_parser_rust?branch=master#6454029c23ce9c3150ecd8d3d57222578be701c2"
+ dependencies = [
+  "derivative",
+  "pest",
+diff --git a/Cargo.toml b/Cargo.toml
+index f15daa2..8a38b92 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -30,3 +30,6 @@ serde = { version = "1.0.225", features = ["derive"] }
+ serde_json = "1.0.145"
+ tracing = "0.1.41"
+ tokio-postgres = { version = "0.7.13", features = ["with-serde_json-1"], optional = true }
++
++[patch."https://github.com/teritorio/overpass_parser_rust"]
++overpass_parser_rust = { path = "../overpass_parser_rust" }
+diff --git a/src/backend.rs b/src/backend.rs
+index b73b86c..43c8814 100644
+--- a/src/backend.rs
++++ b/src/backend.rs
+@@ -10,7 +10,7 @@ pub trait Backend {
+ 
+     fn parse_query(&self, query: &str) -> Result<Vec<String>, String>;
+ 
+-    async fn exec(&mut self, query: Vec<String>) -> Vec<String>;
++    async fn exec(&mut self, query: Vec<String>) -> Result<Vec<String>, String>;
+ }
+ 
+ pub enum BackendType {
+@@ -81,7 +81,7 @@ impl BackendType {
+         }
+     }
+ 
+-    pub async fn exec(&mut self, queries: Vec<String>) -> Vec<String> {
++    pub async fn exec(&mut self, queries: Vec<String>) -> Result<Vec<String>, String> {
+         match self {
+             #[cfg(feature = "postgres")]
+             BackendType::PostgresOsmosis(backend) => backend.exec(queries).await,
+diff --git a/src/duckdb_quackosm/mod.rs b/src/duckdb_quackosm/mod.rs
+index c105a3f..9bbf90d 100644
+--- a/src/duckdb_quackosm/mod.rs
++++ b/src/duckdb_quackosm/mod.rs
+@@ -56,17 +56,15 @@ impl Backend for DuckdbQuackosm {
+         }
+     }
+ 
+-    async fn exec(&mut self, sqls: Vec<String>) -> Vec<String> {
++    async fn exec(&mut self, sqls: Vec<String>) -> Result<Vec<String>, String> {
+         let mut sqls = sqls;
+-        let last_sql = sqls.pop().expect("No SQL queries to execute");
+-        let tx = self.con.transaction().expect("Failed to start transaction");
+-
+-        tx.execute_batch(sqls.join("\n").as_str())
+-            .expect("Failed to execute SQL query");
+-        let mut stmt = tx.prepare(&last_sql).expect("Failed to execute SQL query");
+-        stmt.query_map([], |row| Ok(row.get::<usize, String>(0).unwrap()))
+-            .unwrap()
+-            .map(|result| result.ok().unwrap())
+-            .collect()
++        let last_sql = sqls.pop().ok_or("No SQL queries to execute")?;
++        let tx = self.con.transaction().map_err(|e| e.to_string())?;
++        tx.execute_batch(sqls.join("\n").as_str()).map_err(|e| e.to_string())?;
++        let mut stmt = tx.prepare(&last_sql).map_err(|e| e.to_string())?;
++        let rows = stmt
++            .query_map([], |row| row.get::<usize, String>(0))
++            .map_err(|e| e.to_string())?;
++        rows.collect::<Result<Vec<String>, _>>().map_err(|e| e.to_string())
+     }
+ }
+diff --git a/src/postgres_osmosis/mod.rs b/src/postgres_osmosis/mod.rs
+index 660fb40..734d3c1 100644
+--- a/src/postgres_osmosis/mod.rs
++++ b/src/postgres_osmosis/mod.rs
+@@ -92,26 +92,18 @@ GROUP BY
+         }
+     }
+ 
+-    async fn exec(&mut self, sqls: Vec<String>) -> Vec<String> {
++    async fn exec(&mut self, sqls: Vec<String>) -> Result<Vec<String>, String> {
+         let mut sqls = sqls;
+-        let last_sql = sqls.pop().expect("No SQL queries to execute").to_string();
+-        let tx = self
+-            .con
+-            .transaction()
+-            .await
+-            .expect("Failed to start transaction");
+-
+-        tx.batch_execute(sqls.join("\n").as_str())
+-            .await
+-            .expect("Failed to execute SQL query");
+-        tx.query(&last_sql.to_string(), &[])
+-            .await
+-            .expect("Failed to execute SQL query")
++        let last_sql = sqls.pop().ok_or("No SQL queries to execute")?;
++        let tx = self.con.transaction().await.map_err(|e| e.to_string())?;
++        tx.batch_execute(sqls.join("\n").as_str()).await.map_err(|e| e.to_string())?;
++        let rows = tx.query(&last_sql, &[]).await.map_err(|e| e.to_string())?;
++        Ok(rows
+             .iter()
+             .filter_map(|row| {
+                 let json_value: Option<Value> = row.get(0);
+                 json_value.map(|v| v.to_string().replace("+00:00", "Z"))
+             })
+-            .collect()
++            .collect())
+     }
+ }
+diff --git a/src/query.rs b/src/query.rs
+index 68700e2..4e00471 100644
+--- a/src/query.rs
++++ b/src/query.rs
+@@ -16,10 +16,16 @@ async fn query(
+     backend: Arc<Mutex<Box<BackendType>>>,
+ ) -> Result<Response<Body>, axum::http::Error> {
+     let mut backend = backend.lock().await;
+-    match backend.parse_query(query) {
+-        Ok(sql) => {
+-            let dialect = backend.name();
+-            let json = backend.exec(sql).await.join(",\n");
++    match backend.parse_query(query).map(|sql| (sql, backend.name())) {
++        Ok((sql, dialect)) => {
++            let json = match backend.exec(sql).await {
++                Ok(rows) => rows.join(",\n"),
++                Err(error) => {
++                    return Response::builder()
++                        .status(StatusCode::BAD_REQUEST)
++                        .body(Body::from(format!("<html><body><p><strong style=\"color:#FF0000\">Error</strong>: <pre>{error}</pre></p></body></html>")));
++                }
++            };
+ 
+             let body = json!({
+                 "version": 0.6,
