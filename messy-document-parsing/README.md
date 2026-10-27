@@ -53,7 +53,7 @@ On the failure cases, **Argon got 100%**: the 990-EZ in all three pipelines, and
   - **Whole PDF, WSP 1050.** Given all 492 pages, Flash gave values such as 114 for 67 and 56 for 43, and mislabelled the July 22 row.
   - **Whole PDF, microfilm.** Flash gave one well the next well's values.
 - **It changes from run to run.** An earlier run on the same code got WSP 1050 page by page 100% right, and the whole PDF 84% right. One read is not a measurement; a second read or a check (an ion balance would catch the swapped columns) is the safeguard.
-- **A long PDF fits in one call.** All 492 pages of Water-Supply Paper 1050 (15 MB) went to Flash in one call, as did NACA 824 (261 pages, 26 MB) at $0.11. Small print suffers there, though: page images did better.
+- **A long PDF fits in one call.** All 492 pages of Water-Supply Paper 1050 (15 MB) went to Flash in one call, as did NACA 824 (261 pages, 26 MB) at $0.11. That one is near the limit: base64 makes it a 34 MB request, and in a review run one OpenRouter provider rejected it with a 413 before the retry went through another. Small print suffers there, though: page images did better.
 - **Handwriting needs the bigger model.** Flash read handwritten zeros as blank, and in an earlier run 18,656 as 18,658. Argon got all 28 lines in every pipeline.
 - **Docling alone fails on every document.** It can't read sideways tables, drops clipped numbers, and splits NACA's ten small tables into fragments, giving 179 extra rows. Its OCR of the 1958 letter is 95% wrong.
 
