@@ -556,9 +556,9 @@ def _(MODES, Piece, draw_document, scan, visual_lines):
 @app.cell(hide_code=True)
 def _():
     mo.md(r"""
-    ## Running the four pipelines
+    ## Running the six pipelines
 
-    The same four pipelines as notebook 1, from `pipelines.py`, each given the whole document (one to four pages).
+    The same six pipelines as notebook 1, from `pipelines.py`, each given the whole document (one to four pages).
     Every pipeline gets the same ask: table 3 by its title, and its columns in order.
     """)
     return

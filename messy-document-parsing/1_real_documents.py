@@ -130,13 +130,16 @@ def _():
 @app.cell(hide_code=True)
 def _():
     mo.md(r"""
-    ## Four pipelines
+    ## Six pipelines: four open, two Reducto
 
     - **Docling alone**: its tables on the keyed pages, header rows kept, or its Markdown for the letter. It runs on
       the keyed pages only, since Docling on CPU takes about 7 seconds a page and the long reports have up to 492.
     - **Gemini, whole PDF**: Gemini 3.8 Flash gets the whole file, up to 492 pages and 26 MB in one request.
     - **Gemini, page by page**: each keyed page alone, and the answers stitched in page order.
     - **Docling, then Gemini**: Docling's Markdown of each keyed page next to the page image.
+    - **Reducto Parse**: Reducto's paid parser (its r-1 model) on the keyed pages. Its tables are taken as Docling's
+      are; it has no way to fill the 990-EZ's lines.
+    - **Reducto Extract**: Reducto fills the same schema with the same prompt Gemini gets, from what Parse saw.
 
     They're defined in `pipelines.py`, shared with notebook 2. Answers are saved in `output/answers/` and reused.
     """)

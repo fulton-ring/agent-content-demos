@@ -1,16 +1,16 @@
 # Where open document pipelines break on messy documents
 
-#128 (`reducto-open-pipeline/`) found that Gemini 3.8 Flash reading page images matched what Reducto sells on two clean FEMA flood studies. This spike runs the same pipelines on harder documents to find where they break, and whether that's where a product like Reducto would earn its price:
+#128 (`reducto-open-pipeline/`) found that Gemini 3.8 Flash reading page images matched what Reducto sells on two clean FEMA flood studies. This spike runs the same pipelines on harder documents to find where they break, and whether that's where a product like Reducto would earn its price. Reducto's own Parse and Extract run on the same documents for comparison:
 
 1. **Seven real public documents**, each with one region keyed by hand: a 1951 Census table, a 1949 USGS well table with its left edge cut off, two of ten tables on a NACA airfoil page, a microfilm sheet with four pages on it, a handwritten 990-EZ under a RECEIVED stamp, a grey 1958 State Department letter, and a sideways USGS table whose second page has no header.
 2. **39 synthetic documents with tables broken on purpose**: twelve failure modes, three documents each, plus three with everything at once. The data is made up and seeded, so the answer key is exact.
 
 **Read the two notebooks**, each top to bottom (`uv run marimo edit 1_real_documents.py`, or read them as plain Python):
 
-1. [`1_real_documents.py`](1_real_documents.py): the seven documents, the four pipelines, and Gemini 4 Argon on the failures.
+1. [`1_real_documents.py`](1_real_documents.py): the seven documents, the six pipelines, and Gemini 4 Argon on the failures.
 2. [`2_broken_tables.py`](2_broken_tables.py): how each broken table is drawn, and the score for each failure mode.
 
-[`pipelines.py`](pipelines.py) holds what both notebooks share: the four pipelines and the scoring. [`model_call.py`](model_call.py) is #128's, with the model as an argument.
+[`pipelines.py`](pipelines.py) holds what both notebooks share: the six pipelines and the scoring. [`model_call.py`](model_call.py) is #128's, with the model as an argument.
 
 ## Run it
 
@@ -18,18 +18,20 @@
 ./run.sh
 ```
 
-You need [uv](https://docs.astral.sh/uv/), `tesseract` (`apt install tesseract-ocr` or `brew install tesseract`) and `OPENROUTER_API_KEY`. The documents (about 95 MB) and a handwriting font (Reenie Beanie, SIL Open Font License) are downloaded and hash-checked at run time. Everything goes to `output/` (set `MESSY_OUTPUT_DIR` to change that), and model answers are saved in `output/answers/` and reused on a re-run. A run from a fresh clone took 37 minutes on 4 CPU cores and cost $3.69 ($1.24 for notebook 1, $2.45 for notebook 2). All of the spike's runs together cost about $7.20.
+You need [uv](https://docs.astral.sh/uv/), `tesseract` (`apt install tesseract-ocr` or `brew install tesseract`) and `OPENROUTER_API_KEY`, plus `REDUCTO_API_KEY` for the two Reducto pipelines (without it they're reported as not run). The documents (about 95 MB) and a handwriting font (Reenie Beanie, SIL Open Font License) are downloaded and hash-checked at run time. Everything goes to `output/` (set `MESSY_OUTPUT_DIR` to change that), and model answers are saved in `output/answers/` and reused on a re-run. A run from a fresh clone took 37 minutes on 4 CPU cores and cost $3.69 ($1.24 for notebook 1, $2.45 for notebook 2). All of the spike's runs together cost about $7.20 in model calls. The Reducto pipelines were added afterwards, run against that run's saved answers so the open pipelines' numbers are unchanged; they used 152 Reducto pages, $2.28 at list price.
 
-## The four pipelines
+## The six pipelines
 
-All four are #128's, plus page by page, which the issue asked for:
+Four open ones, #128's plus page by page, which the issue asked for, and two of Reducto's:
 
 - **Docling alone**: Docling 2.138 with Tesseract OCR and table structure. It gives tables as rows, with header rows kept, or Markdown for the letter. It can't fill a form's lines without a model.
 - **Gemini, whole PDF**: Gemini 3.8 Flash gets the whole file, up to 492 pages and 26 MB in one call.
 - **Gemini, page by page**: each page is rendered at 150 dpi and read on its own, then the answers are joined in page order.
 - **Docling, then Gemini**: Docling's Markdown of each page, next to the page image.
+- **Reducto Parse**: Reducto's parser with its r-1 model, on the same pages. Its tables are taken as Docling's are. It can't fill a form's lines.
+- **Reducto Extract**: Reducto fills the same schema, with the same prompt Gemini gets, from what Parse saw.
 
-Every prompt names the table and its columns. On the real documents it also names the PDF page, so this measures reading, not finding the page. #128 already showed that routing on OCR text fails silently. Each cell is scored **right**, **wrong** (a value is there but it isn't the key's, so it looks fine to a reader) or **missing**. **Extra rows** are reported rows that match no key row. Where a Gemini pipeline got under 95% right, the same pipeline was run again on **Gemini 4 Argon**, the strongest Gemini on OpenRouter.
+Every prompt names the table and its columns. On the real documents it also names the PDF page, so this measures reading, not finding the page. #128 already showed that routing on OCR text fails silently. Each cell is scored **right**, **wrong** (a value is there but it isn't the key's, so it looks fine to a reader) or **missing**. **Extra rows** are reported rows that match no key row. Where a Gemini pipeline got under 95% right, the same pipeline was run again on **Gemini 4 Argon**, the strongest Gemini on OpenRouter. Reducto's cost is its list price, $10 per 1,000 pages for Parse r-1 and $20 for Extract, since the API reports pages, not dollars.
 
 ## Results, real documents
 
@@ -95,6 +97,38 @@ Clean documents scored 99% given the whole PDF, and scanned ones 98%. Full table
 - **A cell merged down a column isn't filled in**, by either model. Where a fund is printed once for a run of rows, Gemini leaves the cells below it blank, as the prompt's "never infer" tells it. Whether to fill them is a prompting decision.
 - **Everything at once** costs 4 to 5 points, and Argon recovers only a few of them.
 
+## Reducto head-to-head
+
+The same documents, prompts, schema and scoring. The first figure is the share of cells right.
+
+| Real document | Reducto Parse | Reducto Extract | Best open pipeline |
+|---|---|---|---|
+| Census 1951, table 33 (88 cells) | 95%, **4 wrong** | 95%, **4 wrong** | 100% |
+| USGS OF 49-60, clipped well table (90) | 100% | 100% | 100% |
+| NACA 824, tables 63-009 and 63-006 (208) | 100% | 100% | 100% |
+| USGS OF 61-50, microfilm (216) | 99%, 3 wrong | 99%, 2 wrong | 100% |
+| USGS WSP 1050, p248 with no header (115) | **0%, pages called blank** | **0%** | 100% |
+| IRS 990-EZ, handwritten (28 lines) | can't | **64%, 8 wrong** | 93% Flash, 100% Argon |
+| State FOIA 1958 letter, word error rate | 4.3% | 1.0% | 0.0% |
+
+| Broken tables | Reducto Parse | Reducto Extract | Gemini, whole PDF |
+|---|---|---|---|
+| Modes 1, 2, 3, 5, 8, 10, 11 | 100% | 100% | 93% to 100% |
+| 4. Wide table cut in half | 50% | 100% | 100% |
+| 6. Columns change between pages | 91% | **89%, 174 wrong** | 100% |
+| 7. Merged cells | 87% | 100% | 95% |
+| 9. Footnotes, (negatives), dashes, n/a | 96% | 100% | 100% |
+| 12. Handwritten corrections | 96% | 98% | 97% |
+| 13. Everything at once | 96% | 96% | 95% |
+
+- **On the broken tables, Reducto Extract roughly matches Gemini.** It does better on merged cells (it fills a merged fund down) and on the rotated page, where Gemini given the whole PDF got 93%. It does worse where columns are reordered on page 2: it kept the printed order instead of putting values under the columns asked for, giving 174 believable wrong values.
+- **On the real documents it does worse, and with the same kind of error.**
+  - **Census.** Parse and Extract both misread the same four digits, giving 0.1 for 9.1, 7,706 for 7,796, 2,701 for 2,761 and 3.8 for 8.8. Every Gemini pipeline read them right.
+  - **990-EZ.** Extract read every amount right but put lines 12 to 21 one line off, so each value sits on the line above its own.
+  - **WSP 1050.** Parse called both table pages "a completely empty page with no visible content", in Hebrew. So did the three pages either side, and the legacy parser returned nothing. Gemini, Docling and pypdfium read the same file. In a check outside the notebooks, Reducto read page 248 sent as a PNG, with a few misread digits (83.5 for 88.5, 53 for 33). So it fails silently on some valid PDFs.
+- **It costs 2 to 200 times as much.** Parse is $0.010 a page and Extract $0.020, against $0.0001 to $0.0057 for Gemini. Extract took 5 to 20 seconds a page on the real documents.
+- **Parse alone is a better Docling.** It reads sideways and scanned tables Docling can't. But it gives every table on the page (254 extra rows on the NACA page) and glues footnote markers onto numbers, so it still needs a model or rules after it.
+
 ## Failure types, and the fix each needs
 
 | Failure | Seen in | Fix |
@@ -108,6 +142,8 @@ Clean documents scored 99% given the whole PDF, and scanned ones 98%. Full table
 | Merged cells left blank | Mode 7 | Prompting: say whether to fill down |
 | Answers differ between runs | WSP 1050, modes 6 and 11 | Read twice and compare, or check |
 | Everything, read by Docling alone | All | Don't use Docling as the reader; use a VLM |
+| A valid PDF parsed as blank pages | WSP 1050, Reducto | Send page images, and check that a page called blank really is |
+| Values put on the wrong form line | 990-EZ, Reducto Extract | A check: lines 1 to 8 add to line 9, 10 to 16 to 17 |
 
 No failure here needed fine-tuning. Each was fixed, or would be, by:
 
@@ -116,14 +152,14 @@ No failure here needed fine-tuning. Each was fixed, or would be, by:
 - a prompt;
 - a check behind the read.
 
-The biggest risk is not a blank cell but a believable wrong one, and these failures vary by run. Where a product like Reducto could earn its price is in doing the checks and re-reads, not in reading the page.
+The biggest risk is not a blank cell but a believable wrong one, and these failures vary by run. Reducto doesn't remove that risk. Its errors on the real documents are the same kind, and it made more of them than Gemini reading page images. At 2 to 200 times the cost, it doesn't earn its price on reading the page. The value is in the checks and re-reads, which neither Reducto Parse nor Extract does for you.
 
 ## What it doesn't show
 
-- **Reducto itself.** Running Reducto needs an account, which needs a founder's approval. `PIPELINES` in `pipelines.py` takes a fifth pipeline.
+- **Reducto's other modes.** Only Parse r-1 and plain Extract were run. Deep Extract ($40 per 1,000 pages), agentic table enhancement, citations and Reducto's own page splitting weren't tried. Reducto runs once, so its run-to-run spread isn't measured.
 - **EPA NEPIS 2000V9TU** isn't keyed. Its 45-by-15 typewritten table across three pages would take about an hour by hand. The issue's other optional documents aren't keyed either.
 - **The real-document keys were checked by the agent that keyed them, not by a person.** Each key has a note on how it was checked: column sums, airfoil symmetry, or the IRS extract. On the 990-EZ, lines 13 to 16 sit under the stamp. They're keyed so they add to line 17 as written, and Argon reads them the same way.
 - **The synthetic handwriting** is one font at one size. Real corrections vary more.
 - **The page-number hint** helps the whole-PDF pipeline find the table. Finding it unaided is #128's routing question.
 - **Run-to-run spread.** Each figure is one run. The earlier, partial run is described above where it differed.
-- **Size.** About 1,350 lines of Python, over the 1,000-line target. Notebook 2 (about 740 lines) draws 13 kinds of broken table. Splitting the drawing code into a module would hide it from the reader, so it stays in the notebook.
+- **Size.** About 1,450 lines of Python, over the 1,000-line target. Notebook 2 (about 740 lines) draws 13 kinds of broken table. Splitting the drawing code into a module would hide it from the reader, so it stays in the notebook.
