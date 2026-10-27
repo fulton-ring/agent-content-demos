@@ -53,7 +53,9 @@ spans both catalogues and every published Knutson percentile.
 - **The places people check stay at the top:** Miami-Dade ranks 2nd nationally, Palm Beach
   4th, Broward 6th, Charleston 7th and Horry 11th, all still Very High.
 - **STORM puts about half the observed number of hurricanes on the US coast**, measured against
-  NHC's return periods. That is why the layer averages it with the observed-track catalogue.
+  NHC's return periods. Reweighting STORM to NHC's rates at 12 sites moves the late-century,
+  higher central HM from 1.10 to 1.11 and national loss by under $0.3B
+  ([`storm_recalibration.py`](storm_recalibration.py), on Odériz & Losada's STORM run).
 - **Tracts:** NRI v1.20 tract EAL × county multiplier for 54,919 tracts in 29 states. A
   Florida tract-wind pilot shows the multiplier varies only 0.5-1.5% inside a county.
 
@@ -91,10 +93,9 @@ seeds in both periods).
 ./run.sh
 ```
 
-It needs [uv](https://docs.astral.sh/uv/) and about 4 GB of disk (2.1 GB of downloads and wind fields,
-1.6 GB for the Python environment). `run.sh` runs the notebook as
-a script (`uv run notebook.py`), so every table and figure in `results/` comes from the code in
-the notebook. To read it with its outputs, run `uv run marimo edit notebook.py`.
+It needs [uv](https://docs.astral.sh/uv/) and about 4 GB of disk (2.1 GB of downloads and wind
+fields, 1.6 GB for the Python environment). `run.sh` runs the notebook as a script, so every
+table and figure in `results/` comes from its code; `uv run marimo edit notebook.py` shows it.
 
 - Every input is downloaded at run time into `~/.cache/hurloss-public-rebuild`, and wind fields
   are cached there too. Nothing downloaded goes into the repo. CLIMADA and Cartopy also put
@@ -104,11 +105,10 @@ the notebook. To read it with its outputs, run `uv run marimo edit notebook.py`.
   it takes a few minutes.
 - Settings, all optional: `HURLOSS_CACHE` (cache folder), `HURLOSS_RESULTS` (output folder,
   default `results/`), `HURLOSS_WORKERS` (processes, default all cores).
-- Tests: `uv run pytest` checks FEMA's formula, the Knutson scaling and the rating bins.
-- It makes no model calls and uses no paid services, so it costs nothing.
+- Tests: `uv run pytest` checks FEMA's formula, Knutson scaling and rating bins. No paid services.
 
-STORM's host (4TU) and RAFT's (Zenodo) rate-limit repeated range reads with HTTP 429. Downloads
-retry with backoff; if it still fails, wait and rerun, since finished files are cached.
+STORM v4's host (4TU) has been unreachable since 22 October 2026, so an empty cache can't rebuild
+it. `uv run storm_recalibration.py` (after `notebook.py`) reads STORM from Zenodo instead.
 
 ## Where the data comes from
 
@@ -124,9 +124,8 @@ retry with backoff; if it still fails, wait and rerun, since finished files are 
 | Today's loss | NRI v1.20 (Dec 2025) county and tract hurricane EAL, from FEMA's ArcGIS feature services |
 | Places | Census 2020 county boundaries and 2020 tract population centres |
 | Return periods | NHC's HURISK maps ([nhc.noaa.gov/climo](https://www.nhc.noaa.gov/climo/)), read by eye |
-
-Looked at and not used: HURSAT (imagery with no wind field) and ASCE 7 wind maps (no scenario
-component).
+| STORM rerun (recalibration) | Odériz & Losada (2025), 12,000 years from IBTrACS 1980-2021 ([doi:10.5281/zenodo.15097665](https://doi.org/10.5281/zenodo.15097665)), CC-BY-4.0 |
+| Looked at, not used | HURSAT (imagery with no wind field) and ASCE 7 wind maps (no scenario component) |
 
 ## What it doesn't show
 
@@ -142,6 +141,7 @@ component).
 
 ```
 notebook.py          the spike and the layer, top to bottom (marimo)
+storm_recalibration.py  STORM reweighted to NHC's coastal rates (marimo); results/recalibration/
 fri.py               FEMA's formula, Knutson scaling and rating bins, shared with the tests
 tests/test_fri.py    tests for fri.py
 run.sh               the one command

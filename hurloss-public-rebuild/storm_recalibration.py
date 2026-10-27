@@ -386,7 +386,9 @@ def _(np, pd, storm_names, storm_paths, storm_years):
         _raw["lon"] = ((_raw["lon"] + 180) % 360) - 180
         _raw["wind_kt"] = _raw["wind_ms"] / 0.88 * _knots
         _raw = _raw[_raw["wind_kt"] >= 64.0]
-        _event = _path.name + "-" + _raw["year"].astype(str) + "-" + _raw["tc"].astype(str)
+        # STORM files write integers as floats ("0.0"); CLIMADA's event names use "0".
+        _year, _tc = _raw["year"].astype(int).astype(str), _raw["tc"].astype(int).astype(str)
+        _event = _path.name + "-" + _year + "-" + _tc
         _lat1, _lon1 = np.radians(_raw["lat"].to_numpy()), np.radians(_raw["lon"].to_numpy())
         for _s, _site in sites.iterrows():
             _lat2, _lon2 = np.radians(_site["lat"]), np.radians(_site["lon"])
@@ -631,12 +633,38 @@ def _(summary):
 @app.cell
 def _(mo):
     mo.md(r"""
+    **What it shows** (run of 27 October 2026):
+
+    - **Uniform reweighting changes nothing**, as the algebra says: the multipliers match the
+      unweighted run to rounding.
+    - **Matching NHC changes the layer by about 1%.** The by-site version fits NHC's return
+      periods at all 12 sites and moves the central multiplier for late century, higher warming
+      from 1.10 to 1.11 (1.02-1.03 to 1.03-1.04 mid-century). National projected loss moves by under
+      $0.3B against a gap to FEMA of about $20-24B, and rating agreement with FEMA stays at
+      82-84%. The undercount isn't why our losses are half of FEMA's.
+    - **The site factors are implausible.** To hit NHC at 12 sites the fit drives some factors
+      to 0 and others past 20 (majors near Galveston and Long Island), which reshuffles which
+      counties rise most (Spearman 0.6 against the unweighted run). Reweighting can't add
+      storms STORM never makes.
+    - **Swapping STORM v4 for Odériz and Losada's run moves the STORM-side median down a
+      little** (1.13 to 1.07 late higher) and agrees with v4 on the county pattern only at
+      Spearman 0.49, a reminder that synthetic catalogues disagree on which counties rise most.
+      Their run undercounts the US coast even more than v4 (Galveston: a hurricane every 40
+      years against NHC's 11).
+    """)
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
     ## Why it moves as little or as much as it does
 
     Knutson's change is applied by each storm's lifetime peak category: Category 4-5 storms
     take Knutson's Cat 4-5 change (up), the rest take whatever keeps the all-storm change right
     (down). That second number depends on what share of the catalogue's storm rate is Category
-    4-5, so a reweighting that raises strong landfalling storms more than weak ones changes it.
+    4-5, so a reweighting that raises strong landfalling storms more than weak ones changes it:
+    more Category 4-5 storms to scale up, and a deeper cut for the rest, which mostly cancel.
     Late century, higher warming, Knutson median:
     """)
     return
