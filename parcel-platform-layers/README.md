@@ -37,7 +37,9 @@ The three counties are **Wake NC** (urban; county and state publish parcels), **
 statewide cadastral) and **Gordon GA** (no open parcels: a view-only qPublic site whose terms forbid scraping, and a
 GIS file sold at $300 a layer).
 
-## Results (from one clean `./run.sh`)
+## Results (from one clean `./run.sh` on 2026-10-26)
+
+The endpoints are live, so counts and ages drift a little from day to day.
 
 **The catalogs** (`output/regrid_layers_rated.csv`, `output/mireye_sources_rated.csv`, chart in `output/ratings.png`):
 

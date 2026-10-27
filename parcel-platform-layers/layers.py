@@ -605,7 +605,9 @@ def _(county_shapes, overture_counts, public_counts, regrid_tabs):
     _rows = []
     for _name, _shape in county_shapes.items():
         _geoid = _shape["geoid"]
-        _public = public_counts[public_counts["county"] == _name].groupby("layer")["public count"].max()
+        # The unofficial Calhoun parcel layer is reported as a finding, not counted as Gordon's public parcels.
+        _official = ~public_counts["source"].str.contains("unofficial")
+        _public = public_counts[(public_counts["county"] == _name) & _official].groupby("layer")["public count"].max()
         _firm = public_counts.loc[
             (public_counts["county"] == _name) & (public_counts["layer"] == "FIRM panels"), "latest date"
         ].max()
