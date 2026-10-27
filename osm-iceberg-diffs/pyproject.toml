@@ -1,0 +1,43 @@
+[project]
+name = "osm-iceberg-diffs"
+version = "0.1.0"
+description = "How fast can OSM replication diffs be applied to an Iceberg table, compared to PostGIS?"
+requires-python = ">=3.12"
+dependencies = [
+    "duckdb>=2.0.0",
+    "fastapi>=0.162.0",
+    "httpx>=0.28.1",
+    "marimo>=0.25.2",
+    "osmium>=4.3.2",
+    "polars>=2.1.0",
+    "psycopg-pool>=3.3.3",
+    "psycopg[binary]>=3.3.6",
+    "pyiceberg[pyarrow,sql-sqlite]>=0.12.0",
+    "pyspark>=4.1,<4.2",
+    "shapely>=2.2.0",
+    "uvicorn>=0.54.0",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.17.2",
+    "ty>=0.0.92",
+]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+# A bare expression at the end of a marimo cell is what the cell displays, and
+# the notebooks' markdown tables can't wrap.
+"hourly.py" = ["B018", "E501"]
+"replay.py" = ["B018", "E501"]
+
+[tool.ruff.format]
+skip-magic-trailing-comma = true
+
+[tool.ruff.lint.isort]
+split-on-trailing-comma = false
