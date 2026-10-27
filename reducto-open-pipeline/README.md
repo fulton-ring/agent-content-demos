@@ -65,12 +65,12 @@ Run 1 gave the same picture: A 668 of 676 right with 8 wrong but accepted, B 380
 | fis-henrico-2024 | Table 22: Summary of Topographic Elevation Data used in Mapping | 30 of 30 | 30 of 30 | 30 of 30 |
 | fis-henrico-2024 | Table 23: Floodway Data, Allens Branch | 0 of 126 | 126 of 126 | 126 of 126 |
 
-Run 1 gave the same numbers, cell for cell. Docling took 7.0 to 7.6 seconds a page on CPU, with Tesseract on the scan.
+Run 1 gave the same numbers, cell for cell. A review run on 2026-10-27 differed by one cell: Gemini alone read Deep Run's 0.060 in the scanned Manning's table as -0.060 (331 of 332), and Docling then the VLM read it right (236 of 332). The speck fools Gemini with or without Docling's text. Docling took 7.0 to 7.6 seconds a page on CPU, with Tesseract on the scan.
 
 - **Every pipeline found every numbered heading on the right page**, on both the scan and the born-digital report. The headings carry their numbers, so this was the easy part (see What it doesn't show).
 - **Docling's outline is flat**: every heading at level 1, plus the cover and contents lines as headings (13 and 36 extras). Giving its Markdown to Gemini fixed every level and most extras, for $0.0005 to $0.0009 a page.
-- **Tables are where Docling alone fails.** It merged the 2024 floodway table's 14 rows into one row of whole columns (0 of 126 cells), read the sideways 1980 table as fragments (12 of 96), and glued a footnote marker onto a number (`15,0002` for 15,000 with note 1). Gemini read all 587 cells right from the PDF alone.
-- **Docling then the VLM inherits Docling's misses.** Docling's text never names the sideways table, so the pipeline never found its page (0 of 96). On the scanned Manning's table it took Docling's `-0.060` (a speck read as a minus sign) over the page image's 0.060.
+- **Tables are where Docling alone fails.** It merged the 2024 floodway table's 14 rows into one row of whole columns (0 of 126 cells), read the sideways 1980 table as fragments (12 of 96), and glued a footnote marker onto a number (`15,0002` for 15,000 with note 1). Gemini read all 587 cells right from the PDF alone in runs 1 and 2 (586 in the review run).
+- **Docling then the VLM inherits Docling's misses.** Docling's text never names the sideways table, so the pipeline never found its page (0 of 96). On the scanned Manning's table it took Docling's `-0.060` (a speck read as a minus sign) over the page image's 0.060 in runs 1 and 2, though Gemini alone made the same misread in the review run.
 
 ![Docling merges the rows of the 2024 Floodway Data table](screenshots/2024-p55-docling-merges-rows.png)
 
@@ -84,7 +84,7 @@ Run 1 gave the same numbers, cell for cell. Docling took 7.0 to 7.6 seconds a pa
 | Rows merged in a table without rules | Sections, Docling alone | VLM on the page image; or fine-tune the table model (below) |
 | Sideways pages unreadable | Sections, Docling alone and Docling then VLM | VLM on the page image, which reads it as printed |
 | Flat heading levels, cover and contents lines as headings | Sections, Docling alone | Prompting: give Docling's Markdown to an LLM |
-| OCR noise in Docling's text overrides what the VLM sees | Sections, Docling then VLM | Send the image alone, or tell the model the text is a hint only |
+| A speck on a scan read as a minus sign (`-0.060`) | Sections, Docling then VLM in runs 1 and 2; VLM alone in the review run | A check that flags signs that don't fit the column, or review on low confidence |
 | Footnote marker glued to a number | Sections, Docling alone | VLM, prompted to leave out footnote markers |
 
 ## Where fine-tuning would earn its cost
@@ -108,7 +108,7 @@ More pages of context made things worse here, not better.
 
 ## Verdict
 
-**Yes, for what we measured.** Gemini 3.8 Flash given the whole PDF found all 69 numbered headings on the right page and read all 587 table cells right, on a 1980 scan as well as a 2024 born-digital report, for $0.0018 a page. On the K-1 set it accepted 7 or 8 wrong values of 676 when given whole packages, and the K-1 spike's routed pipeline accepted none in its README's run (0 to 2 in each of its 11 runs). For public-records extraction an open pipeline is good enough, with two rules. The VLM reads the page image, never OCR text. And whatever routes pages to it is checked. Docling earns its place as a router and a source of real boxes, not as the reader. Section parsing was not the hard part we expected, but our documents had numbered headings; [#130](https://github.com/fulton-ring/agent-content-demos/issues/130) tests ones that don't. We found no error that needs fine-tuning a frontier VLM. Fine-tuning earns its cost only when the model must be open weights or run on our own hardware.
+**Yes, for what we measured.** Gemini 3.8 Flash given the whole PDF found all 69 numbered headings on the right page and read 586 to 587 of 587 table cells right, on a 1980 scan as well as a 2024 born-digital report, for $0.0018 a page. On the K-1 set it accepted 7 or 8 wrong values of 676 when given whole packages, and the K-1 spike's routed pipeline accepted none in its README's run (0 to 2 in each of its 11 runs). For public-records extraction an open pipeline is good enough, with two rules. The VLM reads the page image, never OCR text. And whatever routes pages to it is checked. Docling earns its place as a router and a source of real boxes, not as the reader. Section parsing was not the hard part we expected, but our documents had numbered headings; [#130](https://github.com/fulton-ring/agent-content-demos/issues/130) tests ones that don't. We found no error that needs fine-tuning a frontier VLM. Fine-tuning earns its cost only when the model must be open weights or run on our own hardware.
 
 ## What it doesn't show
 

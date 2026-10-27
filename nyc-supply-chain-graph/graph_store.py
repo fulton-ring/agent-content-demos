@@ -141,7 +141,7 @@ def _(lots, spike):
     # The parcels given by BBL are the ones the per-parcel query looks up; the Canarsie point has no BBL.
     sample_bbls = [b for b in _status["bbl"].dropna() if b in set(lots["bbl"])]
     _node_hazards = spike["node_hazards"]
-    _flood_rank = spike["flood_rank"]
+    _flood_rank = spike["FLOOD_RANK"]
     _ratings = ["Very Low", "Relatively Low", "Relatively Moderate", "Relatively High", "Very High"]
 
     def rank_rows(result: pd.DataFrame, firsts: list[str]) -> pd.DataFrame:
