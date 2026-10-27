@@ -70,11 +70,11 @@ def _(Path, os):
     # The same images as #124, pinned by digest: PostGIS 17-3.5 and osm2pgsql 2.3.1.
     POSTGIS_IMAGE = "postgis/postgis@sha256:01a6a70e41e6c4467c8f55f6063555ed72db2d6662cd0d571040d42eadaeb6f6"
     OSM2PGSQL_IMAGE = "iboates/osm2pgsql@sha256:6548a1e2492e08fa0d5ce987d382ad57c4b21c8a94ff00017c6109770a061b79"
-    DB_URL = "postgresql://postgres:osm@127.0.0.1:15432/osm"
+    DB_URL = "postgresql://postgres:osm@127.0.0.1:15442/osm"
     OSM2PGSQL = (
         f"docker run --rm --network host --entrypoint osm2pgsql -e PGPASSWORD=osm"
         f" -v {DATA}:/data:ro -v {HERE}:/style:ro {OSM2PGSQL_IMAGE}"
-        " --slim -d osm -U postgres -H 127.0.0.1 -P 15432 -O flex -S /style/flex.lua"
+        " --slim -d osm -U postgres -H 127.0.0.1 -P 15442 -O flex -S /style/flex.lua"
     )
     return DATA, DB_URL, DIFF_HOURS, EXTRACT_URL, OSM2PGSQL, POSTGIS_IMAGE, REPLICATION, RESULTS, RUNS, WAREHOUSE
 
@@ -186,12 +186,14 @@ def _(mo):
 @app.cell
 def _(DB_URL, OSM2PGSQL, POSTGIS_IMAGE, iceberg_import_s, os, sh, sys, time, timed):
     assert iceberg_import_s > 0
-    sh("docker rm -fv pg", may_fail=True)
-    sh(f"docker run -d --name pg -p 15432:5432 -e POSTGRES_PASSWORD=osm -e POSTGRES_DB=osm {POSTGIS_IMAGE}")
+    sh("docker rm -fv osm_iceberg_pg", may_fail=True)
+    sh(f"docker run -d --name osm_iceberg_pg -p 15442:5432 -e POSTGRES_PASSWORD=osm -e POSTGRES_DB=osm {POSTGIS_IMAGE}")
     # The image starts PostgreSQL, runs its init scripts, then restarts it once: wait for both.
     for _attempt in range(2):
         for _ in range(60):
-            if "1" in sh("docker exec pg psql -U postgres -d osm -h 127.0.0.1 -Atc 'select 1'", may_fail=True):
+            if "1" in sh(
+                "docker exec osm_iceberg_pg psql -U postgres -d osm -h 127.0.0.1 -Atc 'select 1'", may_fail=True
+            ):
                 break
             time.sleep(2)
         time.sleep(3)
@@ -492,7 +494,7 @@ def _(
     (RESULTS / "hourly_summary.txt").write_text(_summary)
     print(_summary)
     service.pool.close()
-    sh("docker rm -fv pg", may_fail=True)
+    sh("docker rm -fv osm_iceberg_pg", may_fail=True)
     return
 
 
