@@ -460,6 +460,18 @@ def _():
       fails on exactly the pages that need help most.
     - **The printed table number disagrees with the contents** on the 1980 report (the contents' Table 4 is
       printed "TABLE 3"). We asked for that table by its title and streams, not its number.
+
+    On the three reports without heading numbers:
+
+    - **Routing on Docling's text loses whole pages of a table, silently.** In the budget book, Docling splits
+      "Department of Social Services" across two header cells, so the page finder matched no page and the model
+      returned no rows (see `screenshots/`). On the 1953 scan, Docling's OCR never found the title on the table's second page, so that
+      page was never sent and its rows are missing. Gemini given the whole PDF got every cell of both.
+    - **The model nests headings by meaning, not by type.** In the two-column USGS report, "Rainfall" and
+      "El Niño ..." are set in the same type as "Climate", but Gemini put them under it. Docling's Markdown, which
+      flattens the type, made it worse.
+    - **Docling alone misses run-in headings** ("Chadron formation.--The ...") on the scan, and still puts almost
+      every heading at level 1.
     """)
     return
 
