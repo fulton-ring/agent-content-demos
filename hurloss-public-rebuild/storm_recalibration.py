@@ -92,6 +92,13 @@ def _(mo):
 
     Storms that never bring hurricane wind to our grid keep their weight in versions 2 and 3:
     STORM's basin-wide counts are right, and they don't enter Eq. 11.
+
+    **Which STORM.** Our layer used STORM v4 from 4TU.ResearchData, which has been unreachable
+    since 22 October 2026 and has no mirror. This notebook uses the only other public run of
+    the same algorithm: Odériz and Losada (2025), 12,000 years of North Atlantic tracks built with
+    STORM from IBTrACS 1980-2021 ([doi:10.5281/zenodo.15097665](https://doi.org/10.5281/zenodo.15097665),
+    CC-BY-4.0), in STORM's own file format. Its multipliers before any reweighting are compared
+    with STORM v4's below, so it is clear how far the substitute alone moves them.
     """)
     return
 
@@ -230,13 +237,14 @@ def _(cached, download, gpd, np, pd, zipfile):
 @app.cell
 def _(mo):
     mo.md(r"""
-    ## STORM's present climate, 10,000 years
+    ## STORM's present climate, 12,000 years (Odériz and Losada)
 
-    The same ten 1,000-year North Atlantic files and the same CLIMADA wind fields as our layer.
-    CLIMADA reads STORM directly (`TCTracks.from_simulations_storm`), converting its 10-minute
-    winds to 1-minute by dividing by 0.88, and names each event `<file>-<year>-<storm>`, which
-    is how storms are matched to the NHC check below. The wind fields take most of an hour on 4
-    cores from an empty cache.
+    The twelve 1,000-year North Atlantic files of the all-years climatology (`IB1980-2021`),
+    read out of the Zenodo zip with HTTP range requests, and the same CLIMADA wind fields as
+    our layer. CLIMADA reads STORM directly (`TCTracks.from_simulations_storm`), converting
+    its 10-minute winds to 1-minute by dividing by 0.88, and names each event
+    `<file>-<year>-<storm>`, which is how storms are matched to the NHC check below. The wind
+    fields take about an hour on 4 cores from an empty cache.
     """)
     return
 
@@ -259,11 +267,12 @@ def _(
     time,
     workers,
 ):
-    _url = (
-        "https://data.4tu.nl/file/01b2ebc7-7903-42ef-b46b-f43b9175dbf4/"
-        "78b72e86-b074-4478-9dc4-7280deb756ab"
-    )
-    storm_paths = [cached("storm", f"STORM_DATA_IBTRACS_NA_1000_YEARS_{i}.txt") for i in range(10)]
+    _url = "https://zenodo.org/records/15097665/files/IB1980-2021.zip?download=1"
+    storm_years = 12_000
+    storm_paths = [
+        cached("storm_oderiz", f"STORM_DATA_IBTRACS_NA_1000_YEARS_{i}.txt")
+        for i in range(storm_years // 1000)
+    ]
     _missing = [p for p in storm_paths if not p.exists()]
     if _missing:
         with RemoteZip(_url, session=session()) as _archive:
@@ -279,7 +288,7 @@ def _(
     _west, _east = grid_lon.min() - 2, grid_lon.max() + 2
     _winds, _categories, _basins, _names = [], [], [], []
     for _index, _path in enumerate(storm_paths):
-        _cached = cached("hazard", f"storm_present_file{_index}_grid0.25.h5")
+        _cached = cached("hazard", f"storm_oderiz_file{_index}_grid0.25.h5")
         if not _cached.exists():
             _start = time.perf_counter()
             _pool = pathos.pools.ProcessPool(nodes=workers)
@@ -322,15 +331,15 @@ def _(
 
     storm = fri.Events(
         wind=sparse.csr_matrix(sparse.vstack(_winds)),
-        frequency=np.full(len(_names), 1 / 10_000),
+        frequency=np.full(len(_names), 1 / storm_years),
         category=np.concatenate(_categories),
         basin=np.concatenate(_basins),
-        years=(1980, 2018),
+        years=(1980, 2021),
     )
     storm_names = np.array(_names)
     assert len(set(_names)) == len(_names), "STORM event names aren't unique"
     f"{len(_names):,} STORM storms come within 2° of the grid"
-    return storm, storm_names, storm_paths
+    return storm, storm_names, storm_paths, storm_years
 
 
 @app.cell
@@ -349,7 +358,7 @@ def _(mo):
 
 
 @app.cell
-def _(np, pd, storm_names, storm_paths):
+def _(np, pd, storm_names, storm_paths, storm_years):
     sites = pd.DataFrame(
         [
             ("Key West, FL", 24.56, -81.78, 8, 18),
@@ -393,9 +402,9 @@ def _(np, pd, storm_names, storm_paths):
     _counts = pd.DataFrame(
         {
             "site": sites["site"],
-            "storm_hurricane_years": 10_000 / passes_hurricane.sum(axis=0),
+            "storm_hurricane_years": storm_years / passes_hurricane.sum(axis=0),
             "nhc_hurricane_years": sites["nhc_hurricane_years"],
-            "storm_major_years": 10_000 / passes_major.sum(axis=0),
+            "storm_major_years": storm_years / passes_major.sum(axis=0),
             "nhc_major_years": sites["nhc_major_years"],
         }
     )
@@ -550,63 +559,51 @@ def _(mo):
 
 
 @app.cell
-def _(bounds, comparison, fri, layer, np, pd, point_county, recalibrated, write):
+def _(bounds, comparison, fri, layer, pd, point_county, recalibrated, write):
     _rank = {name: rank for rank, name in enumerate(fri.RATINGS)}
-    _original_storm = {}
-    _rows, _counties = [], []
+    # STORM-side multiplier per version and scenario; the first row is our published layer's
+    # STORM v4, read from the main notebook's results, as the reference for the substitute.
+    _storm_hm = {("storm_v4_published", _s): layer[f"{_s}_HM_STORM"] for _s in fri.SCENARIOS}
     for _v, _events in recalibrated.items():
         _today = fri.county_intensity(_events, point_county)
         for _s in fri.SCENARIOS:
-            _p = comparison[comparison["scenario"] == _s].copy()
-            _storm_hm = fri.ratio(
-                fri.county_intensity(fri.frequency_only(_events, _s), point_county), _today
-            ).clip(lower=1.0)
-            _storm_hm = _storm_hm.reindex(_p.index)
-            _historical = layer[f"{_s}_HM_HISTORICAL"].reindex(_p.index)
-            _central = pd.concat([_storm_hm, _historical], axis=1).mean(axis=1).fillna(1.0)
-            _p["storm_hm"] = _storm_hm
-            _p["recalibrated_hm"] = _central
-            _p["recalibrated_pal"] = _p["eal_v1_19"] * _central
-            _p["recalibrated_rating"] = fri.rate(_p["recalibrated_pal"], bounds)
-            _move = _p["recalibrated_rating"].map(_rank) - _p["fema_rating"].map(_rank)
-            if _v == "original":
-                _original_storm[_s] = _storm_hm
-                # Our layer is rebuilt exactly before any reweighting; fail if it isn't.
-                assert np.allclose(_central, _p["our_hm"], rtol=1e-4), "layer not reproduced"
-            _cov = _p[_p["our_covered"]]
-            _both = _cov[["storm_hm"]].assign(o=_original_storm[_s]).dropna()
-            _rows.append(
-                {
-                    "version": _v,
-                    "scenario": _s,
-                    "storm_hm_median_covered": _cov["storm_hm"].median(),
-                    "layer_hm_median_covered": _cov["recalibrated_hm"].median(),
-                    "fema_hm_median_covered": _cov["fema_hm"].median(),
-                    "projected_loss_total": _p["recalibrated_pal"].sum(),
-                    "fema_projected_loss_total": _p["fema_pal"].sum(),
-                    "rating_same_as_fema": float((_move == 0).mean()),
-                    "storm_hm_spearman_vs_original": _both["storm_hm"].corr(
-                        _both["o"], method="spearman"
-                    ),
-                    "storm_hm_max_change": float((_both["storm_hm"] - _both["o"]).abs().max()),
-                    "layer_hm_spearman_vs_fema": _cov["recalibrated_hm"].corr(
-                        _cov["fema_hm"], method="spearman"
-                    ),
-                }
-            )
-            _counties.append(
-                _p[
-                    [
-                        "scenario",
-                        "state",
-                        "county",
-                        "fema_hm",
-                        "our_hm",
-                        "storm_hm",
-                        "recalibrated_hm",
-                    ]
-                ].assign(version=_v)
-            )
+            _projected = fri.county_intensity(fri.frequency_only(_events, _s), point_county)
+            _storm_hm[(_v, _s)] = fri.ratio(_projected, _today).clip(lower=1.0)
+
+    _rows, _counties = [], []
+    for (_v, _s), _hm in _storm_hm.items():
+        _p = comparison[comparison["scenario"] == _s].copy()
+        _p["storm_hm"] = _hm.reindex(_p.index)
+        _historical = layer[f"{_s}_HM_HISTORICAL"].reindex(_p.index)
+        _central = pd.concat([_p["storm_hm"], _historical], axis=1).mean(axis=1).fillna(1.0)
+        _p["recalibrated_hm"] = _central
+        _p["recalibrated_pal"] = _p["eal_v1_19"] * _central
+        _p["recalibrated_rating"] = fri.rate(_p["recalibrated_pal"], bounds)
+        _move = _p["recalibrated_rating"].map(_rank) - _p["fema_rating"].map(_rank)
+        _cov = _p[_p["our_covered"]]
+        _row = {
+            "version": _v,
+            "scenario": _s,
+            "storm_counties_with_wind": int(_p["storm_hm"].notna().sum()),
+            "storm_hm_median_covered": _cov["storm_hm"].median(),
+            "layer_hm_median_covered": _cov["recalibrated_hm"].median(),
+            "fema_hm_median_covered": _cov["fema_hm"].median(),
+            "projected_loss_total": _p["recalibrated_pal"].sum(),
+            "fema_projected_loss_total": _p["fema_pal"].sum(),
+            "rating_same_as_fema": float((_move == 0).mean()),
+            "layer_hm_spearman_vs_fema": _cov["recalibrated_hm"].corr(
+                _cov["fema_hm"], method="spearman"
+            ),
+        }
+        for _ref in ("storm_v4_published", "original"):
+            _both = pd.DataFrame(
+                {"a": _cov["storm_hm"], "b": _storm_hm[(_ref, _s)].reindex(_cov.index)}
+            ).dropna()
+            _row[f"storm_hm_spearman_vs_{_ref}"] = _both["a"].corr(_both["b"], method="spearman")
+            _row[f"storm_hm_median_abs_diff_vs_{_ref}"] = (_both["a"] - _both["b"]).abs().median()
+        _rows.append(_row)
+        _columns = ["scenario", "state", "county", "fema_hm", "our_hm", "storm_hm"]
+        _counties.append(_p[[*_columns, "recalibrated_hm"]].assign(version=_v))
     summary = pd.DataFrame(_rows)
     write(summary, "summary.csv")
     write(pd.concat(_counties), "county_multipliers.csv", index=True)
@@ -617,8 +614,10 @@ def _(bounds, comparison, fri, layer, np, pd, point_county, recalibrated, write)
 @app.cell
 def _(mo):
     mo.md(r"""
-    Median multiplier over the 1,333 counties our layer covers. In full, with national
-    projected loss on NRI v1.19 and rating agreement with FEMA (`summary.csv`):
+    Median multiplier over the 1,333 counties our layer covers. `storm_v4_published` is our
+    layer as published; `original` is the same layer with the Odériz and Losada run in place of
+    STORM v4, before any reweighting. In full, with national projected loss on NRI v1.19 and
+    rating agreement with FEMA (`summary.csv`):
     """)
     return
 
@@ -645,8 +644,8 @@ def _(mo):
 
 @app.cell
 def _(fri, np, pd, recalibrated, write):
-    _all = fri.knutson_percent("cat05", "LATE_HIGHER", "NA", (1980, 2018)) / 100
-    _strong = fri.knutson_percent("cat45", "LATE_HIGHER", "NA", (1980, 2018)) / 100
+    _all = fri.knutson_percent("cat05", "LATE_HIGHER", "NA", (1980, 2021)) / 100
+    _strong = fri.knutson_percent("cat45", "LATE_HIGHER", "NA", (1980, 2021)) / 100
     _rows = []
     for _v, _events in recalibrated.items():
         _is_strong = np.isin(_events.category, [4, 5])
@@ -673,6 +672,8 @@ def _(mo):
 
     - NHC's return periods were read off its maps by eye at 12 sites; a neighbouring circle can
       differ by one class. Coast between sites takes the nearest site's factors.
+    - It uses Odériz and Losada's run of STORM, not STORM v4 itself: same algorithm and
+      format, but a later baseline (1980-2021) and their own random draws.
     - It reweights STORM's storms; it doesn't fix why STORM brings too few to the US coast
       (its tracks, its decay over land, or its intensities). A storm that STORM never generates
       can't be reweighted into existence.
