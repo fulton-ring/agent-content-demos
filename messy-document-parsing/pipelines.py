@@ -1,0 +1,286 @@
+"""The four pipelines and the scoring that both notebooks share.
+
+A pipeline takes a Task (a PDF, the pages the answer is on, and what to read) and returns a Result. To add a fifth,
+such as Reducto Parse, write one more async function with the same signature and add it to PIPELINES.
+"""
+
+import asyncio
+import io
+import re
+import time
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
+from decimal import Decimal, InvalidOperation
+from pathlib import Path
+from typing import Any, Literal
+
+import jiwer
+import pypdfium2 as pdfium
+from docling.datamodel.base_models import InputFormat
+from docling.datamodel.pipeline_options import PdfPipelineOptions, TesseractCliOcrOptions
+from docling.document_converter import DocumentConverter, PdfFormatOption
+from docling_core.types.doc import DoclingDocument, TableItem
+from pydantic import BaseModel, Field
+from pydantic_ai import BinaryContent
+from rapidfuzz import fuzz
+
+import model_call
+
+# Gemini takes at most 20 MB of inline data in one request, and base64 adds a third, so a PDF over 15 MB can't be
+# sent whole. That's most long scanned reports.
+MAX_WHOLE_PDF_BYTES = 15_000_000
+
+
+@dataclass(frozen=True)
+class Task:
+    name: str
+    pdf: Path
+    kind: Literal["table", "fields", "text"]
+    ask: str
+    pages: tuple[int, ...]  # the PDF pages the answer is on, 1-based
+    where: str = ""  # a hint added to the prompt, such as "It is on PDF page 25."
+
+
+@dataclass
+class Result:
+    output: dict[str, Any] | None
+    usd: float = 0.0
+    seconds: float = 0.0
+    docling_seconds: float = 0.0
+    pages_read: int = 0
+    error: str = ""
+
+
+@dataclass
+class Runner:
+    """Where answers are saved, how many calls run at once, and which model reads."""
+
+    out: Path
+    model: str = model_call.FLASH
+    slots: asyncio.Semaphore = field(default_factory=lambda: asyncio.Semaphore(8))
+    docling_lock: asyncio.Lock = field(default_factory=asyncio.Lock)  # one Docling conversion at a time
+
+
+class Table(BaseModel):
+    """One table's data rows, joined across pages if it continues."""
+
+    rows: list[list[str]] = Field(description="Each data row as its cells, left to right, exactly as printed.")
+
+
+class Line(BaseModel):
+    line: str = Field(description="The form's line number, such as 5a or 17.")
+    amount: str = Field(description="The amount written on the line, or '' if none.")
+
+
+class Fields(BaseModel):
+    """Amounts on a form's numbered lines."""
+
+    lines: list[Line]
+
+
+class Transcript(BaseModel):
+    """The typed text of a page."""
+
+    text: str
+
+
+OUTPUT_TYPES: dict[str, type[BaseModel]] = {"table": Table, "fields": Fields, "text": Transcript}
+INSTRUCTIONS = (
+    "You read scanned and printed documents. Report only what is printed or written. Never infer, compute or fill in "
+    "a value."
+)
+
+
+def prompt(task: Task) -> str:
+    if task.kind != "table":
+        return f"{task.ask} {task.where}".strip()
+    return (
+        f"Read the table: {task.ask}. {task.where} If it continues on other pages, join its parts in order. Give its "
+        "data rows only, each as its cells from left to right in the column order given. Leave out header rows, rows "
+        "that only name a group, subtotal and total rows, carried-forward lines, and footnote markers. Join a cell's "
+        "wrapped lines with spaces. Copy numbers as printed. An empty cell is ''."
+    )
+
+
+def page_png(pdf: Path, page: int) -> BinaryContent:
+    image = pdfium.PdfDocument(pdf)[page - 1].render(scale=150 / 72).to_pil().convert("RGB")
+    out = io.BytesIO()
+    image.save(out, "PNG")
+    return BinaryContent(out.getvalue(), media_type="image/png")
+
+
+def docling(task: Task, out: Path) -> tuple[DoclingDocument, float]:
+    """Docling on the task's pages, as in #128: Tesseract OCR, table structure on. Saved, so it runs once."""
+    saved, timing = out / "docling" / f"{task.name}.json", out / "docling" / f"{task.name}.seconds"
+    if not saved.exists():
+        options = PdfPipelineOptions(
+            do_ocr=True, ocr_options=TesseractCliOcrOptions(lang=["eng"]), do_table_structure=True
+        )
+        converter = DocumentConverter(format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=options)})
+        t0 = time.time()
+        document = converter.convert(task.pdf, page_range=(min(task.pages), max(task.pages))).document
+        saved.parent.mkdir(parents=True, exist_ok=True)
+        document.save_as_json(saved)
+        timing.write_text(f"{time.time() - t0:.1f}")
+    return DoclingDocument.load_from_json(saved), float(timing.read_text())
+
+
+async def _ask(run: Runner, pipeline: str, task: Task, call: str, parts: list[Any]) -> Result:
+    saved = run.out / "answers" / run.model.split("/")[-1] / pipeline / f"{task.name}-{call}.json"
+    try:
+        answer = await model_call.ask(saved, OUTPUT_TYPES[task.kind], INSTRUCTIONS, parts, run.slots, run.model)
+    except Exception as e:  # the call failed every attempt; that's a result to report, not a crash
+        return Result(None, error=f"{type(e).__name__}: {e!s:.200}")
+    return Result(answer["output"], usd=answer["usd"], seconds=answer["seconds"])
+
+
+async def docling_alone(task: Task, run: Runner) -> Result:
+    """Every Docling table on the task's pages, joined with header rows kept; or its Markdown for a transcript."""
+    async with run.docling_lock:
+        document, seconds = await asyncio.to_thread(docling, task, run.out)
+    result = Result(None, docling_seconds=seconds, pages_read=len(task.pages))
+    if task.kind == "fields":
+        result.error = "Docling has no way to map handwriting to form lines without a model"
+        return result
+    if task.kind == "text":
+        result.output = {"text": document.export_to_markdown()}
+        return result
+    rows: list[list[str]] = []
+    for item, _level in document.iterate_items():
+        if isinstance(item, TableItem) and item.prov and item.prov[0].page_no in task.pages:
+            frame = item.export_to_dataframe(document)
+            rows += [[str(c) for c in frame.columns], *[[str(c) for c in r] for r in frame.values.tolist()]]
+    result.output = {"rows": rows}
+    return result
+
+
+async def vlm_whole_pdf(task: Task, run: Runner) -> Result:
+    data = task.pdf.read_bytes()
+    pages = len(pdfium.PdfDocument(task.pdf))
+    if len(data) > MAX_WHOLE_PDF_BYTES:
+        return Result(None, pages_read=pages, error=f"the PDF is {len(data) / 1e6:.0f} MB, too big to send in one call")
+    result = await _ask(
+        run, "vlm-whole-pdf", task, "all", [prompt(task), BinaryContent(data, media_type="application/pdf")]
+    )
+    result.pages_read = pages
+    return result
+
+
+async def vlm_page_by_page(task: Task, run: Runner) -> Result:
+    """Each page read on its own, then the answers stitched together in page order."""
+    note = "You are shown one page. Give only what is on this page; if none of it is, return nothing."
+    calls = [
+        _ask(run, "vlm-page-by-page", task, f"p{p}", [f"{prompt(task)} {note}", page_png(task.pdf, p)])
+        for p in task.pages
+    ]
+    parts = await asyncio.gather(*calls)
+    failed = [r.error for r in parts if r.error]
+    stitched: dict[str, Any] = {"rows": [], "lines": [], "text": ""}
+    for part in parts:
+        if part.output:
+            stitched["rows"] += part.output.get("rows", [])
+            stitched["lines"] += part.output.get("lines", [])
+            stitched["text"] += " " + part.output.get("text", "")
+    return Result(
+        stitched if not failed else None,
+        usd=sum(r.usd for r in parts),
+        seconds=sum(r.seconds for r in parts),
+        pages_read=len(task.pages),
+        error="; ".join(failed),
+    )
+
+
+async def docling_then_vlm(task: Task, run: Runner) -> Result:
+    """Docling's Markdown of each page next to the page image."""
+    async with run.docling_lock:
+        document, seconds = await asyncio.to_thread(docling, task, run.out)
+    parts: list[Any] = [prompt(task)]
+    for p in task.pages:
+        parts += [f"--- PDF page {p}, Docling's Markdown ---\n{document.export_to_markdown(page_no=p)}"]
+        parts += [page_png(task.pdf, p)]
+    result = await _ask(run, "docling-then-vlm", task, "all", parts)
+    result.docling_seconds, result.pages_read = seconds, len(task.pages)
+    return result
+
+
+PIPELINES: dict[str, Callable[[Task, Runner], Awaitable[Result]]] = {
+    "Docling alone": docling_alone,
+    "Gemini, whole PDF": vlm_whole_pdf,
+    "Gemini, page by page": vlm_page_by_page,
+    "Docling, then Gemini": docling_then_vlm,
+}
+
+
+def norm(value: Any) -> str:
+    """A cell in a form that compares fairly: numbers by value and sign, dashes and leaders as empty, text loosely."""
+    text = re.sub(r"\s+", "", str(value)).lower()
+    text = text.replace("−", "-").replace("–", "-").replace("—", "-")
+    if re.fullmatch(r"[-.…_]*", text):
+        return ""
+    number = re.fullmatch(r"([(<]?)(-?)\$?(\d[\d,]*\.?\d*|\.\d+)%?([)>]?)", text)
+    if number:
+        try:
+            amount = Decimal(number.group(3).replace(",", ""))
+        except InvalidOperation:
+            return text
+        negative = bool(number.group(2)) or (number.group(1) + number.group(4) in ("()", "<>"))
+        amount = -amount if negative and amount else amount
+        return "#" + format(amount.normalize(), "f")
+    return re.sub(r"[^a-z0-9.%?]+", "", text)
+
+
+def same(found: Any, key: str | list[str]) -> bool:
+    if isinstance(key, list):
+        return any(same(found, k) for k in key)
+    f, k = norm(found), norm(key)
+    if f.startswith("#") or k.startswith("#") or not f or not k:
+        return f == k
+    return fuzz.ratio(f, k) >= 85
+
+
+def score_table(found: list[list[str]], key: list[list[Any]]) -> dict[str, int]:
+    """Each key row against the unused found row that agrees with it most, cell by cell in column order.
+
+    A cell is right, wrong (a value is there but isn't the key's: the dangerous case, since it looks fine), or
+    missing (blank, or its row wasn't found). Extra rows are found rows that match no key row.
+    """
+    unused = list(range(len(found)))
+    counts = {"cells": 0, "right": 0, "wrong": 0, "missing": 0, "extra_rows": 0}
+    for k in key:
+        counts["cells"] += len(k)
+
+        def agree(i: int, k: list[Any] = k) -> int:
+            return sum(same(f, kc) for f, kc in zip(found[i], k, strict=False))
+
+        best = max(unused, key=agree, default=None)
+        if best is None or agree(best) == 0:
+            counts["missing"] += len(k)
+            continue
+        unused.remove(best)
+        row = found[best]
+        for j, kc in enumerate(k):
+            f = row[j] if j < len(row) else ""
+            outcome = "right" if same(f, kc) else "missing" if norm(f) == "" else "wrong"
+            counts[outcome] += 1
+    counts["extra_rows"] = len(unused)
+    return counts
+
+
+def score_fields(found: list[dict[str, str]], key: dict[str, str]) -> dict[str, int]:
+    def line_id(text: str) -> str:
+        return re.sub(r"[^0-9a-z]", "", text.lower().replace("line", ""))
+
+    by_line = {line_id(f["line"]): f["amount"] for f in found}
+    counts = {"cells": len(key), "right": 0, "wrong": 0, "missing": 0, "extra_rows": 0}
+    for line, amount in key.items():
+        f = by_line.get(line_id(line), "")
+        counts["right" if same(f, amount) else "missing" if norm(f) == "" else "wrong"] += 1
+    return counts
+
+
+def word_error_rate(found: str, key: str) -> float:
+    def words(text: str) -> str:
+        text = re.sub(r"-\s*", "", text.lower())
+        return " ".join(re.sub(r"[^a-z0-9%]+", " ", text).split())
+
+    return float(jiwer.wer(words(key), words(found) or "-"))
