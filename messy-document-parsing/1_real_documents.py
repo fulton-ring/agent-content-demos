@@ -134,7 +134,7 @@ def _():
 
     - **Docling alone**: its tables on the keyed pages, header rows kept, or its Markdown for the letter. It runs on
       the keyed pages only, since Docling on CPU takes about 7 seconds a page and the long reports have up to 492.
-    - **Gemini, whole PDF**: Gemini 3.8 Flash gets the whole file. A file over 15 MB can't be sent in one request.
+    - **Gemini, whole PDF**: Gemini 3.8 Flash gets the whole file, up to 492 pages and 26 MB in one request.
     - **Gemini, page by page**: each keyed page alone, and the answers stitched in page order.
     - **Docling, then Gemini**: Docling's Markdown of each keyed page next to the page image.
 
@@ -234,7 +234,7 @@ async def _(HEADER, TASKS, flash, row, run_all, score):
     def failed(task: Task, pipeline: str) -> bool:
         s = score(task, flash[(task.name, pipeline)])
         if "failed" in s:
-            return not s["failed"].startswith("the PDF is")
+            return True
         if "wer" in s:
             return s["wer"] > 0.05
         return s["right"] / s["cells"] < 0.95

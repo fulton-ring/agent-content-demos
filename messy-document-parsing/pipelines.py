@@ -26,10 +26,6 @@ from rapidfuzz import fuzz
 
 import model_call
 
-# Gemini takes at most 20 MB of inline data in one request, and base64 adds a third, so a PDF over 15 MB can't be
-# sent whole. That's most long scanned reports.
-MAX_WHOLE_PDF_BYTES = 15_000_000
-
 
 @dataclass(frozen=True)
 class Task:
@@ -157,8 +153,6 @@ async def docling_alone(task: Task, run: Runner) -> Result:
 async def vlm_whole_pdf(task: Task, run: Runner) -> Result:
     data = task.pdf.read_bytes()
     pages = len(pdfium.PdfDocument(task.pdf))
-    if len(data) > MAX_WHOLE_PDF_BYTES:
-        return Result(None, pages_read=pages, error=f"the PDF is {len(data) / 1e6:.0f} MB, too big to send in one call")
     result = await _ask(
         run, "vlm-whole-pdf", task, "all", [prompt(task), BinaryContent(data, media_type="application/pdf")]
     )

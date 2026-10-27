@@ -596,7 +596,7 @@ def _():
     Cells are scored as in notebook 1: **right**, **wrong** (a value that isn't the key's) or **missing**, and found
     rows that match no key row are **extra** (subtotals, the other year's table, header rows). For the handwritten
     corrections, each corrected cell is also sorted by which number a pipeline reported: the handwritten one, the
-    struck-through printed one, or something else.
+    struck-through printed one, both in one cell, or something else.
     """)
     return
 
@@ -608,20 +608,24 @@ def _(documents):
     def corrections(found: list[list[str]], name: str) -> dict[str, int]:
         _mode, rows, _key = KEYS[name]
         columns = next(c for _m, n, c, _r, _k in documents if n == name)
-        counts = {"handwritten": 0, "printed": 0, "other": 0}
+        counts = {"handwritten": 0, "printed": 0, "both": 0, "other": 0}
         for r in rows:
             for col, new in r.corrected.items():
                 match = next((f for f in found if f and same(f[0], r.cells["Project"])), [])
                 i = columns.index(col)
                 value = match[i] if i < len(match) else ""
-                counts["handwritten" if same(value, new) else "printed" if same(value, r.cells[col]) else "other"] += 1
+                has_new = any(same(t, new) for t in value.split())
+                has_old = any(same(t, r.cells[col]) for t in value.split())
+                counts[
+                    "both" if has_new and has_old else "handwritten" if has_new else "printed" if has_old else "other"
+                ] += 1
         return counts
 
     def score(name: str, result: Result) -> dict[str, int]:
         _mode, _rows, key = KEYS[name]
         if result.output is None:
             cells = sum(len(k) for k in key)
-            return {"cells": cells, "right": 0, "wrong": 0, "missing": cells, "extra_rows": 0}
+            return {"cells": cells, "right": 0, "wrong": 0, "missing": cells, "extra_rows": 0} | corrections([], name)
         return score_table(result.output["rows"], key) | corrections(result.output["rows"], name)
 
     return KEYS, score
@@ -630,9 +634,12 @@ def _(documents):
 @app.cell
 def _(KEYS, flash, score):
     def tally(results: dict[tuple[str, str], Result], names: list[str], pipeline: str) -> dict[str, float]:
-        total: dict[str, float] = {}
+        total: dict[str, float] = {"cells": 0, "failed": 0, "usd": 0, "seconds": 0, "pages": 0}
         for n in names:
             r = results[(n, pipeline)]
+            if r.output is None:  # the call failed every attempt; counted, not scored
+                total["failed"] += 1
+                continue
             for k, v in score(n, r).items():
                 total[k] = total.get(k, 0) + v
             for k, v in (("usd", r.usd), ("seconds", r.seconds + r.docling_seconds), ("pages", r.pages_read)):
@@ -640,8 +647,11 @@ def _(KEYS, flash, score):
         return total
 
     def cell_text(t: dict[str, float]) -> str:
+        failed = f", {t['failed']:.0f} documents failed" if t["failed"] else ""
+        if not t["cells"]:
+            return f"not run{failed}"
         share = t["right"] / t["cells"]
-        return f"{share:.0%} ({t['wrong']:.0f} wrong, {t['missing']:.0f} missing, {t['extra_rows']:.0f} extra)"
+        return f"{share:.0%} ({t['wrong']:.0f} wrong, {t['missing']:.0f} missing, {t['extra_rows']:.0f} extra{failed})"
 
     _modes = sorted({m for m, _r, _k in KEYS.values()}, key=lambda m: int(m.split(".")[0]))
     _lines = ["| Failure mode | " + " | ".join(PIPELINES) + " |", "|---" * (len(PIPELINES) + 1) + "|"]
@@ -663,17 +673,20 @@ def _(KEYS, flash, score):
         )
         _all = tally(flash, list(KEYS), _p)
         _lines.append(
-            f"| {_p} | {cell_text(_clean)} | {cell_text(_scanned)} | ${_all['usd'] / _all['pages']:.4f} "
-            f"| {_all['seconds'] / _all['pages']:.1f} |"
+            f"| {_p} | {cell_text(_clean)} | {cell_text(_scanned)} | ${_all['usd'] / max(_all['pages'], 1):.4f} "
+            f"| {_all['seconds'] / max(_all['pages'], 1):.1f} |"
         )
     _fix = [
         "",
-        "| Pipeline | Handwritten number reported | Struck-through number reported | Other or missing |",
-        "|---|---|---|---|",
+        "| Pipeline | Handwritten number only | Struck-through number only | Both in one cell | Other or missing |",
+        "|---|---|---|---|---|",
     ]
     for _p in PIPELINES:
         _t = tally(flash, [n for n, (m, _r, _k) in KEYS.items() if m.startswith(("12", "13"))], _p)
-        _fix.append(f"| {_p} | {_t['handwritten']:.0f} | {_t['printed']:.0f} | {_t['other']:.0f} |")
+        _fix.append(
+            f"| {_p} | {_t.get('handwritten', 0):.0f} | {_t.get('printed', 0):.0f} | {_t.get('both', 0):.0f} "
+            f"| {_t.get('other', 0):.0f} |"
+        )
     broken_table = "\n".join(_lines + _fix)
     (HERE / "results").mkdir(exist_ok=True)
     (HERE / "results" / "broken_tables.md").write_text(broken_table + "\n")
@@ -704,10 +717,9 @@ async def _(KEYS, TASKS, flash, run_all, score):
     _lines = ["| Document | Failure mode | Pipeline | Flash | Argon |", "|---|---|---|---|---|"]
     for _n, _p in failures:
         _f, _b = score(_n, flash[(_n, _p)]), score(_n, big[(_n, _p)])
-        _lines.append(
-            f"| {_n} | {KEYS[_n][0]} | {_p} | {_f['right']} of {_f['cells']} ({_f['wrong']} wrong) "
-            f"| {_b['right']} of {_b['cells']} ({_b['wrong']} wrong) |"
-        )
+        _flash = "failed" if flash[(_n, _p)].error else f"{_f['right']} of {_f['cells']} ({_f['wrong']} wrong)"
+        _argon = "failed" if big[(_n, _p)].error else f"{_b['right']} of {_b['cells']} ({_b['wrong']} wrong)"
+        _lines.append(f"| {_n} | {KEYS[_n][0]} | {_p} | {_flash} | {_argon} |")
     _usd = sum(r.usd for r in big.values())
     big_table = "\n".join(_lines) + f"\n\n{len(failures)} failure cases; Argon cost ${_usd:.2f} for them."
     (HERE / "results" / "broken_tables_bigger_model.md").write_text(big_table + "\n")
