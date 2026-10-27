@@ -1,3 +1,4 @@
+-- Licence: AGPL-3.0, as Underpass-API, whose view.sql this adapts.
 -- Replaces Underpass-API's src/postgres_osmosis/view.sql: the views the parser's SQL reads.
 -- Differences: jsonb tags, relation members in Overpass's JSON shape, relation geometry.
 CREATE OR REPLACE TEMP VIEW node_by_geom AS

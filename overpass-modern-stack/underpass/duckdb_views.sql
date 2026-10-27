@@ -1,3 +1,4 @@
+-- Licence: AGPL-3.0, as Underpass-API, whose view.sql this adapts.
 -- The views the parser's DuckDB SQL reads, over the Parquet tables from duckdb_build.sql.
 -- Placeholder: {out} (the directory holding the tables). Every view has the same columns,
 -- so recursion can UNION ALL them.

@@ -23,7 +23,7 @@ Overpass's 422 ms, and **Overpass Turbo works against it unchanged**.
 Needs Docker and [uv](https://docs.astral.sh/uv/); `ql_compiler.py` also uses Node
 and Playwright for the Overpass Turbo screenshot (it skips it without them). On a
 4-core, 16 GB machine, `ql_compiler.py` took about 20 minutes from a clean checkout; at its peak we estimate about
-11 GB of disk (4 GB of images, 5 GB of databases, 1.4 GB in `data/`).
+11 GB of disk (4 GB of images, 5 GB of databases, 1.4 GB in `data/`); leave 15 GB free, as the adapter step rewrites tables.
 
 ```sh
 ./run.sh                 # both notebooks, then the parser tests
@@ -115,9 +115,9 @@ table, and Underpass-API has a WASM build.
 
 **Licences.** Underpass-API is AGPL-3.0 (its `Cargo.toml` says MIT/Apache-2.0, but the
 `LICENSE` file is AGPL). The parser is MIT. `underpass/underpass_api.patch` and
-`underpass/postgres_views.sql` (adapted from its `view.sql`) are AGPL-3.0;
+`underpass/postgres_views.sql` and `duckdb_views.sql` (adapted from its `view.sql` files) are AGPL-3.0;
 `underpass/overpass_parser_rust.patch` is MIT. The notebook downloads both projects at
-pinned commits and applies the patches; no Underpass-API code is copied in. Serving a
+pinned commits and applies the patches; beyond those two adapted files, no Underpass-API code is copied in. Serving a
 modified Underpass-API publicly means publishing its source, as this repo does.
 
 ## #123: osm2pgsql → PostGIS against Overpass
