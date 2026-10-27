@@ -511,7 +511,7 @@ def _(BUILD, DATA, DB_URL, PARSER_SHIPPED, QUERIES, answers, compare, json, pl, 
     # Run one DuckDB query in a fresh process: argv = views SQL, query SQL; prints the JSON rows.
     _duck_child = (
         "import duckdb, json, sys\n"
-        "c = duckdb.connect(); c.execute(sys.argv[1])\n"
+        "c = duckdb.connect(); c.execute('SET enable_progress_bar = false'); c.execute(sys.argv[1])\n"
         "print(json.dumps([r[0] if isinstance(r[0], str) else json.dumps(r[0]) for r in c.execute(sys.argv[2]).fetchall()]))"
     )
 
