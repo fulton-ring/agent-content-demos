@@ -14,7 +14,7 @@ from pydantic_ai.models.openrouter import OpenRouterModelSettings
 MODEL = "openrouter:google/gemini-3.8-flash"
 ATTEMPTS = 4
 # The K-1 spike's settings: temperature 0, and low thinking, since reading a page doesn't need long reasoning.
-SETTINGS = OpenRouterModelSettings(temperature=0, max_tokens=8000, thinking="low", openrouter_usage={"include": True})
+SETTINGS = OpenRouterModelSettings(temperature=0, max_tokens=16000, thinking="low", openrouter_usage={"include": True})
 
 
 async def ask(saved: Path, output_type: Any, instructions: str, parts: list[Any], slots: asyncio.Semaphore) -> dict:

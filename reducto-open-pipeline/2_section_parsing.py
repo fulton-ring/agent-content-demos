@@ -51,23 +51,49 @@ def _():
     heading in the body (69 in all), its level and the PDF page it starts on, plus three tables from each
     report (587 cells). The key's tables cover what Reducto's docs single out: a table that continues on the
     next page, a table printed sideways, dense numbers under a two-level header, and a 60-word cell.
+
+    **Three reports without heading numbers** (issue #130), where a heading is known only by its type size,
+    capitals, centring or underline:
+
+    - **USGS SIR 2023-5014**, flood frequency in Hawaii: 78 pages, born digital, two columns, three heading levels,
+      and a table printed sideways over four pages.
+    - **USGS Circular 166** (1953), irrigation wells in Box Butte County, Nebraska: 46 pages, typewritten and scanned
+      with no text layer, two columns, with headings five levels deep shown by capitals, centring, underlining
+      and run-in headings ("Chadron formation.--The ...").
+    - **Lewis County, NY 2026 Adopted Budget**: 130 pages, a county budget book, born digital, whose contents page
+      is a page early for five departments.
+
+    Their keys give the contents' entries (141 headings) with the page each is printed on in the body, and one
+    table of three or more pages from each (1,861 cells).
     """)
     return
 
 
 @app.cell
 def _():
-    DOCS = {  # name: (FEMA Map Service Center product, sha256)
-        "fis-henrico-1980": ("510077V000", "f426f88411f8816d5f96b8edcf7444c85b09f9074fb0b804c8909ef407dfaf1f"),
-        "fis-henrico-2024": ("51087CV001B", "bbca76cb3f306b26c6b53c53e9748b63d6f45599394d6367fdfc22493a7a6c4b"),
+    _fema = "https://msc.fema.gov/portal/downloadProduct?productID="
+    DOCS = {  # name: (URL, sha256)
+        "fis-henrico-1980": (_fema + "510077V000", "f426f88411f8816d5f96b8edcf7444c85b09f9074fb0b804c8909ef407dfaf1f"),
+        "fis-henrico-2024": (_fema + "51087CV001B", "bbca76cb3f306b26c6b53c53e9748b63d6f45599394d6367fdfc22493a7a6c4b"),
+        "usgs-sir-2023-5014": (
+            "https://pubs.usgs.gov/sir/2023/5014/sir20235014.pdf",
+            "108ae4adb572dcf6b054eafc9c1d4461482bb592996fd6cd07e005e40cc7b2e6",
+        ),
+        "usgs-circ-166-1953": (
+            "https://pubs.usgs.gov/circ/1953/0166/report.pdf",
+            "d0cf441da37e011da89be5755bc4ed3ca8d9c392f37d692bf7f8e8d7ecabe03f",
+        ),
+        "lewis-county-budget-2026": (
+            "https://lewiscountyny.gov/wp-content/uploads/2025/12/2026-Adopted-Budget.pdf",
+            "773f8fdc308c8bd5c9a8ff4337cb49818ba94daa3a989f52cb964f0a25489f55",
+        ),
     }
     KEY = {k: v for k, v in json.loads((HERE / "section_key.json").read_text()).items() if k[0] != "_"}
     OUT.mkdir(parents=True, exist_ok=True)
-    for _name, (_product, _sha) in DOCS.items():
+    for _name, (_url, _sha) in DOCS.items():
         _path = OUT / f"{_name}.pdf"
         if _path.exists() and hashlib.sha256(_path.read_bytes()).hexdigest() == _sha:
             continue
-        _url = f"https://msc.fema.gov/portal/downloadProduct?productID={_product}"
         with urllib.request.urlopen(
             urllib.request.Request(_url, headers={"User-Agent": "Mozilla/5.0"}), timeout=300
         ) as r:
@@ -206,7 +232,7 @@ def _():
     ## The VLM alone, and Docling then the VLM
 
     For tables, the hybrid pipeline needs Docling to find the pages: every page whose Markdown names the table
-    (fuzzy match on its title), at most the first three. That's how a pipeline without the answer key would find
+    (fuzzy match on its title), at most the first five. That's how a pipeline without the answer key would find
     them. Answers are saved in `output/answers/`.
     """)
     return
@@ -247,7 +273,7 @@ async def _(DOCS, INSTRUCTIONS, KEY, OUTLINE_PROMPT, Outline, Table, docling_doc
         calls = [answer("docling-vlm", name, "outline", Outline, [OUTLINE_PROMPT, "Docling's Markdown:\n\n" + marked])]
         for i, t in enumerate(KEY[name]["tables"]):
             found = [n + 1 for n, md in enumerate(pages) if fuzz.partial_ratio(t["find"].lower(), md.lower()) >= 90]
-            found = found[:3] or [1]
+            found = found[:5] or [1]
             parts = [table_prompt(t["ask"])]
             for p in found:
                 parts += [f"--- PDF page {p}, Docling's Markdown ---\n{pages[p - 1]}", png(name, p)]
@@ -271,9 +297,10 @@ def _():
     - **Level right**: of the headings found, the share at the key's outline level.
     - **Extra headings**: found headings that match none of the key's. Some are real headings the key leaves out
       (an unnumbered sub-heading such as "James River"), so this is not precision.
-    - **Table cell accuracy**: for each key row, the found row that agrees with it on the most cells, compared
-      position by position (the row label fuzzily, values exactly after dropping spaces); the share of the key's
-      cells that agree.
+    - **Table cell accuracy**: for each key row, the found row that agrees with it on the most cells; the share of
+      the key's cells that agree. The row label is compared fuzzily, and each later key cell must equal (after
+      dropping spaces) a cell to the right of the last one matched, so a found row with an extra column, such as
+      Docling keeping a column the key leaves out, isn't scored as all wrong.
     """)
     return
 
@@ -304,12 +331,17 @@ def _():
         }
 
     def cell(text: str) -> str:
-        return re.sub(r"\s+", "", str(text)).replace("–", "-").replace("—", "-").lower()
+        return re.sub(r"\s+", "", str(text)).replace("–", "-").replace("—", "-").replace("−", "-").lower()
 
     def score_table(found: list[list[str]], key: list[list[str]]) -> dict[str, int]:
         def agree(row: list[str], k: list[str]) -> int:
             label = fuzz.ratio(clean(row[0]) if row else "", clean(k[0])) >= 85
-            return int(label) + sum(cell(a) == cell(b) for a, b in zip(row[1:], k[1:], strict=False))
+            found, at, right = [cell(c) for c in row[1:]], 0, int(label)
+            for want in (cell(c) for c in k[1:]):
+                if want in found[at:]:
+                    at = found.index(want, at) + 1
+                    right += 1
+            return right
 
         right = sum(max((agree(r, k) for r in found), default=0) for k in key)
         return {"cells": sum(len(k) for k in key), "right": right}
