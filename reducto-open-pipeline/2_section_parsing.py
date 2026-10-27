@@ -465,8 +465,9 @@ def _():
 
     - **Routing on Docling's text loses whole pages of a table, silently.** In the budget book, Docling splits
       "Department of Social Services" across two header cells, so the page finder matched no page and the model
-      returned no rows (see `screenshots/`). On the 1953 scan, Docling's OCR never found the title on the table's second page, so that
-      page was never sent and its rows are missing. Gemini given the whole PDF got every cell of both.
+      returned no rows (see `screenshots/`). On the 1953 scan, Docling's OCR never found the title on the table's
+      second page, so that page was never sent and its rows are missing. Gemini given the whole PDF got every cell
+      of both.
     - **The model nests headings by meaning, not by type.** In the two-column USGS report, "Rainfall" and
       "El Niño ..." are set in the same type as "Climate", but Gemini put them under it. Docling's Markdown, which
       flattens the type, made it worse.
