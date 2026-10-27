@@ -37,7 +37,7 @@ with [NYC Planning Labs GeoSearch](https://geosearch.planninglabs.nyc/docs/) and
 [PLUTO on NYC Open Data](https://data.cityofnewyork.us/resource/64uk-42ks.json). Both are free and need no key. The
 basemap is [OpenFreeMap](https://openfreemap.org/).
 
-## Results (clean-checkout run of 2026-10-21)
+## Results (clean-checkout run of 2026-10-27)
 
 The graph is 34 nodes and 32 links. The 275,864 lots that have a first node each hang off it by one link. Each store
 is loaded from the same three flat tables and answers three things. **load** builds the store. **one parcel** takes
@@ -46,13 +46,13 @@ behind every facility (#62's concentration table, FEMA Phase 2). Each answer is 
 
 | Store | Load (s) | One parcel (ms) | Whole borough (s) | Same lists as #62 | Same concentration | Query lines | On disk (MB) |
 |---|---:|---:|---:|:-:|:-:|---:|---:|
-| pandas + NetworkX (#62) | 0.00 | 0.4 | 0.006 | yes | yes | 3 | – |
-| DuckDB, recursive SQL | 0.21 | 12.9 | 0.014 | yes | yes | 10 | 1.6 |
-| DuckDB + DuckPGQ | 0.11 | 34.7 | 0.054 | yes | yes | 12 | – |
-| LadybugDB (Kùzu fork) | 0.80 | 16.3 | 0.026 | yes | yes | 4 | 24.5 |
-| Neo4j Community | 30.44 | 10.4 | 0.328 | yes | yes | 4 | – |
+| pandas + NetworkX (#62) | 0.00 | 0.3 | 0.005 | yes | yes | 3 | – |
+| DuckDB, recursive SQL | 0.19 | 7.8 | 0.011 | yes | yes | 10 | 1.6 |
+| DuckDB + DuckPGQ | 0.07 | 24.0 | 0.035 | yes | yes | 12 | – |
+| LadybugDB (Kùzu fork) | 1.51 | 12.4 | 0.056 | yes | yes | 4 | 24.4 |
+| Neo4j Community | 17.51 | 7.3 | 0.441 | yes | yes | 4 | – |
 
-#62's notebook took 147 s inside this run, and `./run.sh check` took 234 s in all, from a clean checkout
+#62's notebook took 82 s inside this run, and `./run.sh check` took 222 s in all, from a clean checkout
 including downloads, the app build and the browser check. On disk: DuckDB is a database file, LadybugDB its
 database folder; DuckPGQ ran in memory (see below) and Neo4j's store is on the server.
 
@@ -79,8 +79,8 @@ a 73 kB graph file and a 5.4 MB lot table, and the page looks a lot up in the br
   node. The app is a static page that looks them up, with no database.
 - **The graph stores cost more to run and to trust.** Kùzu, the obvious embedded choice, was
   [archived in October 2025](https://github.com/kuzudb/kuzu), and its fork LadybugDB is young. DuckPGQ has no build
-  for DuckDB 1.5, so this spike pins DuckDB 1.4.4. Its queries hit two bugs, and on a database file it failed in 1 of
-  10 runs (below). Neo4j needs a Java server and took the longest to load. Its free cloud tier,
+  for DuckDB 1.5, so this spike pins DuckDB 1.4.4. Its queries hit two bugs, and it failed in 1 of 10 runs on a database
+  file and 1 of 6 in memory (below). Neo4j needs a Java server and took the longest to load. Its free cloud tier,
   [AuraDB Free](https://neo4j.com/docs/aura/quotas-and-limits/), allows 200,000 nodes, fewer than Brooklyn's lots.
 - **Cypher reads best.** "Everything that feeds f" is 4 lines in LadybugDB or Neo4j, 10 in recursive SQL and 12 in
   DuckPGQ. That is the graph stores' real advantage, and it grows with the questions.
@@ -99,6 +99,9 @@ without copying it, and keeps it current. Its data isn't public, so it can't bac
   broke binding. On a database file, a loop of 600 graph queries hit a fatal internal error in 1 of 10 runs, after
   which DuckDB refuses the database. In memory, 10 of 10 runs passed. Those counts come from a test script run while
   building, not from `run.sh`. The notebook uses an in-memory database and records an error row if DuckPGQ fails.
+  Even in memory it fails sometimes: on 2026-10-27, 1 of 6 `run.sh` runs on one machine, and 1 of 1 in an earlier
+  check that day, ended DuckPGQ with `INTERNAL Error: Attempted to dereference unique_ptr that is NULL!`. The other
+  stores ran normally in those runs. The table above is from a run where it passed.
 - **A plausible Cypher query was wrong.** In LadybugDB, testing the radial and documented filters with `OPTIONAL
   MATCH` and `count()` gave wrong flags without any error. `EXISTS { }` subqueries give the right answer.
 - **The timings are one run on one machine**, with tiny data. They show the order of magnitude, not a benchmark.
