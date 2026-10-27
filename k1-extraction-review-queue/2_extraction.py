@@ -346,9 +346,9 @@ def _():
     class Runner:
         """One model: asks it for typed answers, counts the cost of every attempt, and saves each answer."""
 
-        def __init__(self, model_name: str, answers: Path) -> None:
+        def __init__(self, model_name: str, answers: Path, overrides: dict[str, Any] | None = None) -> None:
             self.model = infer_model(model_name)
-            settings = {"temperature": 0, "max_tokens": 8000, "thinking": "low"}
+            settings = {"temperature": 0, "max_tokens": 8000, "thinking": "low", **(overrides or {})}
             self.settings: ModelSettings = (
                 OpenRouterModelSettings(**settings, openrouter_usage={"include": True})  # OpenRouter reports cost
                 if model_name.startswith("openrouter:")
@@ -358,6 +358,7 @@ def _():
             answers.mkdir(parents=True, exist_ok=True)
             self.slots = asyncio.Semaphore(6)
             self.cost: dict[str, dict[str, float]] = {}
+            self.served_by: set[str] = set()  # the hosts OpenRouter sent the calls to
 
         def spent(self, doc: str) -> dict[str, float]:
             return self.cost.setdefault(doc, {"usd": 0.0, "cost_missing": 0, "failed_attempts": 0, "seconds": 0.0})
@@ -367,19 +368,23 @@ def _():
             saved = json.loads(saved_path.read_text()) if saved_path.exists() else {}
             adapter = TypeAdapter(output_type)
             if call not in saved:
-                output, cost = await self.call(output_type, prompt, images)
-                saved[call] = {"output": adapter.dump_python(output, mode="json"), "cost": cost}
+                output, cost, hosts = await self.call(output_type, prompt, images)
+                saved[call] = {"output": adapter.dump_python(output, mode="json"), "cost": cost, "served_by": hosts}
                 saved_path.write_text(json.dumps(saved, indent=1))
             for k, v in saved[call]["cost"].items():
                 self.spent(doc)[k] += v
+            self.served_by.update(saved[call].get("served_by", []))
             return adapter.validate_python(saved[call]["output"])
 
-        async def call(self, output_type: Any, prompt: str, images: list[bytes]) -> tuple[Any, dict[str, float]]:
+        async def call(
+            self, output_type: Any, prompt: str, images: list[bytes]
+        ) -> tuple[Any, dict[str, float], list[str]]:
             agent = Agent(
                 self.model, output_type=output_type, instructions=INSTRUCTIONS, retries=2, model_settings=self.settings
             )
             parts = [prompt] + [BinaryContent(png, media_type="image/png") for png in images]
             cost = {"usd": 0.0, "cost_missing": 0, "failed_attempts": 0, "seconds": 0.0}
+            hosts: set[str] = set()
             async with self.slots:
                 for attempt in range(ATTEMPTS):
                     t0, error = time.time(), None
@@ -392,9 +397,10 @@ def _():
                         usd = response_cost(m)
                         cost["usd"] += usd or 0.0
                         cost["cost_missing"] += usd is None
+                        hosts.add((m.provider_details or {}).get("downstream_provider") or "unknown")
                     cost["seconds"] += time.time() - t0
                     if error is None:
-                        return output, cost
+                        return output, cost, sorted(hosts)
                     cost["failed_attempts"] += 1
                     if attempt == ATTEMPTS - 1:
                         raise error
@@ -808,12 +814,75 @@ async def _(FILES, Runner, read_document):
             f"{name}-alone", model_name, lambda p: read_document(runner, p), f"{name}, alone", description
         )
 
-    model_runs = dict(zip(MODELS, await asyncio.gather(*(read_with(n, m) for n, m in MODELS.items())), strict=True))
-    for _name in PAIR:
+    # ./run.sh --gemma-google sets K1_GEMMA_ONLY and runs only section 5b below.
+    _chosen = {} if os.environ.get("K1_GEMMA_ONLY") else MODELS
+    model_runs = dict(zip(_chosen, await asyncio.gather(*(read_with(n, m) for n, m in _chosen.items())), strict=True))
+    for _name in PAIR if _chosen else ():
         if not model_runs[_name]["documents"]:
             raise RuntimeError(f"{_name} produced no results, and the pair needs it")
     model_runs = {k: r for k, r in model_runs.items() if r["documents"]}
     return MODELS, PAIR, model_runs, read_all, save_run
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ## 5b. Gemma 4 31B again, with Google's recommended settings
+
+    Gemma 4 31B came last above. We called it at temperature 0, at the image size the host picked, on whichever host
+    OpenRouter chose. [Google's model card](https://ai.google.dev/gemma/docs/core/model_card_4) recommends temperature
+    1.0, top_p 0.95 and top_k 64, and a higher visual token budget for reading small text. So Gemma runs three more
+    times here with those sampling settings, on one pinned host at full precision: Crusoe, which serves the bf16
+    weights. Most of OpenRouter's hosts for Gemma 4 31B serve it at fp4 or fp8. The prompt, schema, review rules and
+    scoring are the same as above.
+
+    **The image budget couldn't be raised.** Gemma 4 turns an image into 70, 140, 280, 560 or 1120 tokens, and 280
+    is the default. vLLM takes the budget as `mm_processor_kwargs.max_soft_tokens`. We sent a 1700 × 2200 page with
+    budgets 70 and 1120 to Crusoe, Novita, Parasail, DeepInfra, CoreWeave, SiliconFlow and Chutes through OpenRouter.
+    Every host reported the same prompt size either way: about 290 tokens, the default 280 plus the question. OpenRouter
+    has no image-budget parameter of its own. So every run here, like every run above, sees each page at 280 tokens,
+    about 700 × 900 pixels for a K-1 page.
+
+    `require_parameters` makes OpenRouter refuse a host that would drop top_k. Crusoe is often rate-limited
+    upstream, so its runs take longer and count more failed attempts; a refused call isn't charged.
+    """)
+    return
+
+
+@app.cell
+async def _(Runner, read_all, read_document):
+    GEMMA_GOOGLE_SETTINGS = {
+        "temperature": 1.0,
+        "top_p": 0.95,
+        "extra_body": {"top_k": 64},  # OpenAI-style APIs have no top_k field; OpenRouter passes it on
+        "openrouter_provider": {
+            "order": ["crusoe"],
+            "quantizations": ["bf16"],
+            "allow_fallbacks": False,
+            "require_parameters": True,
+        },
+    }
+
+    async def read_gemma_google(n: int) -> dict[str, Any]:
+        model_name, name = "openrouter:google/gemma-4-31b-it", f"gemma-4-31b-it-google-{n}"
+        runner = Runner(model_name, OUT / "answers" / name, GEMMA_GOOGLE_SETTINGS)
+        description = f"Read by {model_name} on Crusoe (bf16) at temperature 1.0, top_p 0.95, top_k 64."
+        run = await read_all(
+            name,
+            model_name,
+            lambda p: read_document(runner, p),
+            f"Gemma 4 31B, Google's settings, run {n}",
+            description,
+        )
+        run["served_by"] = sorted(runner.served_by)
+        print(f"{name}: served by {', '.join(run['served_by']) or 'nothing'}")
+        if set(run["served_by"]) - {"Crusoe"}:
+            raise RuntimeError(f"{name} was served by {run['served_by']}, not only by the pinned host")
+        return run
+
+    # One run after another, so the three don't compete for Crusoe's rate limit.
+    gemma_google_runs = [await read_gemma_google(_n) for _n in (1, 2, 3)]
+    return (gemma_google_runs,)
 
 
 @app.cell(hide_code=True)
@@ -860,22 +929,26 @@ def _(PAIR, agrees, model_runs, same_text, save_run):
             "seconds": round(da["docling_seconds"] + slower, 1),
         }
 
-    _a, _b = (model_runs[n] for n in PAIR)
-    _docs_b = {d["file"]: d for d in _b["documents"]}
-    _pair_docs = [combine(d, _docs_b[d["file"]], *PAIR) for d in _a["documents"] if d["file"] in _docs_b]
-    _done = {d["file"] for d in _pair_docs}
-    _failed = {f["file"]: f["error"] for r in (_a, _b) for f in r["failed_documents"]}
-    _failed |= {d["file"]: "only one model read it" for r in (_a, _b) for d in r["documents"] if d["file"] not in _done}
-    pair_run = {
-        "name": f"pair-{PAIR[0]}+{PAIR[1]}",
-        "label": f"{PAIR[0]} + {PAIR[1]}, must agree",
-        "model": f"{_a['model']} checked by {_b['model']}",
-        "documents": _pair_docs,
-        "description": f"Read by {_a['model']} and {_b['model']} through OpenRouter. "
-        "A value is accepted only when both models read the same thing.",
-        "failed_documents": [{"file": f, "error": e} for f, e in sorted(_failed.items())],
-    }
-    save_run(pair_run)
+    pair_run = None
+    if all(n in model_runs for n in PAIR):  # not when K1_GEMMA_ONLY skipped the models
+        _a, _b = (model_runs[n] for n in PAIR)
+        _docs_b = {d["file"]: d for d in _b["documents"]}
+        _pair_docs = [combine(d, _docs_b[d["file"]], *PAIR) for d in _a["documents"] if d["file"] in _docs_b]
+        _done = {d["file"] for d in _pair_docs}
+        _failed = {f["file"]: f["error"] for r in (_a, _b) for f in r["failed_documents"]}
+        _failed |= {
+            d["file"]: "only one model read it" for r in (_a, _b) for d in r["documents"] if d["file"] not in _done
+        }
+        pair_run = {
+            "name": f"pair-{PAIR[0]}+{PAIR[1]}",
+            "label": f"{PAIR[0]} + {PAIR[1]}, must agree",
+            "model": f"{_a['model']} checked by {_b['model']}",
+            "documents": _pair_docs,
+            "description": f"Read by {_a['model']} and {_b['model']} through OpenRouter. "
+            "A value is accepted only when both models read the same thing.",
+            "failed_documents": [{"file": f, "error": e} for f, e in sorted(_failed.items())],
+        }
+        save_run(pair_run)
     return (pair_run,)
 
 
@@ -1039,7 +1112,9 @@ async def _(
         )
 
     ocr_runs: dict[str, dict[str, Any]] = {}
-    if os.environ.get("MODAL_TOKEN_ID"):
+    if os.environ.get("K1_GEMMA_ONLY"):
+        print("K1_GEMMA_ONLY is set, so the OCR models didn't run.")
+    elif os.environ.get("MODAL_TOKEN_ID"):
         for _engine in ENGINES:  # one after the other: ephemeral runs of the Modal app share the server's URL
             if (_run := await read_with_ocr(_engine))["documents"]:
                 ocr_runs[_engine] = _run
@@ -1049,9 +1124,10 @@ async def _(
 
 
 @app.cell
-def _(model_runs, ocr_runs, pair_run):
+def _(gemma_google_runs, model_runs, ocr_runs, pair_run):
     # The runs for 3_results.py to score, in the order its tables show them.
-    _order = [r["name"] for r in [*model_runs.values(), *ocr_runs.values(), pair_run]]
+    _runs = [*model_runs.values(), *ocr_runs.values(), *([pair_run] if pair_run else []), *gemma_google_runs]
+    _order = [r["name"] for r in _runs]
     (OUT / "runs.json").write_text(json.dumps(_order))
     print("Runs for 3_results.py:", ", ".join(_order))
     return
