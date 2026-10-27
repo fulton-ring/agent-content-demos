@@ -741,5 +741,23 @@ def _(big, flash, score):
     return
 
 
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ## What didn't work
+
+    - **Docling alone** on every mode, and worst on scans.
+    - **A page turned 90 degrees**, given the whole PDF. The values come back wrong, not blank. Page images fix it.
+    - **A column dropped on page 2.** Depending on the pipeline and the run, page 2's rows are dropped, or slid one
+      column left so the values look right but aren't.
+    - **Page by page, on a table cut down the middle.** The halves can't be joined without seeing both pages.
+    - **Handwritten corrections.** The model often reports both numbers, or the printed one. It needs telling which
+      number counts.
+    - **Merged cells.** A value printed once for a run of rows isn't filled in, because the prompt says never to
+      infer. Whether it should be filled is a prompting decision.
+    """)
+    return
+
+
 if __name__ == "__main__":
     app.run()

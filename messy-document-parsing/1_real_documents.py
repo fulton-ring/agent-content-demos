@@ -268,5 +268,23 @@ def _(TASKS, big, flash):
     return
 
 
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ## What didn't work
+
+    - **Docling alone**, on every document. It reads sideways tables as fragments, drops clipped numbers, splits
+      the NACA page's ten tables into scraps, and its OCR of the 1958 letter is almost all wrong.
+    - **Errors that look right.** Gemini's mistakes were believable values, not garbage. Read without its header
+      page, the second page of the WSP 1050 table can come back with the bicarbonate and sulfate columns swapped.
+      Given the whole 492-page PDF, Flash misread small print. On microfilm it gave one well the next well's values.
+    - **The same input doesn't always give the same answer.** At temperature 0, runs of this notebook differed on
+      WSP 1050. A second read, or a check such as an ion balance or column sums, is what catches it.
+    - **Handwriting needs the bigger model.** Flash read the 990-EZ's handwritten zeros as blank; Argon read every
+      line.
+    """)
+    return
+
+
 if __name__ == "__main__":
     app.run()
