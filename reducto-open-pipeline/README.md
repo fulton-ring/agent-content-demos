@@ -67,10 +67,12 @@ Run 1 gave the same picture: A 668 of 676 right with 8 wrong but accepted, B 380
 
 Run 1 gave the same numbers, cell for cell. A review run on 2026-10-27 differed by one cell: Gemini alone read Deep Run's 0.060 in the scanned Manning's table as -0.060 (331 of 332), and Docling then the VLM read it right (236 of 332). Run 3 repeated the review run (331 and 236 of 332), with 5 extra headings from Gemini alone on the 1980 scan. The speck fools Gemini with or without Docling's text. Docling took 7.0 to 7.6 seconds a page on CPU, with Tesseract on the scan.
 
-- **Every pipeline found every numbered heading on the right page**, on both the scan and the born-digital report. The headings carry their numbers, so this was the easy part (see What it doesn't show).
+- **Every pipeline found every numbered heading on the right page**, on both the scan and the born-digital report. The headings carry their numbers, so this was the easy part; the next section tests reports without them.
 - **Docling's outline is flat**: every heading at level 1, plus the cover and contents lines as headings (13 and 36 extras). Giving its Markdown to Gemini fixed every level and most extras, for $0.0005 to $0.0009 a page.
-- **Tables are where Docling alone fails.** It merged the 2024 floodway table's 14 rows into one row of whole columns (0 of 126 cells), read the sideways 1980 table as fragments (12 of 96), and glued a footnote marker onto a number (`15,0002` for 15,000 with note 1). Gemini read all 587 cells right from the PDF alone in runs 1 and 2 (586 in the review run).
-- **Docling then the VLM inherits Docling's misses.** Docling's text never names the sideways table, so the pipeline never found its page (0 of 96). On the scanned Manning's table it took Docling's `-0.060` (a speck read as a minus sign) over the page image's 0.060 in runs 1 and 2, though Gemini alone made the same misread in the review run.
+- **Tables are where Docling alone fails.** It merged the 2024 floodway table's 14 rows into one row of whole columns (0 of 126 cells), read the sideways 1980 table as fragments (12 of 96), and glued a footnote marker onto a number (`15,0002` for 15,000 with note 1). Gemini read all 587 cells right from the PDF alone in runs 1 and 2 (586 in the review run and run 3).
+- **Docling then the VLM inherits Docling's misses.** Docling's text never names the sideways table, so the pipeline never found its page (0 of 96). On the scanned Manning's table it took Docling's `-0.060` (a speck read as a minus sign) over the page image's 0.060 in runs 1 and 2, though Gemini alone made the same misread in the review run and run 3.
+
+![Docling merges the rows of the 2024 Floodway Data table](screenshots/2024-p55-docling-merges-rows.png)
 
 ### Section parsing, three reports without heading numbers
 
@@ -96,10 +98,8 @@ The key's headings are each contents entry, at the level its indentation gives, 
 
 - **Gemini alone found every heading on the right page** in all three, including the 1953 scan's run-in headings ("Chadron formation.--The ...") and the five budget departments the contents puts a page early. It read all 1,861 keyed cells, including a four-page table printed sideways.
 - **Levels are where it slipped, on the two-column report.** It put 6 of 48 headings one level off (5 in a first run), nesting "Rainfall" under "Climate" by meaning although the report sets them in the same type. Docling then the VLM got 8 wrong (11 in the first run). On the scan's five levels shown only by capitals, centring and underlines, both got all 36 right.
-- **Docling alone missed the scan's run-in headings** (9 of 36) and still put almost every heading at level 1. It read the budget table perfectly from the text layer, but only 131 of 880 cells of the sideways table.
+- **Docling alone missed 9 of the scan's 36 headings**, mostly run-in ones, and still put almost every heading at level 1. It read the budget table perfectly from the text layer, but only 131 of 880 cells of the sideways table.
 - **Routing on Docling's text missed whole pages of tables.** The budget table's title is split across two of Docling's header cells, so the page finder found no page and the model returned nothing (0 of 759). On the scan, Docling's OCR never found the title on the table's second page, so that page's 37 rows were lost (146 of 222, since best-row matching still credits some of their cells to look-alike rows). Neither failure shows up as an error.
-
-![Docling merges the rows of the 2024 Floodway Data table](screenshots/2024-p55-docling-merges-rows.png)
 
 ## Failure types, and what would fix each
 
