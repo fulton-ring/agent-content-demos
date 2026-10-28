@@ -185,8 +185,8 @@ def _():
 
     HIFLD Next's hospital layer carries each hospital's trauma designation as free text in `TRAUMA`, compiled from
     state and federal sources (its `SOURCEDATE` runs to 2024). We keep open hospitals, drop psychiatric,
-    rehabilitation, long-term-care and critical-access records (several copy the level of the general hospital they
-    sit beside, and a few are plainly wrong, such as a critical-access hospital marked Level I), and read each
+    rehabilitation and critical-access records (several copy the level of the general hospital they sit beside, and
+    a few are plainly wrong, such as a critical-access hospital marked Level I), and read each
     comma- or slash-separated part of `TRAUMA`:
 
     - `LEVEL I` or `LEVEL II` is an adult level, unless the part says `PEDIATRIC` or the hospital is a children's
@@ -221,8 +221,7 @@ def _(files):
 
     _raw = gpd.read_parquet(files["hospitals"])
     hospitals = _raw[
-        (_raw["STATUS"] == "OPEN")
-        & ~_raw["TYPE"].isin(["PSYCHIATRIC", "REHABILITATION", "LONG TERM CARE", "CRITICAL ACCESS"])
+        (_raw["STATUS"] == "OPEN") & ~_raw["TYPE"].isin(["PSYCHIATRIC", "REHABILITATION", "CRITICAL ACCESS"])
     ].copy()
     _levels = [trauma_levels(t or "", ty) for t, ty in zip(hospitals["TRAUMA"], hospitals["TYPE"], strict=True)]
     hospitals["adult"] = [a for a, _ in _levels]
@@ -231,7 +230,7 @@ def _(files):
     _dropped_levels = [trauma_levels(t or "", ty) for t, ty in zip(_dropped["TRAUMA"], _dropped["TYPE"], strict=True)]
     trauma_counts = {
         "open hospitals": int((_raw["STATUS"] == "OPEN").sum()),
-        "kept after dropping psychiatric, rehab, long-term and critical-access": len(hospitals),
+        "kept after dropping psychiatric, rehab and critical-access": len(hospitals),
         "Level I/II adult": int(hospitals["adult"].sum()),
         "Level I/II pediatric": int(hospitals["peds"].sum()),
         "dropped records that claimed Level I/II": sum(a or p for a, p in _dropped_levels),
@@ -256,7 +255,8 @@ def _():
     Wikipedia names burn units, not hospitals, so a fuzzy match to HIFLD's hospital names went wrong too often (it
     sent UF Health Shands in Gainesville to a hospital in Tamarac, 400 km away). `burn_crosswalk.csv` is a hand
     match of each Wikipedia entry to a HIFLD hospital `source_ID`, with a reason for each entry left out (closed,
-    outpatient or rehabilitation only, or not a hospital). Any entry the crosswalk doesn't cover stops the run.
+    outpatient or rehabilitation only, not a hospital, or not found). Any entry the crosswalk doesn't cover stops
+    the run.
     """)
     return
 
@@ -331,10 +331,10 @@ def _():
 
 @app.cell
 def _(facilities):
-    hand_sample = pd.concat(
-        [facilities[facilities["kind"] == _kind].sample(n=_n, random_state=SEED) for _kind, _n in HAND_SAMPLE.items()],
-        ignore_index=True,
-    )
+    # Rank by a seeded hash of the ID, so adding or dropping one facility doesn't reshuffle the whole sample.
+    _rank = facilities["source_ID"].map(lambda i: hashlib.sha256(f"{SEED}-{i}".encode()).hexdigest())
+    _ranked = facilities.loc[_rank.sort_values().index]
+    hand_sample = pd.concat([_ranked[_ranked["kind"] == k].head(n) for k, n in HAND_SAMPLE.items()], ignore_index=True)
     hand_sample[["kind", "source_ID", "NAME", "CITY", "STATE", "TRAUMA"]].to_csv(
         OUT / "hand_check_sample.csv", index=False
     )
@@ -471,10 +471,12 @@ def _():
     Driving the whole country is too heavy for one run, so we route two contrasting states. The run downloads
     OpenStreetMap's US Northeast extract (about 2 GB), cuts a box around each state with
     [osmium](https://osmcode.org/osmium-tool/), wide enough to take in hospitals across the border (Boston for
-    Maine, New York City and Philadelphia for New Jersey), and builds Valhalla routing tiles. Valhalla's
-    many-to-many matrix then gives the car drive time from each block group's centre to the five nearest facilities
-    of each kind by straight line, and we keep the shortest. Valhalla uses its default speeds by road class and posted
-    limits, with no traffic.
+    Maine, New York City and Philadelphia for New Jersey), and builds Valhalla routing tiles. Valhalla's matrix then
+    gives the car drive time from each block group's centre to every facility of that kind that is among the five
+    nearest by straight line to any block group in the state, and we keep the shortest. Valhalla uses its default
+    speeds by road class and posted
+    limits, with no traffic. Block groups with no road route (islands without a car ferry in OpenStreetMap) are left
+    out of the routed figures and counted.
     """)
     return
 
@@ -527,7 +529,10 @@ def _(bg, facilities, nearest, routed_states, tiles):
     _routed = []
     for _state, _box in routed_states.items():
         _config = valhalla.get_config(tile_extract="", tile_dir=tiles[_state])
-        _config["service_limits"]["auto"]["max_matrix_location_pairs"] = 50_000
+        # TimeDistanceMatrix expands once from each hospital, much faster than CostMatrix for many-to-few.
+        _config["thor"]["source_to_target_algorithm"] = "timedistancematrix"
+        _config["service_limits"]["auto"]["max_matrix_location_pairs"] = 2_000_000
+        _config["service_limits"]["auto"]["max_matrix_distance"] = 500_000
         _actor = valhalla.Actor(_config)
         _sources = bg[bg["state"] == _state].reset_index()
         _in_box = facilities[
@@ -536,32 +541,23 @@ def _(bg, facilities, nearest, routed_states, tiles):
         _result = _sources[["index"]].copy()
         for _kind in KINDS:
             _targets = _in_box[_in_box["kind"] == _kind].reset_index(drop=True)
-            _candidates = nearest(_sources, _targets, k=min(5, len(_targets)))[1].reshape(len(_sources), -1)
-            _minutes = np.full(len(_sources), np.nan)
-            for _start in range(0, len(_sources), 250):
-                _batch = _sources.iloc[_start : _start + 250]
-                _used = np.unique(_candidates[_start : _start + 250])
-                _response = _actor.matrix(
-                    {
-                        "sources": [
-                            {"lat": la, "lon": lo} for la, lo in zip(_batch["lat"], _batch["lon"], strict=True)
-                        ],
-                        "targets": [
-                            {"lat": _targets.at[i, "LATITUDE"], "lon": _targets.at[i, "LONGITUDE"]} for i in _used
-                        ],
-                        "costing": "auto",
-                    }
-                )
-                _times = np.array(
-                    [
-                        [np.nan if c.get("time") is None else c["time"] for c in row]
-                        for row in _response["sources_to_targets"]
-                    ]
-                )
-                _minutes[_start : _start + len(_batch)] = (
-                    np.nanmin(np.where(np.isnan(_times), np.inf, _times), axis=1) / 60
-                )
-            _result[f"{_kind}_min_road"] = np.where(np.isinf(_minutes), np.nan, _minutes)
+            _used = np.unique(nearest(_sources, _targets, k=min(5, len(_targets)))[1])
+            _response = _actor.matrix(
+                {
+                    "sources": [
+                        {"lat": la, "lon": lo} for la, lo in zip(_sources["lat"], _sources["lon"], strict=True)
+                    ],
+                    "targets": [{"lat": _targets.at[i, "LATITUDE"], "lon": _targets.at[i, "LONGITUDE"]} for i in _used],
+                    "costing": "auto",
+                }
+            )
+            _seconds = np.array(
+                [
+                    [np.inf if c.get("time") is None else c["time"] for c in row]
+                    for row in _response["sources_to_targets"]
+                ]
+            ).min(axis=1)
+            _result[f"{_kind}_min_road"] = np.where(np.isinf(_seconds), np.nan, _seconds / 60)
         _routed.append(_result)
     _routed = pd.concat(_routed).set_index("index")
     for _column in _routed:
