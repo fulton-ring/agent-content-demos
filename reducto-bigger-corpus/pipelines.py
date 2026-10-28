@@ -1,10 +1,13 @@
 """The pipelines and the scoring that the three notebooks share.
 
-Copied from messy-document-parsing/pipelines.py (#136), with four changes:
+Copied from messy-document-parsing/pipelines.py (#136), with seven changes:
 - a Task can carry its own table rules, since FinTabNet's key keeps header, group and total rows that #136's drops;
 - a Runner can read Docling's saved output from another run's folder, so Docling (deterministic) runs once;
 - Reducto Deep Extract, Extract with its agentic loop on ($40 per 1,000 pages);
-- score_table can skip cells that are empty in the key, so a blank cell left blank doesn't count as a right answer.
+- score_table can skip cells that are empty in the key, so a blank cell left blank doesn't count as a right answer;
+- a null from Reducto Extract, where the schema asks for a string, is read as empty instead of crashing the run;
+- Reducto's seconds are its own reported duration, not our clock, which also counted waiting for a slot;
+- fresh_copies, because Reducto returns a cached answer for a file it has seen, so a second run needs new bytes.
 """
 
 import asyncio
@@ -14,7 +17,7 @@ import os
 import re
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Literal
@@ -258,7 +261,9 @@ async def _reducto(task: Task, run: Runner, endpoint: Endpoint) -> tuple[dict[st
         saved.write_text(json.dumps({"seconds": time.time() - t0, "answer": answer}))
     stored = json.loads(saved.read_text())
     pages = stored["answer"]["usage"]["num_pages"]
-    result = Result(None, usd=pages * REDUCTO_USD_PER_PAGE[endpoint], seconds=stored["seconds"], pages_read=pages)
+    # Reducto's own processing time; our clock also counts time spent waiting for a free slot.
+    seconds = stored["answer"].get("duration") or stored["seconds"]
+    result = Result(None, usd=pages * REDUCTO_USD_PER_PAGE[endpoint], seconds=seconds, pages_read=pages)
     return stored["answer"], result
 
 
@@ -289,6 +294,11 @@ async def reducto_extract(task: Task, run: Runner, endpoint: Endpoint = "extract
     if not answer:
         return result
     output = answer["result"][0] if isinstance(answer["result"], list) else answer["result"]
+    # Extract sometimes gives null where the schema asks for a string, for a line or cell it found empty.
+    for line in output.get("lines") or []:
+        line["amount"] = line["amount"] if line.get("amount") is not None else ""
+    if output.get("rows"):
+        output["rows"] = [[c if c is not None else "" for c in row] for row in output["rows"]]
     result.output = OUTPUT_TYPES[task.kind].model_validate(output).model_dump()
     return result
 
@@ -434,3 +444,19 @@ def two_run_table(
             f"| {both('errors')} | ${t[0]['usd_per_page']:.4f} | {t[0]['seconds_per_page']:.1f} |"
         )
     return "\n".join(lines), tallies
+
+
+def fresh_copies(tasks: list[Task], folder: Path) -> list[Task]:
+    """The tasks on copies of their PDFs with a comment line added at the end: the same pages, a different file.
+
+    Reducto answers a file it has already seen from a cache, in about 0.2 seconds, so a second run on the same bytes
+    is the first run again. A PDF reader ignores a comment after the end of the file.
+    """
+    folder.mkdir(parents=True, exist_ok=True)
+    copies = []
+    for task in tasks:
+        copy = folder / task.pdf.name
+        if not copy.exists():
+            copy.write_bytes(task.pdf.read_bytes() + b"\n% second run\n")
+        copies.append(replace(task, pdf=copy))
+    return copies

@@ -17,7 +17,7 @@ with app.setup:
     from PIL import Image
 
     import model_call
-    from pipelines import Result, Runner, Task, page_png, run_all, score_table, two_run_table
+    from pipelines import Result, Runner, Task, fresh_copies, page_png, run_all, score_table, two_run_table
 
     HERE = Path(__file__).parent
     OUT = Path(os.environ.get("BIGGER_OUTPUT_DIR", HERE / "output")) / "fintabnet"
@@ -160,15 +160,16 @@ def _(TASKS):
 @app.cell(hide_code=True)
 def _():
     mo.md(r"""
-    ## The pipelines, twice each
+    ## The pipelines
 
     The same six as #136 (see `pipelines.py`, copied from `messy-document-parsing/`): Docling alone, Gemini 3.8 Flash
     given the PDF, Gemini given the page image, Docling's Markdown next to the image, Reducto Parse (r-1) and
-    Reducto Extract with the same schema and prompt as Gemini. Each runs twice, into `run1/` and `run2/`, since
-    #136 found answers change between runs. Docling is deterministic, so it runs once and run 2's "Docling, then
-    Gemini" reuses its output.
+    Reducto Extract with the same schema and prompt as Gemini. The prompt names the column count, as #136's names
+    the columns, and says how merged cells go in the grid.
 
-    The prompt names the column count, as #136's names the columns, and says how merged cells go in the grid.
+    The Gemini pipelines run twice on all 102 tables, into `run1/` and `run2/`, since #136 found answers change
+    between runs. Docling is deterministic, so it runs once and run 2's "Docling, then Gemini" reuses its output.
+    Reducto runs once on all 102; its second run is on the subset below, for a reason shown there.
     """)
     return
 
@@ -184,7 +185,7 @@ async def _(TASKS):
         "Reducto Extract",
     ]
     run1 = await run_all(Runner(OUT / "run1"), OPEN_AND_REDUCTO, TASKS)
-    run2 = await run_all(Runner(OUT / "run2", docling_out=OUT / "run1"), OPEN_AND_REDUCTO[1:], TASKS)
+    run2 = await run_all(Runner(OUT / "run2", docling_out=OUT / "run1"), OPEN_AND_REDUCTO[1:4], TASKS)
     for (_n, _p), _r in (run1 | run2).items():
         if _r.error:
             print(f"{_n}, {_p}: {_r.error}")
@@ -194,23 +195,57 @@ async def _(TASKS):
 @app.cell(hide_code=True)
 def _():
     mo.md(r"""
-    ## Deep Extract and Gemini 4 Argon, on a subset fixed in advance
+    ## Reducto answers a file it has seen from a cache
 
-    Reducto Deep Extract runs Extract in an agentic loop that checks its answer against the document; it costs $40
-    per 1,000 pages, twice Extract. Gemini 4 Argon is the strongest Gemini on OpenRouter, given the page image. Both
-    run twice on 22 of the 102 tables, drawn with a seed before any pipeline ran, so not chosen by results.
+    Our first second run of Reducto came back identical to the first on all 102 tables, under new job IDs, in about
+    0.2 seconds a table against 2 to 170 the first time. Reducto's docs don't mention a cache, but that's what it
+    is. Below, the 22 subset tables go to Reducto Extract twice more: once on the same files (run 2) and once on
+    copies with a comment line added after the end of each PDF (run 3). The pages are the same; the files' hashes
+    aren't. So a real second read needs new bytes, and every second Reducto run in this spike uses such copies.
     """)
     return
 
 
 @app.cell
-async def _(TASKS):
+async def _(TASKS, run1, score):
     SUBSET = random.Random(1412).sample(TASKS, 22)
-    deep = [await run_all(Runner(OUT / f"run{i}"), ["Reducto Deep Extract"], SUBSET) for i in (1, 2)]
+    same = await run_all(Runner(OUT / "run2"), ["Reducto Extract"], SUBSET)
+    run3 = await run_all(
+        Runner(OUT / "run3"), ["Reducto Extract", "Reducto Deep Extract"], fresh_copies(SUBSET, OUT / "pdfs-run3")
+    )
+    _extract = [(n, r) for (n, p), r in run1.items() if p == "Reducto Extract" and (n, p) in same]
+    _identical = sum(same[(n, "Reducto Extract")].output == r.output for n, r in _extract)
+    _changed = sum(run3[(n, "Reducto Extract")].output != r.output for n, r in _extract)
+    _right = [sum(score(n, run[(n, "Reducto Extract")])["right"] for n, _r in _extract) for run in (run1, same, run3)]
+    cache_note = (
+        f"Reducto Extract on the 22 subset tables. Same files again: {_identical} of 22 answers identical to run 1, "
+        f"{sum(r.seconds for r in same.values()) / 22:.1f} seconds a table. New bytes: {_changed} of 22 answers "
+        f"differ. Cells right: {_right[0]} in run 1, {_right[1]} on the same files, {_right[2]} on new bytes."
+    )
+    print(cache_note)
+    return SUBSET, cache_note, run3, same
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ## Deep Extract and Gemini 4 Argon, on a subset fixed in advance
+
+    Reducto Deep Extract runs Extract in an agentic loop that checks its answer against the document; it costs $40
+    per 1,000 pages, twice Extract. Gemini 4 Argon is the strongest Gemini on OpenRouter, given the page image. Both
+    run twice on the 22 tables, drawn with a seed before any pipeline ran, so not chosen by results. Reducto's
+    second runs are run 3, on new bytes.
+    """)
+    return
+
+
+@app.cell
+async def _(SUBSET):
+    deep1 = await run_all(Runner(OUT / "run1"), ["Reducto Deep Extract"], SUBSET)
     argon = [
         await run_all(Runner(OUT / f"run{i}", model=model_call.BIG), ["Gemini, page by page"], SUBSET) for i in (1, 2)
     ]
-    return SUBSET, argon, deep
+    return argon, deep1
 
 
 @app.cell(hide_code=True)
@@ -237,14 +272,16 @@ def _(KEYS):
 
 
 @app.cell
-def _(OPEN_AND_REDUCTO, SUBSET, TASKS, argon, deep, run1, run2, score):
+def _(OPEN_AND_REDUCTO, SUBSET, TASKS, argon, deep1, run1, run2, run3, score):
     _names = [t.name for t in TASKS]
     main_table, tallies = two_run_table(OPEN_AND_REDUCTO, _names, score, [run1, run2])
-    _subset = [t.name for t in SUBSET]
-    _subset_runs = [run1 | deep[0] | {(n, "Argon, page by page"): r for (n, _p), r in argon[0].items()}]
-    _subset_runs += [run2 | deep[1] | {(n, "Argon, page by page"): r for (n, _p), r in argon[1].items()}]
+
+    def as_argon(run: dict) -> dict:
+        return {(n, "Argon, page by page"): r for (n, _p), r in run.items()}
+
+    _subset_runs = [run1 | deep1 | as_argon(argon[0]), run2 | run3 | as_argon(argon[1])]
     _subset_pipelines = ["Gemini, page by page", "Argon, page by page", "Reducto Extract", "Reducto Deep Extract"]
-    subset_table, subset_tallies = two_run_table(_subset_pipelines, _subset, score, _subset_runs)
+    subset_table, subset_tallies = two_run_table(_subset_pipelines, [t.name for t in SUBSET], score, _subset_runs)
     mo.md(f"**All 102 tables**\n\n{main_table}\n\n**The 22-table subset**\n\n{subset_table}")
     return main_table, subset_table, subset_tallies, tallies
 
@@ -308,11 +345,26 @@ def _(KEYS, run1, run2, score):
 
 
 @app.cell
-def _(STRATA, by_stratum, main_table, stratum_table, subset_table, subset_tallies, tallies):
+def _(
+    STRATA,
+    argon,
+    by_stratum,
+    cache_note,
+    deep1,
+    main_table,
+    run1,
+    run2,
+    run3,
+    same,
+    stratum_table,
+    subset_table,
+    subset_tallies,
+    tallies,
+):
     (HERE / "results").mkdir(exist_ok=True)
     (HERE / "results" / "fintabnet.md").write_text(
         f"# FinTabNet, 102 tables\n\n{main_table}\n\n## 22-table subset\n\n{subset_table}\n\n"
-        f"## By kind of table\n\n{stratum_table}\n"
+        f"## By kind of table\n\n{stratum_table}\n\n## Reducto's cache\n\n{cache_note}\n"
     )
     (OUT / "results.json").write_text(
         json.dumps(
@@ -325,8 +377,8 @@ def _(STRATA, by_stratum, main_table, stratum_table, subset_table, subset_tallie
             indent=1,
         )
     )
-    _extra = [t for (p, _i), t in subset_tallies.items() if p in ("Argon, page by page", "Reducto Deep Extract")]
-    print(f"cost of every call in this notebook: ${sum(t['usd'] for t in [*tallies.values(), *_extra]):.2f}")
+    _spent = sum(r.usd for run in (run1, run2, run3, same, deep1, *argon) for r in run.values())
+    print(f"cost of every call in this notebook: ${_spent:.2f}")
     return
 
 

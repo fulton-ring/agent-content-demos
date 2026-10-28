@@ -21,7 +21,7 @@ with app.setup:
     import pypdfium2 as pdfium
 
     import model_call
-    from pipelines import Result, Runner, Task, page_png, run_all, two_run_table
+    from pipelines import Result, Runner, Task, fresh_copies, page_png, run_all, two_run_table
 
     HERE = Path(__file__).parent
     OUT = Path(os.environ.get("BIGGER_OUTPUT_DIR", HERE / "output")) / "990"
@@ -165,9 +165,15 @@ def _(downloaded):
 async def _(TASKS):
     PIPELINES_990 = ["Gemini, whole PDF", "Gemini, page by page", "Docling, then Gemini", "Reducto Extract"]
     run1 = await run_all(Runner(OUT / "run1"), PIPELINES_990, TASKS)
-    run2 = await run_all(Runner(OUT / "run2", docling_out=OUT / "run1"), PIPELINES_990, TASKS)
+    # Run 2 reads copies with new bytes, since Reducto answers a file it has seen from a cache (see notebook 1).
+    run2 = await run_all(
+        Runner(OUT / "run2", docling_out=OUT / "run1"), PIPELINES_990, fresh_copies(TASKS, OUT / "pdfs-run2")
+    )
     SUBSET = random.Random(1412).sample(TASKS, 20)
-    deep = [await run_all(Runner(OUT / f"run{i}"), ["Reducto Deep Extract"], SUBSET) for i in (1, 2)]
+    deep = [
+        await run_all(Runner(OUT / "run1"), ["Reducto Deep Extract"], SUBSET),
+        await run_all(Runner(OUT / "run2"), ["Reducto Deep Extract"], fresh_copies(SUBSET, OUT / "pdfs-run2")),
+    ]
     argon = [
         await run_all(Runner(OUT / f"run{i}", model=model_call.BIG), ["Gemini, page by page"], SUBSET) for i in (1, 2)
     ]
