@@ -14,7 +14,7 @@ Both answer keys are small. Lanesville has 11 distinct spots and Corydon 7, and 
 ## How to run it
 
 ```bash
-./run.sh            # needs uv; about 18 minutes and 3.3 GB of downloads and cached rasters the first time
+./run.sh            # needs uv; about 18 to 21 minutes (with the first uv install) and 3.3 GB of downloads and cached rasters the first time
 ```
 
 `run.sh` runs `notebook.py` as a script once per town (`FFW_SITE=lanesville`, then `FFW_SITE=corydon`). To read it with its outputs, use `FFW_SITE=corydon uv run marimo edit notebook.py`. Downloads and intermediate rasters are cached in `$FFW_CACHE` (default `~/.cache/flash-flood-warning-addresses`). Results go to `results/<town>/`.
@@ -132,7 +132,7 @@ In Corydon, the 1 m HAND against either coarse network ties OWP in the top 25 (4
 
 ## What didn't work
 
-- **The live USA Structures service.** The first runs queried FEMA/ORNL's `USA_Structures_View` feature service. Between October 24 and 28, 2026 it swapped Indiana's 2023 release (2020 production) for the 2025 one, adding about 41,000 structures inside the warning, and every result changed. Corydon's OWP top 25 went from 9 of 11 places to 4. In the 2023 release, two downtown footprints of about 1,700 m² each reached the low ground by the creek and sat within 30 m of six of the nine survey points. The 2025 release draws the buildings there smaller and differently. Its Kentucky footprints now include ones produced in February 2026, too close to the storm to know they show the town as it stood. We now read the dated state files and check their hashes. The 2025 Indiana file gives the same counts in both study boxes as the service did on October 28.
+- **The live USA Structures service.** The first runs queried FEMA/ORNL's `USA_Structures_View` feature service. Between October 24 and 28, 2026 it swapped Indiana's 2023 release (2020 production) for the 2025 one, adding about 41,000 structures inside the warning, and every result changed. Corydon's OWP top 25 went from 9 of 11 places to 4. In the 2023 release, two downtown footprints of about 1,700 m² each reached the low ground by the creek and sat within 30 m of six of the nine survey points. The 2025 release draws the buildings there smaller and differently. Its Kentucky footprints now include ones produced in February 2026, too close to the storm to know they show the town as it stood. We now read the dated state files and check their hashes. The 2025 Indiana file gives the same counts in both study boxes as the service did on October 28. The other inputs (address points, NBI bridges, TIGERweb boundaries and IEM warnings) are still read from live services and aren't hash-pinned; they didn't change between the October 28 runs.
 - **pysheds.** It left pits after resolving flats, so 34% of Lanesville's study area and 13% of its town candidates got no HAND. We replaced it with WhiteboxTools' `whitebox-workflows` wheel; the standalone WhiteboxTools binary download is blocked here.
 - **WhiteboxTools HAND** is still missing for some cells away from town: 88 of Lanesville's 2,567 area candidates and 36 of Corydon's 5,121 have no 1 m value and rank last.
 - **OWP's own bucket** is Requester Pays. The CIROH mirror serves the same files anonymously. Release 4.9.9.0 stores HAND as int16 millimetres, which we checked against the 2024 float copy.
