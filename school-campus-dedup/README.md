@@ -7,17 +7,17 @@ merges the school across the street. This spike measures how well distance, S2 c
 OpenStreetMap school grounds, aerial imagery and a decision model
 ([Jev](https://openrouter.ai/docs/guides/community/jev)) tell the two apart, against two published answer keys.
 
-Everything is in one marimo notebook, [`campus_dedup.py`](campus_dedup.py).
-
 ## How to run it
+
+Everything is in one marimo notebook, [`campus_dedup.py`](campus_dedup.py).
 
 ```bash
 export OPENROUTER_API_KEY=...   # Jev and the comparison chat model are called through OpenRouter
-./run.sh                        # needs uv; first run ~30 min and ~$4 of model calls, later runs ~90 s and $0
+./run.sh                        # needs uv; first run ~35 min and ~$4 of model calls, later runs ~2 min and $0
 ```
 
-To read it as a notebook: `uv run marimo edit campus_dedup.py`. Downloads and cached model answers go to `data/`
-(not committed), results to `output/`.
+Read it as a notebook with `uv run marimo edit campus_dedup.py`. Downloads and cached model answers go to `data/`
+(not committed), results to `output/`. It needs about 12 GB of memory (the Los Angeles footprints).
 
 ## The data
 
@@ -68,11 +68,11 @@ precision; the rest go to review.
 | Same OSM school grounds | 0.80 | 0.71 | 0% | – |
 | Same street address | 0.99 | 0.98 | 64% | 5 of 349 |
 | Geocoded addresses (any cut) | 0.97 | 0.93 | 61% | 7 of 333 |
-| Jev: records, point distance, footprint and grounds flags | 0.81 | 0.88 | 62% | 9 of 339 |
-| Jev: the same + aerial image | 0.81 | 0.87 | 42% | 8 of 230 |
-| Jev: the same + distance between address geocodes | 0.90 | 0.99 | 85% | 8 of 469 |
-| **Jev: the pair described in words, no map points** | 0.94 | 0.99 | **90%** | 8 of 494 |
-| Gemini 3.8 Flash: records, flags and image | 0.90 | 0.97 | 0% | – |
+| Jev: records, point distance, footprint and grounds flags | 0.81 | 0.88 | 38% | 5 of 208 |
+| Jev: the same + aerial image | 0.81 | 0.87 | 43% | 8 of 238 |
+| Jev: the same + distance between address geocodes | 0.89 | 0.99 | 85% | 9 of 468 |
+| **Jev: the pair described in words, no map points** | 0.94 | 0.99 | **91%** | 10 of 498 |
+| Gemini 3.8 Flash: records, flags and image | 0.88 | 0.98 | 11% | 3 of 62 |
 
 The geometry signals all trust HIFLD's point. Pairs whose points share a building are often schools on different
 streets. The address each school reports is the strongest single signal, but a rule can only merge.
@@ -80,7 +80,7 @@ streets. The address each school reports is the strongest single signal, but a r
 Jev does best when the pair is **described in words**. Each school gets its type, charter and virtual status,
 district, website, Census-matched address, and the OSM school grounds its address falls in. The pair gets how the
 addresses relate (identical, same address with a different unit, same street, different streets) and roughly how
-far apart they geocode. It decides 90% of the test pairs, keeps 182 apart with 2 wrong, and merges 312 with 6 wrong.
+far apart they geocode. It decides 91% of the test pairs, keeps 179 apart with 2 wrong, and merges 319 with 8 wrong.
 
 On the Los Angeles test half (48 pairs), that variant decides 67% with 1 error, and the geocode rule 77% with
 1 error. That key is too small to rank them.
@@ -89,11 +89,11 @@ On the Los Angeles test half (48 pairs), that variant decides 67% with 1 error, 
 
 | Model | Brier | ECE | AUC | Cost per pair |
 |---|---:|---:|---:|---:|
-| Jev, records and flags | 0.152 | 0.157 | 0.904 | $0.00003 |
-| Jev, + image | 0.168 | 0.142 | 0.889 | $0.00010 |
-| Jev, + address geocodes | 0.063 | 0.062 | 0.979 | $0.00003 |
-| Jev, described in words | 0.040 | 0.025 | 0.980 | $0.00003 |
-| Gemini 3.8 Flash, + image | 0.098 | 0.086 | 0.944 | $0.0031 |
+| Jev, records and flags | 0.152 | 0.158 | 0.905 | $0.00003 |
+| Jev, + image | 0.168 | 0.143 | 0.888 | $0.00010 |
+| Jev, + address geocodes | 0.063 | 0.059 | 0.976 | $0.00003 |
+| Jev, described in words | 0.040 | 0.026 | 0.982 | $0.00003 |
+| Gemini 3.8 Flash, + image | 0.099 | 0.085 | 0.933 | $0.0031 |
 
 Jev's probabilities are only usable once thresholds are tuned. The words variant has the lowest ECE, but most of
 its pairs sit near 0 or 1; in between it is not calibrated (pairs scored 0.3–0.6 are mostly different sites). Its
@@ -101,8 +101,8 @@ thresholds have to come from a labelled sample, as [TypeSafe's guidance](https:/
 Running it on all 23,333 national pairs would cost about $0.82 (`output/national_cost.csv`); the geocoder is free.
 
 **Sites** (`output/school_sites.csv`, `output/site_summary.csv`). With the tuned thresholds of the words variant,
-NYC's 1,868 records become 1,421 sites, and 127 pairs (172 records) are left for review. Los Angeles has 2,250
-records and 2,146 sites, but no keep-apart threshold could be set from its small key, so 193 pairs go to review.
+NYC's 1,868 records become 1,417 sites, and 124 pairs (169 records) are left for review. Los Angeles has 2,250
+records and 2,144 sites, but no keep-apart threshold could be set from its small key, so 191 pairs go to review.
 
 ## What didn't work, and what this doesn't show
 
@@ -111,11 +111,14 @@ records and 2,146 sites, but no keep-apart threshold could be set from its small
   Describing units properly gave 90%: some pairs the key calls different (a trailer, an annex, a charter school
   with its own building code) now score about 0.98, which pushes the merge threshold above that band. We stopped
   changing the wording there, because each change we kept for scoring better would be tuning to the test set.
+- **Jev's answers vary between runs, and weak variants' thresholds with them.** Rerun from scratch, the words
+  variant decided 90.0% and then 91%; Jev on records and flags decided 62% and then 38%, because a few answers near
+  its threshold moved the tuned cut. Pick thresholds from more labelled pairs than this, and pin the model version.
 - **The aerial image made Jev worse.** Image requests run in Jev's long-context mode, which TypeSafe says is less
   accurate. The imagery is also coarse at campus scale.
-- **The chat model** ranked better than Jev given the same flags (AUC 0.94) but worse than Jev described in words,
-  at ~100× the cost per pair. Its stated probabilities cluster at a few values, so in NYC it never cleared 97% in
-  either direction. It was not given the words state.
+- **The chat model** ranked better than Jev given the same flags (AUC 0.93) but worse than Jev described in words,
+  at ~100× the cost per pair. Its stated probabilities cluster at a few values, so in NYC only 11% of pairs cleared
+  97%. It was not given the words state.
 - **Some "errors" are the key's conventions.** NYC gives a separate building code to a trailer, an annex, or a
   charter school on another floor of an office tower, even at the same street address. "Same campus" is looser
   than the key, so true error rates are lower than the table shows.
@@ -127,8 +130,7 @@ records and 2,146 sites, but no keep-apart threshold could be set from its small
   A state directory (California's [CDE file](https://www.cde.ca.gov/ds/si/ds/pubschls.asp), for one) can.
 - **The keyed regions are two big cities.** Rural districts, where one building often holds the elementary, middle
   and high school under separate IDs, are not measured.
-- **We didn't separate the geocodes from the instruction.** Both address-based Jev variants were also told that map
-  points are sometimes misplaced; which one did the work isn't tested.
+- **We didn't separate the geocodes from the instruction** that map points are sometimes misplaced.
 - **No OCR was needed.** Every source here is machine-readable.
 
 ## Licences
