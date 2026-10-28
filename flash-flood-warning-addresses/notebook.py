@@ -1135,9 +1135,16 @@ def _(mo):
     - **NHDPlus HR service.** The NHDPlus HR map service timed out on most queries, so we use the
       NHD HR HU8 file, which has the same flowline geometry without the value-added
       attributes.
-    - **The 30 m match.** Four of the town's observed places have no structure or crossing
-      within 30 m. They are survey points in streets and yards, so no building- or
-      crossing-level ranking can score them.
+    - **The 30 m match.** Two of Lanesville's observed places and one of Corydon's have no
+      structure or crossing within 30 m. They are survey points in streets and yards, so no
+      building- or crossing-level ranking can score them.
+    - **The live USA Structures service.** We first queried FEMA/ORNL's `USA_Structures_View`
+      feature service. Between runs on October 24 and 28, 2026 it swapped Indiana's 2023
+      release (2020 production) for the 2025 one, and every result changed. Corydon's 10 m
+      OWP HAND went from 9 to 4 of 11 places in its top 25. In the 2023 release, two downtown
+      footprints of about 1,700 m² each reached the low ground by the creek and sat within
+      30 m of six of the nine survey points. The 2025 release draws the buildings there
+      smaller and differently. The notebook now reads the dated state files.
     - **Locations.** Storm report coordinates are rounded to 0.01°, about 1 km, which is why the
       named places are geocoded from addresses instead. The SR 62 closure point is where SR 62
       meets the county line, not a reported spot.
