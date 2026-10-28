@@ -6,6 +6,7 @@ app = marimo.App(width="medium")
 
 @app.cell
 def _():
+    import hashlib
     import json
     import logging
     import math
@@ -60,6 +61,7 @@ def _():
         from_bounds,
         geometry_mask,
         gpd,
+        hashlib,
         json,
         linemerge,
         log,
@@ -339,14 +341,43 @@ def _(mo):
     We count structures (FEMA/ORNL USA Structures), Indiana address points (IGIO's 2025
     release) and TIGER 2025 road segments inside the polygon, and inside the town's Census
     boundary. Corydon's boundary has two parts, the town and a small detached piece east of it.
-    The structure and address counts come from the services' own spatial queries. Indiana's
+    The address counts come from the service's own spatial query.
+
+    The structures come from FEMA/ORNL's dated state files, not the live `USA_Structures_View`
+    service. That service gained about 41,000 structures inside this warning between two of our
+    runs four days apart, which changed every result. We pin the last state releases before the
+    storm, Indiana's of September 13, 2025 and Kentucky's of June 6, 2025, by file name and
+    SHA-256, so a new release stops the run instead of changing its numbers. That is about 1.1 GB
+    of downloads, cached after the first run. Indiana's
     address layer stops at the state line, so it leaves out the Jefferson County, Kentucky part
     of the warning, which is most of Louisville.
     """)
 
 
 @app.cell
-def _(Polygon, arcgis, cache, fetch, gpd, json, pd, site, unary_union, warning):
+def _(cache, fetch, hashlib):
+    _bucket = "https://fema-femadata.s3.amazonaws.com/Partners/ORNL/USA_Structures"
+    _releases = {
+        "IN": ("Indiana/Deliverable20250913IN.zip", "58736959df2e0232b00e65ff9cd33619d307214320803402e62b44f0d82f76e2"),
+        "KY": (
+            "Kentucky/Deliverable20250606KY.zip",
+            "87599458639bf50f11586d0ef71cd6119907310c72812ce175032f85b69cb75e",
+        ),
+    }
+    structure_files = {}
+    for _state, (_key, _sha256) in _releases.items():
+        _zip = cache / f"usa_structures_{_state}.zip"
+        fetch(f"{_bucket}/{_key}", _zip)
+        with open(_zip, "rb") as _f:
+            _digest = hashlib.file_digest(_f, "sha256").hexdigest()
+        if _digest != _sha256:
+            raise RuntimeError(f"{_key} has SHA-256 {_digest}, expected {_sha256}: the release changed")
+        structure_files[_state] = f"/vsizip/{_zip}/{_state}_Structures.gdb"
+    return (structure_files,)
+
+
+@app.cell
+def _(Polygon, arcgis, cache, fetch, gpd, json, pd, site, structure_files, unary_union, warning):
     _place = arcgis(
         "https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/Places_CouSub_ConCity_SubMCD/MapServer/4",
         {"where": f"GEOID='{site['geoid']}'", "outFields": "NAME", "outSR": "4326"},
@@ -358,9 +389,6 @@ def _(Polygon, arcgis, cache, fetch, gpd, json, pd, site, unary_union, warning):
         unary_union([r for r in _rings if r.exterior.is_ccw])
     )
 
-    _structures = (
-        "https://services2.arcgis.com/FiaPA4ga0iQKduv3/ArcGIS/rest/services/USA_Structures_View/FeatureServer/0"
-    )
     _addresses = "https://gisdata.in.gov/server/rest/services/Hosted/Address_Points_of_Indiana_2025/FeatureServer/0"
     for _fips in ["18061", "18043", "21111"]:
         fetch(
@@ -369,6 +397,13 @@ def _(Polygon, arcgis, cache, fetch, gpd, json, pd, site, unary_union, warning):
     _roads = pd.concat(
         [gpd.read_file(cache / f"roads_{f}.zip").to_crs("EPSG:4326") for f in ["18061", "18043", "21111"]]
     )
+
+    def _count_structures(area: Polygon) -> int:
+        _n = 0
+        for _gdb in structure_files.values():
+            _footprints = gpd.read_file(_gdb, bbox=area.bounds, columns=[])
+            _n += int(_footprints.intersects(area).sum())
+        return _n
 
     def _count(layer: str, area: Polygon) -> int:
         _parts = getattr(area, "geoms", [area])
@@ -390,7 +425,7 @@ def _(Polygon, arcgis, cache, fetch, gpd, json, pd, site, unary_union, warning):
     inside = pd.DataFrame(
         {
             area: {
-                "structures": _count(_structures, poly),
+                "structures": _count_structures(poly),
                 "address points (Indiana only)": _count(_addresses, poly),
                 "road segments": int(_roads.intersects(poly).sum()),
             }
@@ -412,7 +447,8 @@ def _(mo):
     same HUC8 watershed, 05140104 (Blue-Sinking), so they share one NHD file and one set of OWP
     rasters. The layers:
 
-    - **Structures:** USA Structures footprints, which come from imagery (production date 2020).
+    - **Structures:** USA Structures footprints from the pinned Indiana file, traced from imagery
+      (production dates 2020 and 2025).
     - **Streams:** NHD High Resolution flowlines for HUC8 05140104 (2023). Indiana's NHD is
       lidar-derived and dense. We keep streams, artificial paths, connectors and ditches, and
       drop "drainageway" swales (FType 468) and underground conduits (420). With the swales
@@ -432,7 +468,7 @@ def _(mo):
 
 
 @app.cell
-def _(UTM, arcgis, box, cache, fetch, gpd, pd, shape, site, zipfile):
+def _(UTM, arcgis, box, cache, fetch, gpd, pd, site, structure_files, zipfile):
     AREA = site["area"]
     _env = {
         "geometry": ",".join(map(str, AREA)),
@@ -442,28 +478,9 @@ def _(UTM, arcgis, box, cache, fetch, gpd, pd, shape, site, zipfile):
         "outSR": "4326",
     }
 
-    _layer = "https://services2.arcgis.com/FiaPA4ga0iQKduv3/ArcGIS/rest/services/USA_Structures_View/FeatureServer/0"
-    _feats = []
-    for _page in range(20):  # 2,000 per page; 20 pages is far more than this box holds
-        _body = arcgis(
-            _layer,
-            {
-                **_env,
-                "where": "1=1",
-                "outFields": "BUILD_ID,OCC_CLS,PRIM_OCC",
-                "orderByFields": "OBJECTID",
-                "resultOffset": _page * 2000,
-                "resultRecordCount": 2000,
-            },
-        )
-        _feats += _body["features"]
-        if not _body.get("exceededTransferLimit"):
-            break
-    structures = gpd.GeoDataFrame(
-        [f["attributes"] for f in _feats],
-        geometry=[shape({"type": "Polygon", "coordinates": f["geometry"]["rings"]}) for f in _feats],
-        crs="EPSG:4326",
-    ).to_crs(UTM)
+    structures = gpd.read_file(structure_files["IN"], bbox=AREA, columns=["BUILD_ID", "OCC_CLS", "PRIM_OCC"]).to_crs(
+        UTM
+    )
 
     _nbi = arcgis(
         "https://services.arcgis.com/xOi1kZaI0eWDREZv/arcgis/rest/services/NTAD_National_Bridge_Inventory/FeatureServer/0",
@@ -1118,9 +1135,16 @@ def _(mo):
     - **NHDPlus HR service.** The NHDPlus HR map service timed out on most queries, so we use the
       NHD HR HU8 file, which has the same flowline geometry without the value-added
       attributes.
-    - **The 30 m match.** Four of the town's observed places have no structure or crossing
-      within 30 m. They are survey points in streets and yards, so no building- or
-      crossing-level ranking can score them.
+    - **The 30 m match.** Two of Lanesville's observed places and one of Corydon's have no
+      structure or crossing within 30 m. They are survey points in streets and yards, so no
+      building- or crossing-level ranking can score them.
+    - **The live USA Structures service.** We first queried FEMA/ORNL's `USA_Structures_View`
+      feature service. Between runs on October 24 and 28, 2026 it swapped Indiana's 2023
+      release (2020 production) for the 2025 one, and every result changed. Corydon's 10 m
+      OWP HAND went from 9 to 4 of 11 places in its top 25. In the 2023 release, two downtown
+      footprints of about 1,700 m² each reached the low ground by the creek and sat within
+      30 m of six of the nine survey points. The 2025 release draws the buildings there
+      smaller and differently. The notebook now reads the dated state files.
     - **Locations.** Storm report coordinates are rounded to 0.01°, about 1 km, which is why the
       named places are geocoded from addresses instead. The SR 62 closure point is where SR 62
       meets the county line, not a reported spot.
