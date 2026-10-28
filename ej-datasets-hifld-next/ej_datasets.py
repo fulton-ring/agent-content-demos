@@ -698,6 +698,7 @@ def _(
         (pl.col("share_exact") == 1).sum().alias("fields_all_exact"),
         pl.col("share_exact").min().alias("lowest_share_exact"),
         pl.col("mismatches").sum(),
+        pl.col("missing_in_ours_only").sum(),
         pl.col("max_abs_diff").max(),
     ).sort("check")
     return bins_match, pctile_check, pctile_seconds
@@ -756,6 +757,38 @@ def _(DATA_DIR, ejam_2022_raw, lookups, manifest, pctiles_2022, pl, shutil, subp
         }
     print("R check:", r_check or "skipped, Rscript not found")
     return (r_check,)
+
+
+@app.cell
+def _(bins_match, mo, pctile_check, pl):
+    _by = {
+        row["check"]: row
+        for row in pctile_check.group_by("check")
+        .agg(
+            pl.col("rows").first(),
+            pl.len().alias("fields"),
+            pl.col("mismatches").sum(),
+            pl.col("missing_in_ours_only").sum(),
+            pl.col("max_abs_diff").max(),
+        )
+        .to_dicts()
+    }
+    _nat, _st = _by["national (P_)"], _by["state (StatePct P_)"]
+    _cells = _nat["rows"] * _nat["fields"]
+    mo.md(f"""
+    Nationally, {_nat["mismatches"]:,} of {_cells:,} percentile cells differ from EPA's,
+    by at most {_nat["max_abs_diff"]} point, and the map bins match in {bins_match:.2%} of
+    rows. By state, {_st["mismatches"]:,} cells differ. {_st["missing_in_ours_only"]:,} of
+    them are in the four island territories, which EPA ranked within each territory but
+    EJAM can't: it has no values for them and its state lookups there are empty. The other
+    {_st["mismatches"] - _st["missing_in_ours_only"]:,} differ by at most
+    {_st["max_abs_diff"]} points, almost all in proximity to Superfund sites (`PNPL`): 193
+    block groups have exactly the same score, 11.0, which fills several percentiles of
+    some states' lookups (92 to 97 in Nebraska), so a tie rule decides, and EPA's state
+    ranking broke those ties differently from EJAM's lookup.
+    `outputs/percentile_check.csv` has every column.
+    """)
+    return
 
 
 @app.cell
@@ -1438,6 +1471,7 @@ def _(
                 (pl.col("share_exact") == 1).sum().alias("fields_all_exact"),
                 pl.col("share_exact").min().alias("lowest_share_exact"),
                 pl.col("mismatches").sum().alias("cells_different"),
+                pl.col("missing_in_ours_only").sum().alias("cells_epa_ranks_but_ejam_cannot"),
                 pl.col("max_abs_diff").max(),
             )
             .sort("check")
