@@ -243,7 +243,14 @@ def _(mo):
       grids with `np.save` under a `.txt` name, which the generator can't read back (the
       "file names need fixing by hand" the Zenodo README warns about). NumPy now needs
       `allow_pickle=True` to read the pickles STORM writes for itself. Every module saves next
-      to `sys.argv[0]`, which under a notebook is the notebook's own folder.
+      to `sys.argv[0]`, which under a notebook is the notebook's own folder. And the decay over
+      land loops forever when a storm moves more than 0 but at most 1 km in a step (positions
+      rounded to 0.1° still differ by float noise): it skips only an exact 0 as stationary and
+      never advances otherwise. Two of our first ten seeds hung there; we treat up to 1 km as
+      stationary. A long stall over land then pushes the decay formula past its 150-hour range,
+      the wind goes negative and the pressure becomes NaN, which crashes the radius step; we
+      end the storm there, since it has dissipated. Neither change touches a storm that ran
+      before.
     - **Speed, without changing what is simulated.** The generator rereads its input files
       (26 MB of pressure field per storm) and brute-forces the distance to the coast over 1.1
       million points at every 3-hourly step. We cache the reads and use a k-d tree, which gives
@@ -376,6 +383,22 @@ def _(first_season, last_season, re):
             "speed",
         ),
         (["environmental.py"], "import numpy as np\n", _loaders, 1, "speed"),
+        (
+            ["SAMPLE_TC_PRESSURE.py"],
+            "            if D==0.: #storm is stationairy",
+            "            if D<=1.: #storm is stationairy",
+            1,
+            "bug",
+        ),
+        (
+            ["SAMPLE_TC_PRESSURE.py"],
+            "                pres_landfall=Calculate_Pressure(v*0.514444,Penv,coef)",
+            "                if v<0: #dissipated; a negative wind has no pressure\n"
+            "                    return pressure_decay, wind_decay\n"
+            "                pres_landfall=Calculate_Pressure(v*0.514444,Penv,coef)",
+            1,
+            "bug",
+        ),
         (["SAMPLE_TC_PRESSURE.py"], _old_coast, _coast, 1, "speed"),
         (
             ["SAMPLE_TC_PRESSURE.py"],
@@ -608,12 +631,13 @@ def _(
     work = cached("runs", f"ibtracs_{first_season}_{last_season}", "x").parent
     _done = work / "COEFFICIENTS_JM_PRESSURE.npy"
     _start = time.perf_counter()
+    # The patched scripts are rewritten every run, so a change to a patch always applies.
+    for _name, _path in storm_sources.items():
+        if _name.endswith(".py"):
+            (work / _name).write_text(patch_source(_name, _path.read_text()))
+        else:
+            shutil.copy(_path, work / _name)
     if not (_done.exists() and (work / "GRID_GENESIS_MATRIX_1_11.txt").exists()):
-        for _name, _path in storm_sources.items():
-            if _name.endswith(".py"):
-                (work / _name).write_text(patch_source(_name, _path.read_text()))
-            else:
-                shutil.copy(_path, work / _name)
         shutil.copy(ibtracs_path, work / "IBTrACS.nc")
         for _month in range(1, 13):
             np.savetxt(work / f"Monthly_mean_MSLP_{_month}.txt", era5_means[("MSLP", _month)] / 100)
