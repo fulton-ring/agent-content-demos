@@ -24,7 +24,7 @@ The fourth corpus in the issue, SEC filings keyed by XBRL, is split off as #150.
 
 You need [uv](https://docs.astral.sh/uv/), `tesseract`, `OPENROUTER_API_KEY` and `REDUCTO_API_KEY`. Everything is downloaded at run time: FinTabNet's first test file from Hugging Face (142 MB, pinned and hash-checked), the SOI extract, and the 990 scans through ProPublica and the IRS. Notebook 3 copies `messy-document-parsing/` into `output/` and runs its `run.sh` twice, so #136's own documents, keys and scorer are used without changing that folder. Answers are saved in `output/` (set `BIGGER_OUTPUT_DIR` to change that) and reused on a re-run.
 
-From nothing, a run takes about 3 to 4 hours on 4 cores, mostly Docling and #136's two runs. All of this spike's calls cost **$11.41 on OpenRouter** and **$20.39 on Reducto at list price**. $5.61 of the Reducto figure is answers served from Reducto's cache, which may not be billed. Reducto is costed at its list price, $10 (Parse), $20 (Extract) and $40 (Deep Extract) per 1,000 pages, since its API reports pages, not dollars.
+From nothing, a run takes about 3 to 4 hours on 4 cores, mostly Docling and #136's two runs. All of this spike's calls cost **$11.41 on OpenRouter** and **$20.39 on Reducto at list price**. $5.61 of the Reducto figure is answers served from Reducto's cache, which may not be billed. The notebooks' own cost lines add up to $28.25. The rest is FinTabNet's first Reducto run 2, which turned out to be cached and isn't used. A check run from a clean clone, reusing the saved answers, reproduced every table in `results/`. Reducto is costed at its list price, $10 (Parse), $20 (Extract) and $40 (Deep Extract) per 1,000 pages, since its API reports pages, not dollars.
 
 ## Pipelines
 
