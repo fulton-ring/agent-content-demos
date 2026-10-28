@@ -10,7 +10,7 @@ Can public satellite embeddings find communities with high environmental and hea
 ./run.sh
 ```
 
-It needs [uv](https://docs.astral.sh/uv/) and about 3 GB of disk. On the first run it builds the EJScreen and CEJST GeoParquet files by running `../ej-datasets-hifld-next/run.sh` unchanged, with its download and output folders pointed into `data/ej/` (1.4 GB, about 10 minutes). It then runs the notebook `geoembeddings_ej.py` as a script. To read the notebook with its outputs, run `uv run marimo edit geoembeddings_ej.py`.
+It needs [uv](https://docs.astral.sh/uv/), about 3 GB of disk and about 4.8 GB of downloads. On the first run it builds the EJScreen and CEJST GeoParquet files by running `../ej-datasets-hifld-next/run.sh` unchanged, with its download and output folders pointed into `data/ej/` (1.4 GB, about 12 minutes). It then runs the notebook `geoembeddings_ej.py` as a script. To read the notebook with its outputs, run `uv run marimo edit geoembeddings_ej.py`.
 
 ## Where the data comes from
 
@@ -53,7 +53,7 @@ All numbers come from `outputs/summary.json` and `outputs/prediction_scores.csv`
 
 ![R² by indicator](outputs/prediction_r2.png)
 
-- The land-use indicators we expected embeddings to do well on are predicted well, but NLCD does as well or better. Adding embeddings to NLCD lifts them by 0.00 to 0.07.
+- The land-use indicators we expected embeddings to do well on are predicted well, but NLCD does as well or better. Adding embeddings to NLCD changes them by −0.02 to +0.05.
 - Embeddings beat NLCD by 0.18 to 0.24 on PM2.5, ozone and RSEI air, and coordinates alone beat embeddings on all three. Trained on Texas and scored on Louisiana, the embeddings' R² falls to 0.27 (ozone), −0.15 (RSEI air) and −2.33 (PM2.5).
 - Embeddings do a little better than NLCD on demographics (median 0.18 against 0.12). That's still too weak to screen with.
 - Top-decile AUC per indicator is in `outputs/prediction_scores.csv`. It runs from 0.95 (traffic) down to 0.52 (children under 5) for embeddings, with the same ordering.
@@ -74,9 +74,9 @@ All numbers come from `outputs/summary.json` and `outputs/prediction_scores.csv`
 
 ![Similarity map](outputs/similarity_map.png)
 
-**Asthma (CDC PLACES 2025, R² on held-out counties, 5,971 tracts).** EJ indicators alone 0.56; embeddings alone 0.33; EJ indicators plus embeddings 0.64; EJ indicators plus coordinates 0.64. Whatever embeddings add to the EJ indicators, coordinates add as much.
+**Asthma (CDC PLACES 2025, R² on held-out counties, 8,211 tracts).** EJ indicators alone 0.56; embeddings alone 0.33; EJ indicators plus embeddings 0.64; EJ indicators plus coordinates 0.64. Whatever embeddings add to the EJ indicators, coordinates add as much.
 
-**Cost and time.** Zero dollars. On 4 CPUs the clean-checkout run took about NN minutes: about 10 for the sibling EJ build, N for 181 embedding tiles (N MB), N for NLCD (N MB), and 9 for the model fits.
+**Cost and time.** Zero dollars; no account or key is needed. On 4 CPUs a clean checkout took about 12 minutes for the sibling EJ build and 21 minutes for the notebook: 8 for the 181 embedding tiles (3.2 GB), 1 for NLCD (149 MB), 9 for the model fits and 3 for the NAIP mosaics. A rerun reuses the downloads. Failures seen: Source Cooperative now and then returns a bad body for a range request, which the notebook retries with a fresh URL; one block group smaller than a 160 m pixel takes the pixel under its interior point.
 
 ## Why it didn't work
 
