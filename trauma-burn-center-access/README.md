@@ -10,7 +10,7 @@ How far is each US block group from a Level I or II trauma center and from a bur
 ./run.sh
 ```
 
-It needs [uv](https://docs.astral.sh/uv/), [osmium-tool](https://osmcode.org/osmium-tool/) (`apt install osmium-tool` or `brew install osmium-tool`), about 6 GB of disk. The first run downloads about 2.6 GB into `data/`, then builds routing tiles for both states and routes them. `ACCESS_DATA_DIR` and `ACCESS_OUT_DIR` move the data and output folders. To read the notebook with its outputs, run `uv run marimo edit access.py`.
+It needs [uv](https://docs.astral.sh/uv/), [osmium-tool](https://osmcode.org/osmium-tool/) (`apt install osmium-tool` or `brew install osmium-tool`), about 5 GB of disk. The first run downloads about 2.6 GB into `data/`, then builds routing tiles for both states and routes them. `ACCESS_DATA_DIR` and `ACCESS_OUT_DIR` move the data and output folders. To read the notebook with its outputs, run `uv run marimo edit access.py`.
 
 ## Where the data comes from
 
@@ -58,7 +58,7 @@ Every group and the 30-minute shares are in `outputs/national_by_group.csv`; the
 - An earlier draw of 45 records, made before the facility filter changed, found 27 of 30 adult and 13 of 15 pediatric records correct; its rows are also in `hand_check.csv`.
 - Completeness: New Jersey has all 10 of its adult centers and both of Maine's are present, but New Jersey has only 1 of its 5 pediatric centers. HIFLD has 102 pediatric records against the 148 Level I/II pediatric centers Melhado et al. counted, so the pediatric figures overstate distance.
 
-**Run time.** The run reported here took 14.3 minutes with downloads and routing tiles already cached, almost all of it Valhalla's matrix (about 14 minutes for 7,766 block groups). A first run from a clean checkout also downloads 2.6 GB and builds the tiles: see the issue comment for the timing. Five Maine island block groups have no road route and are left out of the routed figures.
+**Run time.** On 4 CPUs, a run from a clean checkout took 25 minutes: 30 seconds of downloads, 9.4 minutes cutting the OpenStreetMap extract and building routing tiles, and 14.7 minutes in Valhalla's matrix for 7,766 block groups. The national steps take seconds. A rerun reuses the downloads and tiles and takes about 15 minutes. Five Maine island block groups have no road route and are left out of the routed figures.
 
 ![Estimated drive time to the nearest Level I/II adult trauma center, pediatric trauma center and burn center](outputs/map_drive_time.png)
 
