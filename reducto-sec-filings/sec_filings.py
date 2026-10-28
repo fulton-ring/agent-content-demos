@@ -956,6 +956,29 @@ def _(BY_SLUG, PIPELINES, SCORES):
     return (EXAMPLES,)
 
 
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ## 7. What didn't work, and what to read into it
+
+    - **The first scoring blamed the readers for the key's mistakes.** Every pipeline showed the same ~70 wrong
+      values. They came from Simon Property's combined filing, which repeats every line in one `R` page; from
+      Deere's segment columns, which column alignment first looked past; and from comprehensive-income and
+      percent-of-sales lines that the prompt tells pipelines to skip. Section 2 and section 5 now handle all
+      three, the same way for every pipeline. When every reader gets the same value wrong, suspect the key.
+    - **Finding the statements in print needs care.** Quarterly-data tables in the notes and MD&A summaries print
+      many of the same numbers. Hence the title rule in section 3. For Deere it still chose the supplemental
+      consolidating cash-flow statement, whose 12 columns include the consolidated ones. That page caused every
+      silent failure in the run.
+    - **Two filings couldn't be used.** Eli Lilly's 2011 filing has only the older XML viewer pages. Sturm
+      Ruger's printed PDF puts every character on its own line in the text layer, so its statements couldn't be
+      found. Reserves replaced both.
+    - **Signs aren't scored**, and a row whose numbers are all wrong under a label that differs from XBRL's
+      counts as missing, so "wrong" is a floor (see the README).
+    """)
+    return
+
+
 @app.cell
 def _(CORPUS_TABLE, EXAMPLES, FILING_TABLE, MAIN_TABLE, SUBSET_TABLE, TYPE_TABLE):
     RESULTS.mkdir(exist_ok=True)
