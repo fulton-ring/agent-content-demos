@@ -8,8 +8,8 @@ app = marimo.App(width="medium")
 def _():
     import json
     import os
-    import subprocess
     import time
+    from collections.abc import Callable
     from concurrent.futures import ThreadPoolExecutor
     from pathlib import Path
 
@@ -21,6 +21,7 @@ def _():
     import pandas as pd
     import rasterio
     from rasterio.features import rasterize
+    from rasterio.io import DatasetReader
     from rasterio.transform import Affine
     from rasterio.windows import Window
     from scipy.sparse import csr_matrix
@@ -31,6 +32,8 @@ def _():
 
     return (
         Affine,
+        Callable,
+        DatasetReader,
         GroupKFold,
         HistGradientBoostingRegressor,
         Path,
@@ -50,7 +53,6 @@ def _():
         rasterio,
         rasterize,
         roc_auc_score,
-        subprocess,
         time,
     )
 
@@ -143,7 +145,25 @@ def _(Path, os, time):
 
 
 @app.cell
-def _(DATA_DIR, Path, httpx):
+def _(Callable, DATA_DIR, DatasetReader, GDAL_ENV, Path, httpx, rasterio, time):
+    def read_remote[T](url: str, read: Callable[[DatasetReader], T], overview: int = -1) -> T:
+        """Open a remote raster over HTTP range requests and return read(dataset).
+
+        Source Cooperative now and then answers a range request with a bad body. GDAL caches
+        what it got for that URL, so each retry adds a dummy query string to start afresh.
+        """
+        kwargs = {"overview_level": overview} if overview >= 0 else {}
+        for attempt in range(4):
+            href = url if attempt == 0 else f"{url}?retry={attempt}"
+            try:
+                with rasterio.Env(**GDAL_ENV), rasterio.open(f"/vsicurl/{href}", **kwargs) as src:
+                    return read(src)
+            except rasterio.errors.RasterioIOError:
+                if attempt == 3:
+                    raise
+                time.sleep(5 * 2**attempt)
+        raise AssertionError("unreachable")
+
     def fetch(url: str, name: str) -> Path:
         """Download a file once into data/ and return its path."""
         path = DATA_DIR / name
@@ -163,7 +183,7 @@ def _(DATA_DIR, Path, httpx):
         lines = Path("/proc/net/dev").read_text().splitlines()[2:]
         return sum(int(line.split(":")[1].split()[0]) for line in lines)
 
-    return fetch, rx_bytes
+    return fetch, read_remote, rx_bytes
 
 
 @app.cell
@@ -275,7 +295,6 @@ def _(
     ALBERS,
     Affine,
     DATA_DIR,
-    GDAL_ENV,
     ThreadPoolExecutor,
     YEAR,
     bg,
@@ -283,8 +302,8 @@ def _(
     gpd,
     np,
     pd,
-    rasterio,
     rasterize,
+    read_remote,
     rx_bytes,
     time,
 ):
@@ -301,25 +320,9 @@ def _(
         if cache.exists():
             return dict(np.load(cache))
         url = AEF_BASE + tile["path"].split("/v1/annual", 1)[1]
-        for attempt in range(4):  # Source Cooperative sometimes drops a range request.
-            try:
-                with (
-                    rasterio.Env(**GDAL_ENV),
-                    rasterio.open(f"/vsicurl/{url}", overview_level=3) as r,
-                ):
-                    raw = r.read()
-                    res, west, south, flip = (
-                        r.transform.a,
-                        r.transform.c,
-                        r.transform.f,
-                        r.transform.e,
-                    )
-                break
-            except rasterio.errors.RasterioIOError:
-                if attempt == 3:
-                    raise
-                time.sleep(5 * 2**attempt)
-        assert flip > 0, "expected a bottom-up file"
+        raw, transform = read_remote(url, lambda r: (r.read(), r.transform), overview=3)
+        res, west, south = transform.a, transform.c, transform.f
+        assert transform.e > 0, "expected a bottom-up file"
         raw = raw[:, ::-1, :]
         n_rows, n_cols = raw.shape[1:]
         top_down = Affine(res, 0, west, 0, -res, south + res * n_rows)
@@ -404,7 +407,6 @@ def _(mo):
 @app.cell
 def _(
     DATA_DIR,
-    GDAL_ENV,
     NLCD_URL,
     ThreadPoolExecutor,
     Window,
@@ -413,6 +415,7 @@ def _(
     pd,
     rasterio,
     rasterize,
+    read_remote,
     rx_bytes,
     time,
 ):
@@ -424,21 +427,21 @@ def _(
     if _cache.exists():
         nlcd_counts = np.load(_cache)
     else:
-        with rasterio.Env(**GDAL_ENV), rasterio.open(f"/vsicurl/{NLCD_URL}") as _src:
-            _bg = bg.to_crs(_src.crs)
-            _full = _src.window(*_bg.total_bounds).round_offsets().round_lengths()
-            _step = 4096
-            _windows = [
-                Window(
-                    c,
-                    r,
-                    min(_step, _full.col_off + _full.width - c),
-                    min(_step, _full.row_off + _full.height - r),
-                )
-                for r in range(_full.row_off, _full.row_off + _full.height, _step)
-                for c in range(_full.col_off, _full.col_off + _full.width, _step)
-            ]
-            _src_transform = _src.transform
+        _crs, _src_transform = read_remote(NLCD_URL, lambda r: (r.crs, r.transform))
+        _bg = bg.to_crs(_crs)
+        _full = rasterio.windows.from_bounds(*_bg.total_bounds, transform=_src_transform)
+        _full = _full.round_offsets().round_lengths()
+        _step = 4096
+        _windows = [
+            Window(
+                c,
+                r,
+                min(_step, _full.col_off + _full.width - c),
+                min(_step, _full.row_off + _full.height - r),
+            )
+            for r in range(_full.row_off, _full.row_off + _full.height, _step)
+            for c in range(_full.col_off, _full.col_off + _full.width, _step)
+        ]
 
         def window_counts(window: Window) -> np.ndarray:
             """Count NLCD pixels per (block group, class) in one window."""
@@ -458,8 +461,7 @@ def _(
             )
             if not ids.any():
                 return np.zeros((len(bg), k), np.int64)
-            with rasterio.Env(**GDAL_ENV), rasterio.open(f"/vsicurl/{NLCD_URL}") as src:
-                classes = _lookup[src.read(1, window=window)]
+            classes = _lookup[read_remote(NLCD_URL, lambda r: r.read(1, window=window))]
             inside = ids > 0
             flat = (ids[inside].astype(np.int64) - 1) * k + classes[inside]
             return np.bincount(flat, minlength=len(bg) * k).reshape(len(bg), k)
