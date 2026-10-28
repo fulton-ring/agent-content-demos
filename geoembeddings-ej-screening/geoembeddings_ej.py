@@ -179,9 +179,13 @@ def _(Callable, DATA_DIR, DatasetReader, GDAL_ENV, Path, httpx, rasterio, time):
         return path
 
     def rx_bytes() -> int:
-        """Bytes received on all network interfaces, to measure what each step downloads."""
+        """Bytes received from outside the machine, to measure what each step downloads.
+
+        Loopback is left out: behind a local proxy every byte would otherwise count twice.
+        """
         lines = Path("/proc/net/dev").read_text().splitlines()[2:]
-        return sum(int(line.split(":")[1].split()[0]) for line in lines)
+        rows = [line.split(":") for line in lines]
+        return sum(int(stats.split()[0]) for name, stats in rows if name.strip() != "lo")
 
     return fetch, read_remote, rx_bytes
 
