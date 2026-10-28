@@ -1,11 +1,14 @@
-"""The four pipelines and the scoring that both notebooks share.
+"""The pipelines and the scoring that both notebooks share.
 
-A pipeline takes a Task (a PDF, the pages the answer is on, and what to read) and returns a Result. To add a fifth,
-such as Reducto Parse, write one more async function with the same signature and add it to PIPELINES.
+A pipeline takes a Task (a PDF, the pages the answer is on, and what to read) and returns a Result. Four are open
+(Docling, Gemini, or both); two are Reducto's paid API, Parse and Extract. To add one, write one more async function
+with the same signature and add it to PIPELINES.
 """
 
 import asyncio
 import io
+import json
+import os
 import re
 import time
 from collections.abc import Awaitable, Callable
@@ -23,6 +26,10 @@ from docling_core.types.doc import DoclingDocument, TableItem
 from pydantic import BaseModel, Field
 from pydantic_ai import BinaryContent
 from rapidfuzz import fuzz
+from reducto import Reducto
+from reducto.types.formatting_param import FormattingParam
+from reducto.types.instructions_param import InstructionsParam
+from reducto.types.settings_param import SettingsParam
 
 import model_call
 
@@ -197,17 +204,101 @@ async def docling_then_vlm(task: Task, run: Runner) -> Result:
     return result
 
 
+# Reducto's list prices per page from 2026-09-01 (docs.reducto.ai/reference/credit-usage): Parse r-1 $10 and Extract
+# $20 per 1,000 pages. The API reports pages, not dollars, so cost is pages times these.
+REDUCTO_USD_PER_PAGE = {"parse": 0.010, "extract": 0.020}
+REDUCTO_ATTEMPTS = 3
+
+
+def _reducto_call(task: Task, endpoint: Literal["parse", "extract"]) -> dict[str, Any]:
+    """One Reducto call on the task's pages, with Parse's r-1 model. Uploads the PDF first. Raises on failure."""
+    client = Reducto()
+    upload = client.upload(file=task.pdf)
+    pages: SettingsParam = {"model": "r-1", "page_range": {"start": min(task.pages), "end": max(task.pages)}}
+    if endpoint == "parse":
+        tables: FormattingParam = {"table_output_format": "json"}
+        response = client.parse.run(input=upload.file_id, settings=pages, formatting=tables)
+    else:
+        schema = OUTPUT_TYPES[task.kind].model_json_schema()
+        instructions: InstructionsParam = {"schema": schema, "system_prompt": f"{INSTRUCTIONS} {prompt(task)}"}
+        response = client.extract.run(input=upload.file_id, instructions=instructions, parsing={"settings": pages})
+    answer = response.model_dump(mode="json")
+    assert answer["result"] is not None, f"Reducto {endpoint} returned no result"
+    return answer
+
+
+async def _reducto(task: Task, run: Runner, endpoint: Literal["parse", "extract"]) -> tuple[dict[str, Any], Result]:
+    """Reducto's answer, saved like the model's so a re-run reuses it, with its cost at list price."""
+    saved = run.out / "answers" / "reducto" / endpoint / f"{task.name}.json"
+    if not saved.exists():
+        if not os.environ.get("REDUCTO_API_KEY"):
+            return {}, Result(None, error="REDUCTO_API_KEY isn't set")
+        t0, error = time.time(), ""
+        for attempt in range(REDUCTO_ATTEMPTS):
+            try:
+                async with run.slots:
+                    answer = await asyncio.to_thread(_reducto_call, task, endpoint)
+                break
+            except Exception as e:  # rate limits, server errors; reported after the last attempt
+                error = f"{type(e).__name__}: {e!s:.200}"
+                await asyncio.sleep(10 * (attempt + 1))
+        else:
+            return {}, Result(None, error=error)
+        saved.parent.mkdir(parents=True, exist_ok=True)
+        saved.write_text(json.dumps({"seconds": time.time() - t0, "answer": answer}))
+    stored = json.loads(saved.read_text())
+    pages = stored["answer"]["usage"]["num_pages"]
+    result = Result(None, usd=pages * REDUCTO_USD_PER_PAGE[endpoint], seconds=stored["seconds"], pages_read=pages)
+    return stored["answer"], result
+
+
+def _cells(table_json: str) -> list[list[str]]:
+    """A Parse table block's JSON rows, with the HTML tags it puts in cells (<b>, <sup>) dropped."""
+    return [[re.sub(r"<[^>]+>", "", str(c)) for c in row] for row in json.loads(table_json)]
+
+
+async def reducto_parse(task: Task, run: Runner) -> Result:
+    """Every table Reducto Parse finds on the task's pages, joined with header rows kept, as for Docling alone."""
+    answer, result = await _reducto(task, run, "parse")
+    if not answer:
+        return result
+    if task.kind == "fields":
+        result.error = "Parse returns blocks, not form lines; Extract fills them"
+        return result
+    blocks = [b for chunk in answer["result"]["chunks"] for b in chunk["blocks"]]
+    if task.kind == "text":
+        result.output = {"text": " ".join(b["content"] for b in blocks)}
+    else:
+        result.output = {"rows": [row for b in blocks if b["type"] == "Table" for row in _cells(b["content"])]}
+    return result
+
+
+async def reducto_extract(task: Task, run: Runner) -> Result:
+    """Reducto Extract, given the same schema and prompt as Gemini."""
+    answer, result = await _reducto(task, run, "extract")
+    if not answer:
+        return result
+    output = answer["result"][0] if isinstance(answer["result"], list) else answer["result"]
+    result.output = OUTPUT_TYPES[task.kind].model_validate(output).model_dump()
+    return result
+
+
 PIPELINES: dict[str, Callable[[Task, Runner], Awaitable[Result]]] = {
     "Docling alone": docling_alone,
     "Gemini, whole PDF": vlm_whole_pdf,
     "Gemini, page by page": vlm_page_by_page,
     "Docling, then Gemini": docling_then_vlm,
+    "Reducto Parse": reducto_parse,
+    "Reducto Extract": reducto_extract,
 }
 
 
 def norm(value: Any) -> str:
     """A cell in a form that compares fairly: numbers by value and sign, dashes and leaders as empty, text loosely."""
     text = re.sub(r"\s+", "", str(value)).lower()
+    text = re.sub(
+        "[\u00b9\u00b2\u00b3\u2070-\u2079]", "", text
+    )  # a footnote marker kept as a superscript, as Reducto does
     text = text.replace("−", "-").replace("–", "-").replace("—", "-")
     if re.fullmatch(r"[-.…_]*", text):
         return ""
@@ -220,7 +311,7 @@ def norm(value: Any) -> str:
         negative = bool(number.group(2)) or (number.group(1) + number.group(4) in ("()", "<>"))
         amount = -amount if negative and amount else amount
         return "#" + format(amount.normalize(), "f")
-    return re.sub(r"[^a-z0-9.%?]+", "", text)
+    return re.sub(r"[^a-z0-9.%?]+", "", re.sub(r"\.{2,}", "", text))  # leader dots after a row label
 
 
 def same(found: Any, key: str | list[str]) -> bool:
