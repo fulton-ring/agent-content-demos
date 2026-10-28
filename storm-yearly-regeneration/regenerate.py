@@ -742,6 +742,7 @@ def _(
     last_season,
     log,
     pd,
+    time,
     work,
     write,
 ):
@@ -751,6 +752,7 @@ def _(
     ]
     _todo = [(i, f) for i, f in enumerate(track_files) if not f.exists()]
     _seconds = {}
+    _start = time.perf_counter()
     with ProcessPoolExecutor(max_workers=min(WORKERS, max(len(_todo), 1))) as _pool:
         _jobs = {
             i: _pool.submit(generator.run_chunk, work, SEED * 1000 + i, 1000, f) for i, f in _todo
@@ -758,6 +760,7 @@ def _(
         for _i, _job in _jobs.items():
             _seconds[_i] = _job.result()
             log.info("file %d: %.0f s", _i, _seconds[_i])
+    generator_wall_seconds = time.perf_counter() - _start
     run_timing = pd.DataFrame(
         {
             "file": range(len(track_files)),
@@ -769,7 +772,7 @@ def _(
     if _seconds:
         write(run_timing, "run_timing.csv")
     run_timing
-    return run_timing, track_files, track_folder
+    return generator_wall_seconds, run_timing, track_files, track_folder
 
 
 @app.cell
@@ -782,6 +785,7 @@ def _(
     era5_record,
     era5_seconds,
     first_season,
+    generator_wall_seconds,
     ibtracs_record,
     json,
     last_season,
@@ -792,11 +796,8 @@ def _(
     storm_commits,
     track_folder,
 ):
-    # What publish.py needs to describe this run; timings are kept from the run that made them.
-    _previous = RESULTS / "run.json"
-    _old = json.loads(_previous.read_text()) if _previous.exists() else {}
-    _same = _old.get("baseline") == [first_season, last_season] and _old.get("seed") == SEED
-    _generated = run_timing["seconds_this_run"].notna().all()
+    # What publish.py needs to describe this run. Timings are this run's; a step whose output
+    # was already cached shows as near zero, so publish from a run with an empty cache.
     run = {
         "baseline": [first_season, last_season],
         "seed": SEED,
@@ -805,15 +806,10 @@ def _(
         "cpu_count": os.cpu_count(),
         "storm_commits": storm_commits,
         "track_folder": str(track_folder),
-        "era5_seconds": era5_seconds
-        if era5_seconds > 60 or not _same
-        else _old.get("era5_seconds"),
-        "preprocessing_seconds": preprocessing_seconds
-        if preprocessing_seconds > 60 or not _same
-        else _old.get("preprocessing_seconds"),
-        "generator_cpu_seconds": float(run_timing["seconds_this_run"].sum())
-        if _generated or not _same
-        else _old.get("generator_cpu_seconds"),
+        "era5_seconds": era5_seconds,
+        "preprocessing_seconds": preprocessing_seconds,
+        "generator_cpu_seconds": float(run_timing["seconds_this_run"].fillna(0).sum()),
+        "generator_wall_seconds": generator_wall_seconds,
         "track_megabytes": float(run_timing["megabytes"].sum()),
         "inputs": [ibtracs_record, era5_record, *code_records],
     }
