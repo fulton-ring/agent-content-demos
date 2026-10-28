@@ -300,11 +300,26 @@ def _(
         cache = DATA_DIR / "aef" / f"{YEAR}-{tile['utm_zone']}-{name}.npz"
         if cache.exists():
             return dict(np.load(cache))
-        url = tile["path"].replace("s3://us-west-2.opendata.source.coop", AEF_BASE[:-17])
-        with rasterio.Env(**GDAL_ENV), rasterio.open(f"/vsicurl/{url}", overview_level=3) as r:
-            raw = r.read()
-            res, west, south = r.transform.a, r.transform.c, r.transform.f
-        assert r.transform.e > 0, "expected a bottom-up file"
+        url = AEF_BASE + tile["path"].split("/v1/annual", 1)[1]
+        for attempt in range(4):  # Source Cooperative sometimes drops a range request.
+            try:
+                with (
+                    rasterio.Env(**GDAL_ENV),
+                    rasterio.open(f"/vsicurl/{url}", overview_level=3) as r,
+                ):
+                    raw = r.read()
+                    res, west, south, flip = (
+                        r.transform.a,
+                        r.transform.c,
+                        r.transform.f,
+                        r.transform.e,
+                    )
+                break
+            except rasterio.errors.RasterioIOError:
+                if attempt == 3:
+                    raise
+                time.sleep(5 * 2**attempt)
+        assert flip > 0, "expected a bottom-up file"
         raw = raw[:, ::-1, :]
         n_rows, n_cols = raw.shape[1:]
         top_down = Affine(res, 0, west, 0, -res, south + res * n_rows)
@@ -333,7 +348,7 @@ def _(
         ok = pv[0] != -128
         pv = (pv / 127.5) ** 2 * np.sign(pv)
         # Keyed by GEOID, so the cache stays valid if the block-group table changes.
-        geoids = bg["geoid"].to_numpy()
+        geoids = bg["geoid"].to_numpy().astype("U12")
         out = {
             "geoids": geoids[uniq],
             "sums": sums,
@@ -516,11 +531,12 @@ def _(mo):
     ## Step 2: how well each feature set predicts each indicator
 
     The same model (scikit-learn's histogram gradient boosting, default settings) is fitted
-    on three feature sets: NLCD shares, embeddings, and both. Scores are on held-out
-    **counties**: five folds of whole counties, so a model never sees a neighbour of the
-    block group it is scoring. A second, harder test trains on Texas only and scores
-    Louisiana. We report R² of the predicted national percentile, and the AUC for
-    picking out the block groups at or above the 90th national percentile.
+    on four feature sets: NLCD shares, embeddings, both, and, as a check on what the
+    embeddings are really carrying, nothing but the block group's coordinates. Scores are
+    on held-out **counties**: five folds of whole counties, so a model never sees the
+    block groups around the one it is scoring. A second, harder test trains on Texas only
+    and scores Louisiana. We report R² of the predicted national percentile, and the AUC
+    for picking out the top decile of block groups in the two states.
     """)
     return
 
@@ -546,6 +562,7 @@ def _(
         "nlcd": pd.concat([nlcd_share, nlcd_ctx], axis=1),
         "embeddings": aef,
         "both": pd.concat([nlcd_share, nlcd_ctx, aef], axis=1),
+        "location": pd.DataFrame({"x": bg["point"].x, "y": bg["point"].y}),
     }
     _folds = list(GroupKFold(n_splits=5).split(bg, groups=bg["county"]))
     _tx, _la = (bg["st_abbrev"] == "TX").to_numpy(), (bg["st_abbrev"] == "LA").to_numpy()
@@ -565,7 +582,7 @@ def _(
                 _train, _test = _train[_has[_train]], _test[_has[_test]]
                 _pred[_test] = model().fit(_X[_train], _y[_train]).predict(_X[_test])
             cv_predictions[(_target, _name)] = _pred
-            _top = _y[_has] >= 90
+            _top = _y[_has] >= np.nanpercentile(_y, 90)
             _fit = model().fit(_X[_tx & _has], _y[_tx & _has])
             _rows.append(
                 {
@@ -590,7 +607,7 @@ def _(OUT_DIR, scores):
     scores.round(3).to_csv(OUT_DIR / "prediction_scores.csv", index=False)
     score_table = scores.pivot(
         index=["kind", "indicator"], columns="features", values="r2_county_cv"
-    )[["nlcd", "embeddings", "both"]]
+    )[["location", "nlcd", "embeddings", "both"]]
     score_table["gain"] = score_table["embeddings"] - score_table["nlcd"]
     score_table.sort_values(["kind", "embeddings"], ascending=[False, False]).round(2)
     return (score_table,)
@@ -604,9 +621,13 @@ def _(OUT_DIR, plt, score_table):
     _ax.hlines(_y, _t["nlcd"], _t["embeddings"], color="#bbb", lw=2)
     _ax.scatter(_t["nlcd"], _y, color="#8a8a8a", label="NLCD land-cover shares", zorder=3)
     _ax.scatter(_t["embeddings"], _y, color="#2b6cb0", label="AlphaEarth embeddings", zorder=3)
+    _ax.scatter(
+        _t["location"], _y, color="#d69e2e", marker="|", s=120, label="coordinates only", zorder=2
+    )
     _ax.set_yticks(list(_y), [f"{i} ({k[:4]}.)" for k, i in _t.index])
     _ax.set_xlabel("R² of national percentile, held-out counties (LA + TX)")
     _ax.axvline(0, color="#ddd", lw=1)
+    _ax.set_xlim(-0.3, 1)
     _ax.legend(loc="lower right", frameon=False)
     _ax.set_title("How well each feature set predicts EJScreen 2024 indicators")
     _fig.tight_layout()
@@ -666,7 +687,7 @@ def _(ALBERS, aef, bg, gpd, np, pd, unit):
         ["geoid", "st_abbrev", "cnty_name", "acstotpop", "flag_ejscreen", "flag_cejst", "flag_any"]
     ].copy()
     sim["similarity"] = _sim.max(1)
-    sim["nearest_seed"] = places["place"].to_numpy()[_seeds][_sim.argmax(1)]
+    sim["nearest_seed"] = places[places["role"] == "seed"]["place"].to_numpy()[_sim.argmax(1)]
     _seed_xy = np.c_[bg["point"].x, bg["point"].y][_seeds]
     _d = np.hypot(
         bg["point"].x.to_numpy()[:, None] - _seed_xy[:, 0],
