@@ -6,6 +6,7 @@ app = marimo.App(width="medium")
 with app.setup:
     import base64
     import hashlib
+    import http.client
     import io
     import json
     import os
@@ -112,7 +113,7 @@ def _():
                     if r.status != 200:
                         raise RuntimeError(f"{url} returned HTTP {r.status}")
                     return r.read()
-            except (OSError, RuntimeError):
+            except (OSError, RuntimeError, http.client.HTTPException):
                 if attempt == 3:
                     raise
                 time.sleep(2 ** (attempt + 1))
