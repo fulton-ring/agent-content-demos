@@ -24,7 +24,7 @@ def _():
     from rasterio.transform import Affine
     from rasterio.windows import Window
     from scipy.sparse import csr_matrix
-    from scipy.spatial import cKDTree
+    from scipy.spatial import KDTree
     from sklearn.ensemble import HistGradientBoostingRegressor
     from sklearn.metrics import r2_score, roc_auc_score
     from sklearn.model_selection import GroupKFold
@@ -36,7 +36,7 @@ def _():
         Path,
         ThreadPoolExecutor,
         Window,
-        cKDTree,
+        KDTree,
         csr_matrix,
         gpd,
         httpx,
@@ -496,9 +496,9 @@ def _(mo):
 
 
 @app.cell
-def _(aef_count, aef_sum, bg, cKDTree, csr_matrix, nlcd_counts, np, pd):
+def _(aef_count, aef_sum, bg, KDTree, csr_matrix, nlcd_counts, np, pd):
     _xy = np.c_[bg["point"].x, bg["point"].y]
-    _pairs = cKDTree(_xy).query_pairs(5000, output_type="ndarray")
+    _pairs = KDTree(_xy).query_pairs(5000, output_type="ndarray")
     _n = len(bg)
     _r = np.r_[_pairs[:, 0], _pairs[:, 1], np.arange(_n)]
     _c = np.r_[_pairs[:, 1], _pairs[:, 0], np.arange(_n)]
@@ -571,7 +571,6 @@ def _(
         return HistGradientBoostingRegressor(random_state=0)
 
     _rows = []
-    cv_predictions = {}
     for _target in ENV + DEMOG:
         _y = bg[f"p_{_target}"].to_numpy(float)
         _has = ~np.isnan(_y)
@@ -581,7 +580,6 @@ def _(
             for _train, _test in _folds:
                 _train, _test = _train[_has[_train]], _test[_has[_test]]
                 _pred[_test] = model().fit(_X[_train], _y[_train]).predict(_X[_test])
-            cv_predictions[(_target, _name)] = _pred
             _top = _y[_has] >= np.nanpercentile(_y, 90)
             _fit = model().fit(_X[_tx & _has], _y[_tx & _has])
             _rows.append(
@@ -599,7 +597,7 @@ def _(
             )
     scores = pd.DataFrame(_rows)
     fit_seconds = round(time.perf_counter() - _t)
-    return cv_predictions, feature_sets, fit_seconds, scores
+    return feature_sets, fit_seconds, scores
 
 
 @app.cell
@@ -680,9 +678,15 @@ def _(ALBERS, aef, bg, gpd, np, pd, unit):
     places = _places.assign(geoid=_hit["geoid"], row=_hit["index_right"])
     assert places["row"].notna().all(), "a seed point fell outside every block group"
 
-    _emb = unit(np.nan_to_num(aef.to_numpy()))
     _seeds = places[places["role"] == "seed"]["row"].astype(int).to_numpy()
-    _sim = _emb @ _emb[_seeds].T / 2  # both halves are unit length, so this is in [-1, 1]
+    _vectors = np.nan_to_num(aef.to_numpy())
+
+    def seed_similarity(columns: slice) -> np.ndarray:
+        """Cosine similarity of every block group to each seed, on some of the columns."""
+        emb = unit(_vectors[:, columns])
+        return emb @ emb[_seeds].T
+
+    _sim = seed_similarity(slice(0, 128))
     sim = bg[
         ["geoid", "st_abbrev", "cnty_name", "acstotpop", "flag_ejscreen", "flag_cejst", "flag_any"]
     ].copy()
@@ -697,8 +701,30 @@ def _(ALBERS, aef, bg, gpd, np, pd, unit):
     sim.loc[_seeds, "similarity"] = np.nan
     sim["rank"] = sim["similarity"].rank(ascending=False, method="first")
     places["rank"] = sim["rank"].to_numpy()[places["row"].astype(int)]
-    places[["place", "role", "geoid", "rank"]]
-    return places, sim
+
+    # Which part of the vector does the work: the block group's own pixels, its 5 km
+    # surroundings, or both (the version used above)?
+    _rows = {}
+    for _label, _cols in [
+        ("own block group", slice(0, 64)),
+        ("5 km context", slice(64, 128)),
+        ("both", slice(0, 128)),
+    ]:
+        _s = seed_similarity(_cols).max(1)
+        _s[_seeds] = np.nan
+        _rank = pd.Series(_s).rank(ascending=False, method="first")
+        _top = _rank <= 250
+        _rows[_label] = {
+            "top 250 flagged by either": round(sim["flag_any"][_top].mean(), 3),
+            "top 250 within 10 km of a seed": int((sim["km_to_seed"][_top] <= 10).sum()),
+            **{
+                p: int(_rank.iloc[int(r)])
+                for p, r in places[places.role == "check"][["place", "row"]].itertuples(index=False)
+            },
+        }
+    variants = pd.DataFrame(_rows)
+    variants
+    return places, sim, variants
 
 
 @app.cell
@@ -742,7 +768,7 @@ def _(mo):
 
 
 @app.cell
-def _(ALBERS, FACILITY_LAYERS, HIFLD, bg, cKDTree, fetch, gpd, lookalikes, np, pd, sim):
+def _(ALBERS, FACILITY_LAYERS, HIFLD, bg, KDTree, fetch, gpd, lookalikes, np, pd, sim):
     _frames = []
     for _kind, _path in FACILITY_LAYERS.items():
         _f = gpd.read_parquet(
@@ -753,7 +779,9 @@ def _(ALBERS, FACILITY_LAYERS, HIFLD, bg, cKDTree, fetch, gpd, lookalikes, np, p
         )
         _f = _f.to_crs(ALBERS)
         _f = _f[_f.geometry.notna() & ~_f.geometry.is_empty]
-        _f = gpd.GeoDataFrame({"kind": _kind}, geometry=_f.geometry.centroid, crs=ALBERS)
+        _f = gpd.GeoDataFrame(
+            {"kind": [_kind] * len(_f)}, geometry=_f.geometry.centroid.values, crs=ALBERS
+        )
         _frames.append(_f)
     facilities = pd.concat(_frames, ignore_index=True)
     _area = bg.union_all().buffer(5000)
@@ -762,10 +790,10 @@ def _(ALBERS, FACILITY_LAYERS, HIFLD, bg, cKDTree, fetch, gpd, lookalikes, np, p
     _pts = np.c_[bg["point"].x, bg["point"].y]
     for _kind in FACILITY_LAYERS:
         _sub = facilities[facilities["kind"] == _kind]
-        _tree = cKDTree(np.c_[_sub.geometry.x, _sub.geometry.y])
+        _tree = KDTree(np.c_[_sub.geometry.x, _sub.geometry.y])
         sim[f"n_{_kind}_3km"] = [len(i) for i in _tree.query_ball_point(_pts, 3000)]
     _heavy = ["refinery", "rmp", "tsdf", "terminal"]
-    sim["heavy_industry_3km"] = sim[[f"n_{k}_3km" for k in _heavy]].sum(1) > 0
+    sim["heavy_industry_3km"] = sim[[f"n_{k}_3km" for k in _heavy]].sum(axis=1) > 0
     _look = sim.loc[lookalikes.index]
     _cols = [f"n_{k}_3km" for k in FACILITY_LAYERS]
     facility_summary = pd.DataFrame(
@@ -787,39 +815,30 @@ def _(ALBERS, FACILITY_LAYERS, HIFLD, bg, cKDTree, fetch, gpd, lookalikes, np, p
 @app.cell
 def _(mo):
     mo.md(r"""
-    Then a hand check. Twenty unflagged look-alikes, drawn at random with a fixed seed,
-    each get a 3 km × 3 km chip of the newest NAIP aerial photo (USDA, public domain,
-    through Microsoft's Planetary Computer, which needs no account), with the block group
-    outlined and HIFLD facilities marked. Each chip was looked at and labelled by hand in
-    `hand_check.csv`: **real** if there is heavy industry (a refinery, chemical plant,
-    tank farm, port terminal or similar) within the chip next to homes, **not** if the
-    match is explained by something else, such as a rail yard, an airport or ordinary
-    commercial strip. The labels are the one part of this notebook that is human
-    judgment; the chips are in `outputs/naip/` so anyone can check them.
+    Then a hand check. Up to 20 unflagged look-alikes, drawn at random with a fixed seed
+    (with fewer than 20, all of them), each get a chip of the newest NAIP aerial photos
+    (USDA, public domain, mosaicked from Microsoft's Planetary Computer, which needs no
+    account) covering the whole block group plus 1 km, with the block group outlined and
+    HIFLD facilities marked. Each chip was looked at and labelled by hand in
+    `hand_check.csv`: **yes** if there is heavy industry (a refinery, chemical plant, tank
+    farm, port terminal or similar) next to the block group's homes, **partly** for
+    lighter industry next to homes, **no** if nothing like that is there. The labels are
+    the one part of this notebook that is human judgment (here, the worker agent's); the
+    chips are in `outputs/naip/` so anyone can check them.
     """)
     return
 
 
 @app.cell
-def _(
-    GDAL_ENV,
-    OUT_DIR,
-    bg,
-    facilities,
-    httpx,
-    lookalikes,
-    np,
-    plt,
-    rasterio,
-):
+def _(ALBERS, GDAL_ENV, OUT_DIR, bg, facilities, gpd, httpx, lookalikes, np, plt, rasterio):
+    from rasterio.merge import merge
+    from rasterio.vrt import WarpedVRT
+
     hand_sample = lookalikes[~lookalikes["flag_any"]].sample(
         min(20, int((~lookalikes["flag_any"]).sum())), random_state=0
     )
-    _token = (
-        httpx.get("https://planetarycomputer.microsoft.com/api/sas/v1/token/naip", timeout=60)
-        .raise_for_status()
-        .json()["token"]
-    )
+    _pc = "https://planetarycomputer.microsoft.com/api"
+    _token = httpx.get(f"{_pc}/sas/v1/token/naip", timeout=60).raise_for_status().json()["token"]
     _colors = {
         "refinery": "red",
         "rmp": "orange",
@@ -832,55 +851,57 @@ def _(
     naip_dates = {}
     for _i, _row in hand_sample.iterrows():
         _png = OUT_DIR / "naip" / f"{_row['geoid']}.png"
-        _pt = bg.loc[[_i], "point"].to_crs("EPSG:4326").iloc[0]
-        _search = (
+        # The chip covers the whole block group plus 1 km, and at least 3 km across.
+        _shape = bg.loc[[_i]]
+        _x0, _y0, _x1, _y1 = _shape.total_bounds
+        _half = max(_x1 - _x0, _y1 - _y0, 1000) / 2 + 1000
+        _cx, _cy = (_x0 + _x1) / 2, (_y0 + _y1) / 2
+        _ext = (_cx - _half, _cy - _half, _cx + _half, _cy + _half)
+        _box = gpd.GeoSeries.from_xy([_ext[0], _ext[2]], [_ext[1], _ext[3]], crs=ALBERS)
+        _box = _box.to_crs("EPSG:4326")
+        _items = (
             httpx.post(
-                "https://planetarycomputer.microsoft.com/api/stac/v1/search",
+                f"{_pc}/stac/v1/search",
                 json={
                     "collections": ["naip"],
-                    "limit": 1,
-                    "intersects": {"type": "Point", "coordinates": [_pt.x, _pt.y]},
-                    "sortby": [{"field": "datetime", "direction": "desc"}],
+                    "limit": 100,
+                    "bbox": [_box.x.min(), _box.y.min(), _box.x.max(), _box.y.max()],
                 },
                 timeout=60,
             )
             .raise_for_status()
             .json()["features"]
         )
-        assert _search, f"no NAIP image for {_row['geoid']}"
-        _item = _search[0]
-        naip_dates[_row["geoid"]] = _item["properties"]["datetime"][:10]
+        assert _items, f"no NAIP image for {_row['geoid']}"
+        _year = max(f["properties"]["naip:year"] for f in _items)
+        _items = [f for f in _items if f["properties"]["naip:year"] == _year]
+        _dates = sorted(f["properties"]["datetime"][:10] for f in _items)
+        naip_dates[_row["geoid"]] = f"{_dates[0]} to {_dates[-1]}"
         if _png.exists():
             continue
-        _href = _item["assets"]["image"]["href"] + "?" + _token
-        with rasterio.Env(**GDAL_ENV), rasterio.open(f"/vsicurl/{_href}") as _src:
-            _c = bg.loc[[_i], "point"].to_crs(_src.crs).iloc[0]
-            _win = _src.window(_c.x - 1500, _c.y - 1500, _c.x + 1500, _c.y + 1500)
-            _scale = max(1, int(round(3000 / _src.res[0] / 1000)))
-            _img = _src.read(
-                [1, 2, 3],
-                window=_win,
-                boundless=True,
-                fill_value=0,
-                out_shape=(3, int(_win.height / _scale), int(_win.width / _scale)),
-            )
-            _crs = _src.crs
+        with rasterio.Env(**GDAL_ENV):
+            _srcs = [
+                rasterio.open(f"/vsicurl/{f['assets']['image']['href']}?{_token}") for f in _items
+            ]
+            _vrts = [WarpedVRT(s, crs=ALBERS) for s in _srcs]
+            _img, _ = merge(_vrts, bounds=_ext, res=2 * _half / 900, indexes=[1, 2, 3])
+            for _d in _vrts + _srcs:
+                _d.close()
         _fig, _ax = plt.subplots(figsize=(6, 6))
-        _ext = (_c.x - 1500, _c.x + 1500, _c.y - 1500, _c.y + 1500)
-        _ax.imshow(np.moveaxis(_img, 0, -1), extent=_ext)
-        bg.loc[[_i]].to_crs(_crs).boundary.plot(ax=_ax, color="cyan", lw=1.5)
-        _f = facilities.to_crs(_crs).cx[_ext[0] : _ext[1], _ext[2] : _ext[3]]
+        _ax.imshow(np.moveaxis(_img, 0, -1), extent=(_ext[0], _ext[2], _ext[1], _ext[3]))
+        _shape.boundary.plot(ax=_ax, color="cyan", lw=1.5)
+        _f = facilities.cx[_ext[0] : _ext[2], _ext[1] : _ext[3]]
         for _k, _g in _f.groupby("kind"):
             _ax.scatter(_g.geometry.x, _g.geometry.y, s=30, c=_colors[_k], edgecolor="k", label=_k)
-        _ax.set_xlim(_ext[:2])
-        _ax.set_ylim(_ext[2:])
+        _ax.set_xlim(_ext[0], _ext[2])
+        _ax.set_ylim(_ext[1], _ext[3])
         _ax.set_axis_off()
         if len(_f):
             _ax.legend(loc="lower left", fontsize=7)
         _ax.set_title(
-            f"{_row['geoid']} {_row['cnty_name']}, {_row['st_abbrev']}  "
-            f"NAIP {naip_dates[_row['geoid']]}",
-            fontsize=9,
+            f"{_row['geoid']} {_row['cnty_name']}, {_row['st_abbrev']}, "
+            f"{2 * _half / 1000:.0f} km across, NAIP {naip_dates[_row['geoid']]}",
+            fontsize=8,
         )
         _fig.tight_layout()
         _fig.savefig(_png, dpi=110)
@@ -903,6 +924,7 @@ def _(HAND_CHECK, hand_sample, pd):
         "sampled": len(hand_sample),
         "labelled": len(_labelled),
         "real": int(_labelled["real"].eq("yes").sum()),
+        "partly": int(_labelled["real"].eq("partly").sum()),
         "unlabelled": sorted(set(hand_sample["geoid"]) - set(_labelled["geoid"])),
     }
     hand_result
@@ -962,9 +984,10 @@ def _(
     _emb = pd.DataFrame(aef_sum).groupby(_tract.to_numpy()).sum()
     _emb = pd.DataFrame(unit(_emb.to_numpy()), index=_emb.index).add_prefix("aef_")
     _lc = pd.DataFrame(nlcd_counts[:, :-1]).groupby(_tract.to_numpy()).sum()
-    _lc = _lc.div(_lc.sum(1).replace(0, np.nan), axis=0).add_prefix("nlcd_")
+    _lc = _lc.div(_lc.sum(axis=1).replace(0, np.nan), axis=0).add_prefix("nlcd_")
+    _xy = pd.DataFrame({"x": bg["point"].x, "y": bg["point"].y}).groupby(_tract).mean()
     _ok = pd.Series(aef_count).groupby(_tract.to_numpy()).sum() > 0
-    tracts = places_asthma.set_index("tractfips").join([_ej, _emb, _lc], how="inner")[
+    tracts = places_asthma.set_index("tractfips").join([_ej, _emb, _lc, _xy], how="inner")[
         lambda d: _ok.reindex(d.index).fillna(False)
     ]
     tracts = tracts.dropna(subset=["casthma_crudeprev"])
@@ -977,6 +1000,7 @@ def _(
         "embeddings": list(_emb.columns),
         "EJ indicators + embeddings": _ej_cols + list(_emb.columns),
         "EJ environmental + embeddings": [f"p_{c}" for c in ENV] + list(_emb.columns),
+        "EJ indicators + coordinates": _ej_cols + ["x", "y"],
     }
     _rows = []
     for _name, _cols in _sets.items():
@@ -1009,13 +1033,20 @@ def _(OUT_DIR, TOP_N, bg, facility_summary, places, plt, sim):
     # facility_summary added the facility counts to sim, so this cell runs after it.
     assert len(facility_summary)
     sim.round(4).to_csv(OUT_DIR / "similarity_block_groups.csv", index=False)
-    _fig, _axes = plt.subplots(1, 2, figsize=(13, 6.2), gridspec_kw={"width_ratios": [1.35, 1]})
+    _fig, _axes = plt.subplots(1, 3, figsize=(16, 6), gridspec_kw={"width_ratios": [1.4, 1, 1]})
     _g = bg[["geometry"]].assign(
         similarity=sim["similarity"], rank=sim["rank"], flag=sim["flag_any"]
     )
+    _seeds = bg.loc[places[places.role == "seed"]["row"].astype(int), "point"]
+    _checks = bg.loc[places[places.role == "check"]["row"].astype(int), "point"]
+
+    def around(x: float, y: float, km: float) -> tuple[float, float, float, float]:
+        return (x - km * 1000, x + km * 1000, y - km * 1000, y + km * 1000)
+
     for _ax, _bounds, _title in (
         (_axes[0], None, "Louisiana and Texas"),
-        (_axes[1], (-60000, 600000, 760000, 880000), "Houston to New Orleans"),
+        (_axes[1], around(_seeds.iloc[2].x, _seeds.iloc[2].y, 45), "Houston"),
+        (_axes[2], around(_seeds.iloc[0].x, _seeds.iloc[0].y, 45), "Mississippi River parishes"),
     ):
         _g.plot(
             column="similarity",
@@ -1026,20 +1057,30 @@ def _(OUT_DIR, TOP_N, bg, facility_summary, places, plt, sim):
             linewidth=0,
             legend=_ax is _axes[0],
             legend_kwds={"label": "similarity to nearest seed", "shrink": 0.6},
+            missing_kwds={"color": "#f6ad55"},
         )
         _top = _g[_g["rank"] <= TOP_N]
         _top[~_top["flag"]].boundary.plot(ax=_ax, color="red", lw=0.6)
         _top[_top["flag"]].boundary.plot(ax=_ax, color="white", lw=0.4)
-        _seeds = bg.loc[places[places.role == "seed"]["row"].astype(int), "point"]
-        _ax.scatter(_seeds.x, _seeds.y, marker="*", s=90, c="orange", edgecolor="k", zorder=4)
+        _ax.scatter(_seeds.x, _seeds.y, marker="*", s=120, c="orange", edgecolor="k", zorder=4)
+        _ax.scatter(
+            _checks.x,
+            _checks.y,
+            marker="o",
+            s=40,
+            facecolor="none",
+            edgecolor="orange",
+            lw=1.5,
+            zorder=4,
+        )
         if _bounds:
             _ax.set_xlim(_bounds[0], _bounds[1])
             _ax.set_ylim(_bounds[2], _bounds[3])
         _ax.set_axis_off()
         _ax.set_title(_title)
     _fig.suptitle(
-        f"Similarity to four fenceline seeds (stars). Top {TOP_N}: "
-        "white = already flagged by EJScreen or CEJST, red = not flagged"
+        f"Similarity to four fenceline seeds (stars); circles are the five held-out places. "
+        f"Top {TOP_N} outlined: white = already flagged by EJScreen or CEJST, red = not flagged"
     )
     _fig.tight_layout()
     _fig.savefig(OUT_DIR / "similarity_map.png", dpi=150)
@@ -1050,9 +1091,24 @@ def _(OUT_DIR, TOP_N, bg, facility_summary, places, plt, sim):
 @app.cell
 def _(mo):
     mo.md(r"""
-    ## What didn't work, and what this doesn't show
+    ## What it shows, and what didn't work
 
-    The numbers below are written to `outputs/summary.json`. The README discusses them.
+    - **Prediction.** Embeddings predict the land-use indicators (traffic, NO2, diesel PM,
+      hazardous-waste proximity) about as well as plain NLCD shares, not better. They beat
+      NLCD on ozone, PM2.5 and toxic air releases, but the block group's coordinates alone
+      do better still on those: the embeddings are telling the model *where* a block group
+      is, and these indicators are smooth regional fields. Trained on Texas and scored on
+      Louisiana, that advantage disappears. Demographics are predicted poorly by everything.
+    - **Look-alikes.** The most similar block groups are overwhelmingly ones EJScreen or
+      CEJST already flag, and half of them are the seeds' own neighbours. The unflagged
+      ones mostly look like the seeds' surroundings (river-parish cane fields and swamp,
+      Houston suburbs), not like their industry. The held-out fenceline places rank in the
+      thousands. Mean-pooled embeddings describe what most of a block group looks like,
+      and in a fenceline community most of it is houses.
+    - **Asthma.** Embeddings add to the EJ indicators about what coordinates add, so we
+      can't tell them apart from location.
+
+    The numbers are written to `outputs/summary.json`.
     """)
     return
 
@@ -1074,6 +1130,7 @@ def _(
     score_table,
     t_start,
     time,
+    variants,
 ):
     summary = {
         "embeddings": aef_stats,
@@ -1086,6 +1143,7 @@ def _(
             "flag_rates": flag_summary.to_dict("index"),
             "unflagged": int((~lookalikes["flag_any"]).sum()),
             "check_place_ranks": places[["place", "role", "rank"]].to_dict("records"),
+            "variants": variants.to_dict(),
         },
         "facilities_within_3km": facility_summary.round(3).to_dict("index"),
         "hand_check": hand_result,
