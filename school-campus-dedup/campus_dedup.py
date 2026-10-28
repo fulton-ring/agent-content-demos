@@ -476,11 +476,12 @@ def _(building_files, candidate_pairs, ccd, la_key, normalise_address, nyc_key, 
     _con = duckdb.connect()
     _con.sql("INSTALL geography FROM community; LOAD geography;")
     _shared = " + ".join(f"(s2_cell_parent(ca, {_l}) = s2_cell_parent(cb, {_l}))::INT" for _l in range(10, 25))
-    _cells = pairs[["a_lon", "a_lat", "b_lon", "b_lat"]]
+    _con.register("pair_points", pairs[["a_lon", "a_lat", "b_lon", "b_lat"]].reset_index(names="row"))
     pairs["s2_shared_level"] = (
         _con.sql(f"""
         SELECT 9 + {_shared} AS level FROM (
-            SELECT s2_cellfromlonlat(a_lon, a_lat) AS ca, s2_cellfromlonlat(b_lon, b_lat) AS cb FROM _cells)
+            SELECT row, s2_cellfromlonlat(a_lon, a_lat) AS ca, s2_cellfromlonlat(b_lon, b_lat) AS cb FROM pair_points)
+        ORDER BY row
     """)
         .df()["level"]
         .to_numpy()
