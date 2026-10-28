@@ -10,6 +10,8 @@ def _():
     import json
     import os
     import re
+    import shutil
+    import subprocess
     import time
     import warnings
     import zipfile
@@ -52,6 +54,8 @@ def _():
         pystac,
         rdata,
         re,
+        shutil,
+        subprocess,
         time,
         warnings,
         zipfile,
@@ -182,6 +186,13 @@ def _(Path, os, time):
                     "file": f"ejam_{_tag}_{_lookup}.rda",
                 }
             )
+    sources.append(
+        {
+            "key": "ejam_pctile_from_raw_lookup",
+            "url": f"{EJAM_RAW}/v3.2024.0/R/pctile_from_raw_lookup.R",
+            "file": "ejam_v3.2024.0_pctile_from_raw_lookup.R",
+        }
+    )
     sources.append(
         {
             "key": "ejam_v3.2024.0_headers",
@@ -550,7 +561,7 @@ def _(headers, np, pl):
         # R's signif(): round to a number of significant digits.
         with np.errstate(divide="ignore", invalid="ignore"):
             scale = 10.0 ** (digits - 1 - np.floor(np.log10(np.abs(values))))
-        return np.where(np.isfinite(scale), np.round(values * scale) / scale, values)
+            return np.where(np.isfinite(scale), np.round(values * scale) / scale, values)
 
     def ejscreen_percentiles(
         bg: pl.DataFrame, usastats: pl.DataFrame, statestats: pl.DataFrame
@@ -602,7 +613,7 @@ def _(headers, np, pl):
                     cut = cutoffs(state, state_raw, state_values[rows])
                     by_state[rows] = ranked(state_values[rows], cut, raw)
             out[f"S_{field}"] = by_state
-        frame = pl.DataFrame(out).with_columns(pl.exclude("bgfips").cast(pl.Int32))
+        frame = pl.DataFrame(out).with_columns(pl.exclude("bgfips").fill_nan(None).cast(pl.Int32))
         # Bins 1-9 by tens, 10 for the 90-94th percentile and 11 for the 95th and above.
         bins = {
             f"B_{f.removeprefix('P_')}": (pl.col(f) // 10 + 1).clip(upper_bound=10)
@@ -690,6 +701,61 @@ def _(
         pl.col("max_abs_diff").max(),
     ).sort("check")
     return bins_match, pctile_check, pctile_seconds
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    **Is the port faithful to EJAM's R code?** If R is installed, the notebook runs EJAM's
+    own `pctile_from_raw_lookup()` (`check_ejam_r.R`, base R only) on five columns of
+    v3.2022.3, nationally and by state, and counts the cells where R and Python disagree.
+    Without R this step is skipped.
+    """)
+    return
+
+
+@app.cell
+def _(DATA_DIR, ejam_2022_raw, lookups, manifest, pctiles_2022, pl, shutil, subprocess):
+    r_check = None
+    if shutil.which("Rscript"):
+        _columns = {
+            "proximity.npl": "P_PNPL",
+            "EJ.DISPARITY.rsei.eo": "P_D2_RSEI_AIR",
+            "pctlowinc": "P_LOWINCPCT",
+            "pm": "P_PM25",
+            "drinking": "P_DWATER",
+        }
+        _paths = [DATA_DIR / f"r_check_{n}.csv" for n in ["values", "us", "st", "out"]]
+        ejam_2022_raw.select(pl.col("bgfips").alias("ID"), "ST", *_columns).filter(
+            pl.col("ST").is_not_null()
+        ).write_csv(_paths[0])
+        lookups[("v3.2022.3", "usastats")].write_csv(_paths[1])
+        lookups[("v3.2022.3", "statestats")].write_csv(_paths[2])
+        subprocess.run(
+            [
+                "Rscript",
+                "check_ejam_r.R",
+                manifest["ejam_pctile_from_raw_lookup"]["path"],
+                *map(str, _paths[:3]),
+                ",".join(_columns),
+                str(_paths[3]),
+            ],
+            check=True,
+        )
+        _r = pl.read_csv(_paths[3], schema_overrides={"ID": pl.Utf8}, null_values="NA")
+        _joined = _r.join(pctiles_2022, left_on="ID", right_on="bgfips", how="inner")
+        _pairs = [(f"us_{raw}", field) for raw, field in _columns.items()] + [
+            (f"st_{raw}", f"S_{field}") for raw, field in _columns.items() if raw[:3] != "EJ."
+        ]
+        r_check = {
+            "rows": _joined.height,
+            "cells": _joined.height * len(_pairs),
+            "cells_different": sum(
+                int((~_joined[r].cast(pl.Float64).eq_missing(_joined[p])).sum()) for r, p in _pairs
+            ),
+        }
+    print("R check:", r_check or "skipped, Rscript not found")
+    return (r_check,)
 
 
 @app.cell
@@ -1295,6 +1361,9 @@ def _(OUT_DIR, gpd, outputs):
 def _(mo):
     mo.md(r"""
     ## 9. What the public copies leave out
+
+    EPA columns with nothing filled in EJAM's v3.2024.0 tables. The 150 percentile, bin
+    and text columns are the ones section 4 adds back to the hosted file.
     """)
     return
 
@@ -1327,11 +1396,16 @@ def _(ejam_raw, epa_raw, headers, pl):
 @app.cell
 def _(
     OUT_DIR,
+    bins_match,
     diff_summary,
     json,
     manifest,
     missing_from_ejam,
     outputs,
+    pctile_check,
+    pctile_seconds,
+    pl,
+    r_check,
     t_download,
     t_start,
     t_write,
@@ -1355,6 +1429,22 @@ def _(
             diff_summary["examples"].list.join(", ")
         ).to_dicts(),
         "epa_columns_missing_from_ejam": missing_from_ejam,
+        "percentiles": {
+            "seconds_per_vintage": round(pctile_seconds),
+            "check_vs_epa_2024": pctile_check.group_by("check")
+            .agg(
+                pl.len().alias("fields"),
+                pl.col("rows").first(),
+                (pl.col("share_exact") == 1).sum().alias("fields_all_exact"),
+                pl.col("share_exact").min().alias("lowest_share_exact"),
+                pl.col("mismatches").sum().alias("cells_different"),
+                pl.col("max_abs_diff").max(),
+            )
+            .sort("check")
+            .to_dicts(),
+            "b_pm25_share_matching_epa": bins_match,
+            "python_vs_ejam_r": r_check,
+        },
     }
     (OUT_DIR / "summary.json").write_text(json.dumps(summary, indent=1, default=str))
     print(f"total run time {t_total / 60:.1f} min")
@@ -1369,9 +1459,13 @@ def _(mo):
     - **R data without R is slow.** `rdata` takes about five minutes to parse each EJAM
       `blockgroupstats.rda`; `pyreadr` (librdata) reads the file but returns a single empty
       column for this data.table. The parsed table is cached, so only a first run pays.
-    - **EJAM v3.2024.0 has no per-block-group percentiles.** EJAM computes them when it runs
-      a report from its national and state lookup tables, so the hosted file has raw values
-      and EJ indexes but not EPA's `P_`, `B_` and `T_` columns (see section 8).
+    - **EJAM v3.2024.0 ships no per-block-group percentiles.** EJAM computes them when it
+      runs a report, so section 4 adds them from its lookup tables with a Python port of
+      its lookup rule, rather than running EJAM's R export, which needs R and the whole
+      EJAM package installed.
+    - **State percentiles can't be rebuilt for the island territories.** EJAM has no
+      values and empty state lookup tables for American Samoa, Guam, the Northern Mariana
+      Islands and the Virgin Islands, although EPA's `StatePct` file ranked them.
     - **Water-only block groups have no shape.** The cartographic boundary files leave out
       block groups that are all water, so about 440 rows per block-group file, with no
       population, have empty geometry. TIGER/Line block groups would fill them at the cost
