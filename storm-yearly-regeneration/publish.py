@@ -220,7 +220,9 @@ def _(mo):
 
 
 @app.cell
-def _(catalogue, first_season, json, last_season, os, release, subprocess):
+def _(catalogue, first_season, json, last_season, os, release, run, subprocess):
+    seed = run["seed"]
+
     def portolan(*args: str) -> str:
         """Run one Portolan CLI command in the catalogue; fail loudly on a non-zero exit."""
         done = subprocess.run(
@@ -275,10 +277,24 @@ def _(catalogue, first_season, json, last_season, os, release, subprocess):
         ),
         "keywords": ["tropical cyclone", "hurricane", "synthetic tracks", "STORM", "IBTrACS"],
     }
-    for _folder in (catalogue / ".portolan", catalogue / "storm-north-atlantic" / ".portolan"):
-        _folder.mkdir(parents=True, exist_ok=True)
+    # Titles and descriptions don't inherit in Portolan, so each level gets its own.
+    _release = {
+        **_metadata,
+        "title": f"STORM North Atlantic, IBTrACS {first_season}-{last_season}, seed {seed}",
+        "description": (
+            f"10,000 synthetic years refitted to IBTrACS {first_season}-{last_season}. "
+            "tracks.parquet has one point per 3-hourly fix; storm_text.zip is the same tracks "
+            "in STORM's text format; manifest.json lists inputs, code and checksums."
+        ),
+    }
+    for _folder, _values in (
+        (catalogue, {**_metadata, "title": "Fulton Ring synthetic hurricane tracks"}),
+        (catalogue / "storm-north-atlantic", _metadata),
+        (catalogue / "storm-north-atlantic" / release, _release),
+    ):
+        (_folder / ".portolan").mkdir(parents=True, exist_ok=True)
         # YAML is a superset of JSON, so the metadata file can be written as JSON.
-        (_folder / "metadata.yaml").write_text(json.dumps(_metadata, indent=2))
+        (_folder / ".portolan" / "metadata.yaml").write_text(json.dumps(_values, indent=2))
     _log.append(
         portolan("add", "--datetime", f"{last_season}-12-31", f"storm-north-atlantic/{release}")
     )
