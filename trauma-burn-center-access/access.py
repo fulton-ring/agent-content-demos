@@ -11,6 +11,8 @@ with app.setup:
     import shutil
     import subprocess
     import time
+    import urllib.error
+    import urllib.request
     from pathlib import Path
 
     import geopandas as gpd
@@ -18,7 +20,6 @@ with app.setup:
     import matplotlib
 
     matplotlib.use("Agg")
-    import httpx
     import matplotlib.pyplot as plt
     import numpy as np
     import pandas as pd
@@ -30,6 +31,8 @@ with app.setup:
     OUT = Path(os.environ.get("ACCESS_OUT_DIR", HERE / "outputs"))
     DATA.mkdir(parents=True, exist_ok=True)
     OUT.mkdir(parents=True, exist_ok=True)
+    # Wikipedia refuses requests whose User-Agent has no contact address.
+    USER_AGENT = "fulton-ring-agent-content-demos/0.1 (https://github.com/fulton-ring/agent-content-demos)"
     SEED = 148
     HAND_SAMPLE = {"adult": 30, "peds": 15, "burn": 20}
     EARTH_KM = 6371.0088
@@ -110,19 +113,11 @@ def _():
             part = dest.with_name(name + ".part")
             for attempt in range(4):
                 try:
-                    with httpx.stream(
-                        "GET",
-                        url,
-                        follow_redirects=True,
-                        timeout=600,
-                        headers={"User-Agent": "fulton-ring agent-content-demos (trauma-burn-center-access)"},
-                    ) as response:
-                        response.raise_for_status()
-                        with part.open("wb") as out:
-                            for chunk in response.iter_bytes(2**20):
-                                out.write(chunk)
+                    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+                    with urllib.request.urlopen(request, timeout=600) as response, part.open("wb") as out:
+                        shutil.copyfileobj(response, out, 2**20)
                     break
-                except httpx.HTTPError:
+                except (urllib.error.URLError, TimeoutError):
                     if attempt == 3:
                         raise
                     time.sleep(2 ** (attempt + 1))
