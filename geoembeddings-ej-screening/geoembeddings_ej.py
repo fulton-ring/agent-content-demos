@@ -1130,6 +1130,7 @@ def _(
     score_table,
     t_start,
     time,
+    tracts,
     variants,
 ):
     summary = {
@@ -1149,6 +1150,7 @@ def _(
         "hand_check": hand_result,
         "naip_dates": naip_dates,
         "asthma_r2_county_cv": asthma_scores.to_dict("records"),
+        "asthma_tracts": len(tracts),
         "run_seconds": round(time.perf_counter() - t_start),
     }
     (OUT_DIR / "summary.json").write_text(json.dumps(summary, indent=2, default=str))
