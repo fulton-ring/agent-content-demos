@@ -470,7 +470,7 @@ def _():
       of both.
     - **The model nests headings by meaning, not by type.** In the two-column USGS report, "Rainfall" and
       "El Niño ..." are set in the same type as "Climate", but Gemini put them under it. Docling's Markdown, which
-      flattens the type, made it worse.
+      flattens the type, didn't reliably help.
     - **Docling alone misses run-in headings** ("Chadron formation.--The ...") on the scan, and still puts almost
       every heading at level 1.
     """)
