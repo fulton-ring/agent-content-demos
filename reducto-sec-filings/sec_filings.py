@@ -159,8 +159,10 @@ def _():
     viewer. `FilingSummary.xml` says which page is which statement. Each `R` page gives the statement's line items,
     its period columns and every value. We keep the balance sheet, the income statement (which some filers call
     operations or earnings) and the cash-flow statement. We leave out the parenthetical, comprehensive-income and
-    equity statements. In a combined filing with more than one registrant, we take the first of each, which is the
-    parent's.
+    equity statements. Within the three, ratio lines (XBRL elements named `...Percent...`) are left out, and so are
+    the comprehensive-income lines that some filers print at the foot of their income statement; the prompt tells
+    every pipeline to skip those. A combined filing for a parent and its operating partnership (Simon Property)
+    repeats each line in one `R` page; repeated lines count once.
     """)
     return
 
@@ -184,16 +186,18 @@ def statement_type(name: str) -> str:
 
 
 @app.function
-def read_r_page(html: bytes) -> list[tuple[str, list[str]]]:
-    """An R page's line items: (label, the value shown in each period column, '' where there's none)."""
+def read_r_page(html: bytes) -> list[tuple[str, list[str], str]]:
+    """An R page's line items: (label, the value in each period column or '', the XBRL element's name)."""
     table = lxml.html.fromstring(html).xpath("//table")[0]
     rows = []
     for tr in table.xpath(".//tr[td[contains(@class, 'pl')]]"):
-        label = " ".join(tr.xpath("./td[contains(@class, 'pl')]")[0].text_content().split())
+        label_cell = tr.xpath("./td[contains(@class, 'pl')]")[0]
+        label = " ".join(label_cell.text_content().split())
+        element = re.search(r"defref_([\w-]+)", lxml.html.tostring(label_cell).decode())
         cells = tr.xpath("./td[contains(@class, 'num') or @class='text']")
         values = [" ".join(td.text_content().split()) for td in cells]
         if any(re.search(r"\d", v) for v in values):
-            rows.append((label, values))
+            rows.append((label, values, element.group(1) if element else ""))
     return rows
 
 
@@ -225,10 +229,16 @@ def _(CANDIDATES):
             if " - Statement - " not in _long or not _html:
                 continue
             _rows = read_r_page(sec_get(_base + _html))
-            _xbrl_numbers |= {n for _, values in _rows for v in values for n in numbers_in(v)}
+            _xbrl_numbers |= {n for _, values, _ in _rows for v in values for n in numbers_in(v)}
             _kind = statement_type(_report.findtext("ShortName") or _long)
             if _kind and _kind not in _keys:
-                _keys[_kind] = _rows
+                # Left out: ratios (J&J prints each line as a percent of sales) and, where a filer combines its
+                # income statement with comprehensive income, the comprehensive-income lines the prompt excludes.
+                _keys[_kind] = [
+                    (label, values)
+                    for label, values, element in _rows
+                    if "Percent" not in element and not (_kind == "income" and "ComprehensiveIncome" in element)
+                ]
         FILINGS.append(
             {
                 "name": _name,
@@ -354,7 +364,7 @@ def _(FILINGS, PRINTED, WANTED):
                 match = "0" if options[:1] == ["0"] else next((x for x in options if x in printed), None)
                 dropped += bool(options) and match is None
                 values.append(match if options else None)
-            if any(v is not None for v in values):
+            if any(v is not None for v in values) and (label, values) not in key:  # a combined filing repeats rows
                 key.append((label, values))
         return key, dropped
 
@@ -709,6 +719,8 @@ def _(CORPUS, FIELDS):
         if re.fullmatch(r"[\s$€£()\-–—.]*", text):
             return ""
         found = numbers_in(text)
+        if len(found) > 1 and all(len(n) == 1 for n in found[1:]):  # a footnote marker after the amount
+            return found[0]
         return found[0] if len(found) == 1 else text
 
     def right(found: Any, key: str) -> bool:
@@ -722,7 +734,7 @@ def _(CORPUS, FIELDS):
             [sum(1 for k in key if k[j] not in (None, "0") and k[j] in seen[i]) for i in range(width)]
             for j in range(len(key[0]))
         ]
-        options = itertools.permutations(range(min(width, 8)), len(key[0]))
+        options = itertools.permutations(range(min(width, 16)), len(key[0]))
         return max(options, key=lambda cols: sum(agree[j][i] for j, i in enumerate(cols)), default=())
 
     def score_statement(
