@@ -38,8 +38,8 @@
 | File | Size | Checksum |
 |------|------|----------|
 | ./tracks.parquet | 83.4 MB | 122025553008... |
-| ./storm_text.zip | 101.7 MB | 12206fe2ef14... |
-| ./manifest.json | 6.1 KB | 1220e1e44617... |
+| ./storm_text.zip | 101.7 MB | 1220e8a146dd... |
+| ./manifest.json | 6.1 KB | 1220bf113bd5... |
 | ./tracks.thumb.jpg | 20.8 KB | 1220b9a97220... |
 
 ## Quick Start

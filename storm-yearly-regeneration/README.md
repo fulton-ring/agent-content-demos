@@ -39,6 +39,8 @@ multipliers come out lower.** All numbers below come from `./run.sh` on a clean 
 | Hurricanes | 6.6 | 6.0 | 5.5 | 6.5 |
 | Major hurricanes | 2.9 | 3.0 | 2.6 | 2.8 |
 
+![Category shares by source](results/category_shares.png)
+
 - **On the US coast it inherits STORM's shortfall, and then some.** Median over NHC's 12 sites,
   as a rate against NHC's HURISK:
 
@@ -69,10 +71,10 @@ multipliers come out lower.** All numbers below come from `./run.sh` on a clean 
 
 ## Publishing it yearly
 
-- **Cost per run on 4 cores:** ERA5 means COST_ERA5; STORM preprocessing COST_PRE; generator
-  COST_GEN_PER CPU per 1,000 years, COST_GEN_TOTAL for 10,000 (COST_GEN_WALL wall). Validation
-  wind fields: about 55 min more for two catalogues.
-- **Disk:** 37 MB of STORM text per 1,000 years (372 MB for 10,000). A release is COST_REL MB:
+- **Cost per run on 4 cores:** ERA5 means 2.4 min, STORM preprocessing 4.3 min, generator
+  291 s CPU per 1,000 years (48.5 CPU-min for 10,000, 14.6 min wall). Validation wind fields
+  for both catalogues add about 55 min. The whole `./run.sh` took 78 min from an empty cache.
+- **Disk:** 37 MB of STORM text per 1,000 years (372 MB for 10,000). A release is 194 MB:
   GeoParquet points 87 MB, zipped STORM text 107 MB, plus metadata. About 6 GB of cache.
 - **Trigger:** a new North Atlantic season appears in IBTrACS with no `PROVISIONAL` tracks.
   That happens once NHC's post-season best tracks (HURDAT2) land, usually in spring. 2025 is
@@ -140,14 +142,7 @@ mirror (its server presented a self-signed certificate from here), NOAA PSL's NC
 
 ## Files
 
-```
-regenerate.py        inputs, patches, preprocessing, the 10,000-year run (marimo)
-validate.py          checks against the record, NHC, STORM v4, Odériz & Losada (marimo)
-publish.py           the yearly release as a Portolan catalogue, dry run (marimo)
-generator.py         STORM's master loop, in a module so a process pool can run it
-common.py            settings and download helpers shared by the notebooks
-tests/               the safe reader for STORM's pickled files
-results/             tables and figures from the run
-sample_catalogue/    the catalogue's metadata files (STAC, README, versions), without the data
-run.sh               the one command
-```
+`regenerate.py`, `validate.py`, `publish.py` (the notebooks); `generator.py` (STORM's master
+loop, a module so a process pool can run it); `common.py` (settings and downloads);
+`tests/` (the safe reader for STORM's pickles); `results/` (tables and figures from the run);
+`sample_catalogue/` (the catalogue's metadata without the data); `run.sh` (the one command).
