@@ -364,11 +364,18 @@ def _():
 def _(cached, ccd, normalise_address, schools):
     _nyc = pd.read_json(cached("nyc-school-locations-2019-20.json", NYC_LOCATIONS), dtype=str)
     _nyc = _nyc.merge(ccd[["ncessch", "beds"]], on="beds").merge(
-        schools[["NCESID", "ADDRESS"]], left_on="ncessch", right_on="NCESID"
+        schools[["NCESID", "ADDRESS", "geometry"]], left_on="ncessch", right_on="NCESID"
     )
     _house = _nyc["ADDRESS"].map(normalise_address).str.split().str[0]
     _nyc_house = _nyc["primary_address_line_1"].str.split().str[0]
     nyc_key = _nyc.loc[_house == _nyc_house].drop_duplicates("NCESID").set_index("NCESID")["primary_building_code"]
+    # How far HIFLD's point is from where the DOE places the same school (same house number in both).
+    _same = _nyc[(_house == _nyc_house) & pd.to_numeric(_nyc["latitude"], errors="coerce").notna()]
+    _doe = gpd.GeoSeries(
+        gpd.points_from_xy(_same["longitude"].astype(float), _same["latitude"].astype(float)), crs="EPSG:4326"
+    )
+    _offset = gpd.GeoSeries(_same["geometry"].to_numpy(), crs=METRIC).distance(_doe.to_crs(METRIC), align=False)
+    _offset.describe(percentiles=[0.5, 0.9, 0.95]).round(1).to_csv(OUT / "hifld_point_offset_nyc.csv")
 
     def arcgis_layer(layer: int) -> gpd.GeoDataFrame:
         """Every feature of one LAUSD map-service layer, 1,000 at a time."""
@@ -394,7 +401,9 @@ def _(cached, ccd, normalise_address, schools):
     _placed["NCESID"] = _placed["CDSCODE"].map(ccd.set_index("cds")["ncessch"])
     la_key = _placed.dropna(subset=["NCESID"]).groupby("NCESID")["site"].agg(frozenset)
     mo.md(
-        f"NYC key: {len(nyc_key):,} HIFLD schools with a building code. "
+        f"NYC key: {len(nyc_key):,} HIFLD schools with a building code. HIFLD's point is a median "
+        f"{_offset.median():.0f} m from the DOE's for the same school; {(_offset > 100).mean():.0%} are more than "
+        f"100 m off and {(_offset > 250).mean():.0%} more than 250 m. "
         f"LAUSD key: {len(la_key):,} HIFLD schools placed on one of {len(_campuses):,} campuses."
     )
     return la_key, nyc_key
@@ -570,15 +579,45 @@ def _(pairs):
 @app.cell(hide_code=True)
 def _():
     mo.md(r"""
+    **S2 cells.** Matching by "same S2 cell at level L" is a distance cut whose edges fall on a fixed grid. For pairs
+    whose points are within 10 m of each other, this is the share that land in different cells at each level.
+    """)
+    return
+
+
+@app.cell
+def _(pairs):
+    _close = pairs[pairs["distance_m"] <= 10]
+    s2_split = pd.DataFrame(
+        {
+            "level": range(14, 23),
+            "cell edge (m, approx.)": [600, 300, 150, 75, 38, 19, 10, 5, 2.4],
+            "pairs ≤10 m apart split into two cells %": [
+                round(100 * float((_close["s2_shared_level"] < _l).mean()), 1) for _l in range(14, 23)
+            ],
+        }
+    )
+    s2_split.to_csv(OUT / "s2_split.csv", index=False)
+    s2_split
+    return
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
     ## Asking Jev
 
     [Jev](https://openrouter.ai/docs/guides/community/jev) is a *decision model*: it takes a state and a typed
     question and returns a probability, not text. We ask one yes/no ("Noul") question per pair, through OpenRouter's
-    Decisions API, in two forms:
+    Decisions API, in three forms:
 
     - **text**: the two records and the geometry facts above, as JSON;
     - **text + image**: the same, plus a USGS aerial image of the pair (public domain, from The National Map) with
-      point A marked in red and B in blue.
+      point A marked in red and B in blue;
+    - **text + address geocodes**: the text, plus the distance between the two reported addresses as geocoded by the
+      [Census Bureau's batch geocoder](https://geocoding.geo.census.gov/geocoder/) (free, no key), and a sentence
+      saying the map points are sometimes misplaced. We added this after the first run: in the answer key, many
+      pairs whose points sit in one building have different addresses and really are in different buildings.
 
     For comparison we put the same text and image to a cheap chat model and ask it to state a probability. Every
     answer is checked against a schema and cached in `data/answers/`, so a rerun costs nothing.
@@ -765,6 +804,8 @@ def _(METHODS, answers, pairs):
     scored["near_10m"] = (scored["distance_m"] <= 10).astype(float)
     scored["near_50m"] = (scored["distance_m"] <= 50).astype(float)
     scored["closeness"] = -scored["distance_m"]
+    # A pair with an address the Census can't place gets the worst score, so it is never merged on this rule alone.
+    scored["geocoded_closeness"] = -scored["geocoded_distance_m"].fillna(1e6)
     scored["s2_18"] = (scored["s2_shared_level"] >= 18).astype(float)
     scored["s2_20"] = (scored["s2_shared_level"] >= 20).astype(float)
     scored["rules"] = (
@@ -774,10 +815,11 @@ def _(METHODS, answers, pairs):
         "distance ≤ 10 m": "near_10m",
         "distance ≤ 50 m": "near_50m",
         "distance (any cut)": "closeness",
-        "same S2 cell, level 18 (~35 m)": "s2_18",
-        "same S2 cell, level 20 (~9 m)": "s2_20",
+        "same S2 cell, level 18 (~38 m)": "s2_18",
+        "same S2 cell, level 20 (~10 m)": "s2_20",
         "S2 shared level (any level)": "s2_shared_level",
         "same address": "same_address",
+        "geocoded addresses (any cut)": "geocoded_closeness",
         "same Overture building": "same_building",
         "same OSM school grounds": "same_osm_grounds",
         "count of the four signals": "rules",
@@ -807,7 +849,7 @@ def _(METHODS, answers, pairs):
             _s, _y = _test[_column].astype(float), _test["truth"]
             _merge, _apart = _s >= _merge_at, (_s <= _apart_at) & ~(_s >= _merge_at)
             # A plain yes/no reading of the same score: 0.5 for probabilities and rules, 25 m, S2 level 18.
-            _said_yes = _s >= {"closeness": -25, "s2_shared_level": 18}.get(_column, 0.5)
+            _said_yes = _s >= {"closeness": -25, "geocoded_closeness": -25, "s2_shared_level": 18}.get(_column, 0.5)
             _rows.append(
                 {
                     "region": _region,
@@ -933,7 +975,9 @@ def _(scored, schools, thresholds):
         scored.loc[_all.index, "decision"] = _decision
     sites = pd.concat(_regional, ignore_index=True)
     sites.to_csv(OUT / "school_sites.csv", index=False)
-    scored.drop(columns=["closeness", "near_10m", "near_50m", "s2_18", "s2_20"]).to_csv(OUT / "pairs.csv", index=False)
+    scored.drop(columns=["closeness", "near_10m", "near_50m", "s2_18", "s2_20", "geocoded_closeness"]).to_csv(
+        OUT / "pairs.csv", index=False
+    )
     site_summary = pd.DataFrame(_rows)
     site_summary.to_csv(OUT / "site_summary.csv", index=False)
     site_summary
@@ -952,22 +996,38 @@ def _():
 
 
 @app.cell
-def _(METHODS, national_pairs, pairs):
-    _runs = pd.read_csv(OUT / "model_runs.csv").set_index("method")
-    _per_pair = {
-        m: sum(json.loads(p.read_text())["cost"] for p in (DATA / "answers" / m).glob("*.json"))
-        / max(1, len(list((DATA / "answers" / m).glob("*.json"))))
-        for m in METHODS
-    }
-    pd.DataFrame(
-        {
-            "USD per pair": {m: round(v, 6) for m, v in _per_pair.items()},
-            "USD for all national candidate pairs": {
-                m: round(v * len(national_pairs), 2) for m, v in _per_pair.items()
-            },
-            "pairs in this run": _runs["pairs"],
-        }
-    ).assign(**{"national candidate pairs": len(national_pairs), "regional pairs": len(pairs)})
+def _(national_pairs):
+    # Cached answers keep the cost of the call that made them, so these are first-run costs.
+    national_cost = pd.read_csv(OUT / "model_runs.csv").set_index("method")[["pairs", "cost_usd"]]
+    national_cost["usd_per_pair"] = (national_cost["cost_usd"] / national_cost["pairs"]).round(6)
+    national_cost["usd_for_national_pairs"] = (national_cost["usd_per_pair"] * len(national_pairs)).round(2)
+    national_cost.to_csv(OUT / "national_cost.csv")
+    mo.vstack([mo.md(f"{len(national_pairs):,} national candidate pairs."), national_cost])
+    return
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ## What this shows, and what didn't work
+
+    - **The points are the weak part.** Distance, S2 cells, a shared Overture building and shared OSM grounds are
+      each right about 80% of the time, because they all trust HIFLD's point, and some points sit on the wrong
+      building. The street address each school reports is right about 99% of the time when two addresses match.
+    - **Jev is useful once it sees independent evidence and its thresholds are tuned.** With the address geocodes it
+      ranks pairs well and decides most New York pairs automatically, in both directions. Its raw probabilities are
+      not calibrated (see the chart: a 0.5 is rarely the same site), so the thresholds have to come from a labelled
+      sample, as TypeSafe's own guidance says.
+    - **The image did not help.** Jev with the aerial image did worse than Jev on text alone. Requests with an image
+      run in Jev's long-context mode, which TypeSafe says is less accurate.
+    - **The chat model ranked well but cost about 100 times more per pair** and its stated probabilities are coarse,
+      so few pairs clear a 97% threshold.
+    - **S2 cells are a distance cut with edges.** Two points a metre apart can fall in different cells, so a fixed
+      level splits close pairs at cell boundaries; comparing neighbouring cells too makes it a distance cut again.
+    - **The 150 m radius misses big campuses.** A school whose point is more than 150 m from its campus-mates, with a
+      different street number, is never compared.
+    - **The Los Angeles key is small** (about a hundred pairs), so its numbers are a check, not a measurement.
+    """)
     return
 
 
