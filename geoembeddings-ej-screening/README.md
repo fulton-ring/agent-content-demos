@@ -10,7 +10,7 @@ Can public satellite embeddings find communities with high environmental and hea
 ./run.sh
 ```
 
-It needs [uv](https://docs.astral.sh/uv/), about 3 GB of disk and about 4.8 GB of downloads. On the first run it builds the EJScreen and CEJST GeoParquet files by running `../ej-datasets-hifld-next/run.sh` unchanged, with its download and output folders pointed into `data/ej/` (1.4 GB, about 12 minutes). It then runs the notebook `geoembeddings_ej.py` as a script. To read the notebook with its outputs, run `uv run marimo edit geoembeddings_ej.py`.
+It needs [uv](https://docs.astral.sh/uv/), about 3 GB of disk and about 4.5 GB of downloads. On the first run it builds the EJScreen and CEJST GeoParquet files by running `../ej-datasets-hifld-next/run.sh` unchanged, with its download and output folders pointed into `data/ej/` (1.4 GB, about 12 minutes). It then runs the notebook `geoembeddings_ej.py` as a script. To read the notebook with its outputs, run `uv run marimo edit geoembeddings_ej.py`.
 
 ## Where the data comes from
 
@@ -69,6 +69,7 @@ All numbers come from `outputs/summary.json` and `outputs/prediction_scores.csv`
 
 - 128 of the 250 look-alikes are within 10 km of a seed. Only 12 are unflagged.
 - A refinery, RMP facility, TSDF or terminal is within 3 km of 78% of look-alikes, against 41% of all block groups. For the 12 unflagged ones the share is 42%, no higher than for a block group picked at random.
+- False positives: being flagged doesn't make a match right, since 72% of all block groups are flagged, often for demographics alone. 55 of the 250 look-alikes (22%) have no refinery, RMP facility, TSDF or terminal within 3 km, and 48 of those 55 are flagged anyway. Near the seeds the rate is 8 of 128 (6%); more than 10 km away it is 47 of 122 (39%). 38 are in Harris County and 16 in rural Louisiana parishes. This counts only facilities HIFLD Next lists.
 - Hand check: all 12 unflagged look-alikes, on NAIP photos from 2022–2023 with HIFLD facilities overlaid. 0 were clearly real, 1 partly (homes against a manufacturing park with about 15 TRI reporters in northwest Houston), and 11 were not: cane fields and swamp in Lafourche, Ascension and inland St. James parishes, and ordinary Houston suburbs. Labels and notes are in `hand_check.csv`; the chips are in `outputs/naip/`.
 - Five known fenceline places held out from the seeds rank badly out of 22,907: Texas City 2,490th, North Baton Rouge 3,766th, Mossville/Westlake 7,685th, West Port Arthur 7,755th and Hillcrest in Corpus Christi 9,113th. Using only the block group's own pixels or only its 5 km context doesn't fix it (`summary.json`, `variants`).
 
@@ -76,7 +77,7 @@ All numbers come from `outputs/summary.json` and `outputs/prediction_scores.csv`
 
 **Asthma (CDC PLACES 2025, R² on held-out counties, 8,211 tracts).** EJ indicators alone 0.56; embeddings alone 0.33; EJ indicators plus embeddings 0.64; EJ indicators plus coordinates 0.64. Whatever embeddings add to the EJ indicators, coordinates add as much.
 
-**Cost and time.** Zero dollars; no account or key is needed. On 4 CPUs a clean checkout took about 12 minutes for the sibling EJ build and 21 minutes for the notebook: 8 for the 181 embedding tiles (3.2 GB), 1 for NLCD (149 MB), 9 for the model fits and 3 for the NAIP mosaics. A rerun reuses the downloads. Failures seen: Source Cooperative now and then returns a bad body for a range request, which the notebook retries with a fresh URL; one block group smaller than a 160 m pixel takes the pixel under its interior point.
+**Cost and time.** Zero dollars; no account or key is needed. On 4 CPUs a clean checkout took about 12 minutes for the sibling EJ build, then 12 minutes for the notebook in the run these outputs come from: 3 for the 181 embedding tiles (2.8 GB), half a minute for NLCD (149 MB), 5 for the model fits, and the rest for the NAIP mosaics. An earlier clean run on a busier machine took 21 minutes and measured 3.2 GB for the tiles, with identical results. A rerun reuses the downloads. Failures seen: Source Cooperative now and then returns a bad body for a range request, which the notebook retries with a fresh URL; one block group smaller than a 160 m pixel takes the pixel under its interior point.
 
 ## Why it didn't work
 
@@ -84,7 +85,7 @@ Mean-pooling a block group's pixels describes what most of the block group looks
 
 ## What it doesn't show
 
-- It doesn't test other ways to use embeddings: the 10 m pixels instead of 160 m means, embeddings of the facility sites themselves, or a classifier trained on known facilities. These could do better and are the obvious next spike.
+- It doesn't test other ways to use embeddings. Three follow-ups are filed as sub-issues: a classifier on 10 m pixels of known facilities to find unregistered hazards near homes (#155), year-to-year change to spot new industry next to housing (#156), and screening in a country with no EJ index (#157).
 - Only two states, one year (2022) and one model (AlphaEarth). Clay and Major TOM embeddings were not tried.
 - The hand check is 12 block groups judged by the worker agent from photos, not a field visit, and "real" means visible heavy industry next to homes, not measured exposure.
 - EJScreen 2024 has no impervious-surface or tree-cover indicator, so those weren't tested.
