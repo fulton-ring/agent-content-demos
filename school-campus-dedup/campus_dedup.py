@@ -467,10 +467,24 @@ def _(building_files, candidate_pairs, ccd, la_key, normalise_address, nyc_key, 
             _ka, _kb = _a["NCESID"].map(la_key), _b["NCESID"].map(la_key)
             _known = _ka.notna() & _kb.notna()
             _pairs["truth"] = np.nan
-            _pairs.loc[_known, "truth"] = [bool(x & y) for x, y in zip(_ka[_known], _kb[_known], strict=True)]
+            _pairs.loc[_known, "truth"] = [float(bool(x & y)) for x, y in zip(_ka[_known], _kb[_known], strict=True)]
         _frames.append(_pairs.drop(columns=["i", "j"]))
     pairs = pd.concat(_frames, ignore_index=True)
     pairs["pair_id"] = pairs["a_ncesid"] + "-" + pairs["b_ncesid"]
+    # S2 cells, as used to match features between versions of a layer: the deepest level (10-24, about 10 km down to
+    # 0.6 m) at which both points fall in the same cell. Cells nest, so counting the shared levels gives the deepest.
+    _con = duckdb.connect()
+    _con.sql("INSTALL geography FROM community; LOAD geography;")
+    _shared = " + ".join(f"(s2_cell_parent(ca, {_l}) = s2_cell_parent(cb, {_l}))::INT" for _l in range(10, 25))
+    _cells = pairs[["a_lon", "a_lat", "b_lon", "b_lat"]]
+    pairs["s2_shared_level"] = (
+        _con.sql(f"""
+        SELECT 9 + {_shared} AS level FROM (
+            SELECT s2_cellfromlonlat(a_lon, a_lat) AS ca, s2_cellfromlonlat(b_lon, b_lat) AS cb FROM _cells)
+    """)
+        .df()["level"]
+        .to_numpy()
+    )
     # Half of each key picks thresholds, the other half tests them. The split is a hash, so it is stable across runs.
     pairs["half"] = np.where(
         pairs["pair_id"].map(lambda s: int(hashlib.sha256(s.encode()).hexdigest(), 16) % 2), "test", "tune"
@@ -698,6 +712,8 @@ def _(METHODS, answers, pairs):
     scored["near_10m"] = (scored["distance_m"] <= 10).astype(float)
     scored["near_50m"] = (scored["distance_m"] <= 50).astype(float)
     scored["closeness"] = -scored["distance_m"]
+    scored["s2_18"] = (scored["s2_shared_level"] >= 18).astype(float)
+    scored["s2_20"] = (scored["s2_shared_level"] >= 20).astype(float)
     scored["rules"] = (
         scored[["same_address", "same_building", "same_osm_grounds"]].sum(axis=1) + (scored["distance_m"] <= 25)
     ) / 4
@@ -705,6 +721,9 @@ def _(METHODS, answers, pairs):
         "distance ≤ 10 m": "near_10m",
         "distance ≤ 50 m": "near_50m",
         "distance (any cut)": "closeness",
+        "same S2 cell, level 18 (~35 m)": "s2_18",
+        "same S2 cell, level 20 (~9 m)": "s2_20",
+        "S2 shared level (any level)": "s2_shared_level",
         "same address": "same_address",
         "same Overture building": "same_building",
         "same OSM school grounds": "same_osm_grounds",
@@ -856,7 +875,7 @@ def _(scored, schools, thresholds):
         scored.loc[_all.index, "decision"] = _decision
     sites = pd.concat(_regional, ignore_index=True)
     sites.to_csv(OUT / "school_sites.csv", index=False)
-    scored.drop(columns=["closeness", "near_10m", "near_50m"]).to_csv(OUT / "pairs.csv", index=False)
+    scored.drop(columns=["closeness", "near_10m", "near_50m", "s2_18", "s2_20"]).to_csv(OUT / "pairs.csv", index=False)
     site_summary = pd.DataFrame(_rows)
     site_summary.to_csv(OUT / "site_summary.csv", index=False)
     site_summary
