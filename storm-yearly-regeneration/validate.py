@@ -511,7 +511,8 @@ def _(
             wind=sparse.csr_matrix(hazard.intensity),
             frequency=np.full(hazard.size, rate),
             category=np.asarray(hazard.category),
-            basin=np.asarray(hazard.basin),
+            # CLIMADA labels STORM tracks 'na'; Knutson's tables are keyed 'NA'.
+            basin=np.char.upper(np.asarray(hazard.basin).astype(str)),
             years=years,
         )
 
@@ -555,6 +556,7 @@ def _(
         for scenario in scenarios:
             future = county_intensity(frequency_only(events, scenario), point_county)
             table[scenario] = (future / today.where(today > 0)).clip(lower=1.0)
+        assert (table.max() > 1).all(), "no county changed: the climate scaling didn't apply"
         return table
 
     return Events, multipliers, scenarios, wind_events
@@ -595,8 +597,15 @@ def _(
 
 @app.cell
 def _(layer, multipliers, pd, point_county, scenarios, wind, write):
+    from dataclasses import replace as _replace
+
     _v4 = pd.read_csv(layer / "county_multipliers.csv", dtype={"unit": str}).set_index("unit")
     county_hm = {name: multipliers(events, point_county) for name, events in wind.items()}
+    # Knutson's changes are relative to the catalogue's own years, so a later baseline leaves
+    # less change to 2050 and 2100. This row holds our tracks on STORM v4's baseline.
+    county_hm["ours, v4 baseline"] = multipliers(
+        _replace(wind["ours"], years=(1980, 2018)), point_county
+    )
     _rows = []
     for _name, _table in county_hm.items():
         for _s in scenarios:
@@ -617,6 +626,19 @@ def _(layer, multipliers, pd, point_county, scenarios, wind, write):
                     "p90_abs_difference": (_mine[_both] - _theirs[_both]).abs().quantile(0.9),
                 }
             )
+    for _s in scenarios:
+        _a, _b = county_hm["ours"][_s].dropna(), county_hm["oderiz_losada"][_s].dropna()
+        _both = _a.index.intersection(_b.index)
+        _rows.append(
+            {
+                "catalogue": "ours vs oderiz_losada",
+                "scenario": _s,
+                "counties_both": len(_both),
+                "median_catalogue": _a[_both].median(),
+                "spearman_vs_storm_v4": _a[_both].corr(_b[_both], method="spearman"),
+                "median_abs_difference": (_a[_both] - _b[_both]).abs().median(),
+            }
+        )
     multiplier_check = pd.DataFrame(_rows)
     write(multiplier_check, "county_multipliers_vs_storm_v4.csv")
     write(
@@ -632,15 +654,27 @@ def _(layer, multipliers, pd, point_county, scenarios, wind, write):
 def _(mo, multiplier_check):
     _m = multiplier_check.set_index(["catalogue", "scenario"])
     _o, _l = _m.loc["ours"], _m.loc["oderiz_losada"]
+    _v, _x = _m.loc["ours, v4 baseline"], _m.loc["ours vs oderiz_losada"]
     mo.md(f"""
-    Across the four scenarios our tracks give a county median of
-    {_o["median_catalogue"].min():.3f}-{_o["median_catalogue"].max():.3f} against STORM v4's
-    {_o["median_storm_v4"].min():.3f}-{_o["median_storm_v4"].max():.3f}, with Spearman
-    {_o["spearman_vs_storm_v4"].min():.2f}-{_o["spearman_vs_storm_v4"].max():.2f}. Odériz &
-    Losada's rerun, against the same STORM v4 numbers, gets Spearman
-    {_l["spearman_vs_storm_v4"].min():.2f}-{_l["spearman_vs_storm_v4"].max():.2f}. The levels
-    agree; the county ranking of a few-percent multiplier is mostly sampling noise between any
-    two 10,000-year runs, ours or theirs.
+    **Ranking.** Our tracks rank counties against STORM v4 with Spearman
+    {_o["spearman_vs_storm_v4"].min():.2f}-{_o["spearman_vs_storm_v4"].max():.2f}; Odériz &
+    Losada's published rerun gets
+    {_l["spearman_vs_storm_v4"].min():.2f}-{_l["spearman_vs_storm_v4"].max():.2f}
+    against the same numbers, and the two reruns against each other
+    {_x["spearman_vs_storm_v4"].min():.2f}-{_x["spearman_vs_storm_v4"].max():.2f}. A
+    multiplier of a few percent, mostly floored at 1, ranks counties by sampling noise: any
+    two 10,000-year STORM runs disagree this much, so our swap costs nothing a STORM rerun
+    wouldn't.
+
+    **Level.** Our county medians are lower: {_o.loc["MID_HIGHER", "median_catalogue"]:.3f}
+    against STORM v4's {_o.loc["MID_HIGHER", "median_storm_v4"]:.3f} at mid-century higher,
+    {_o.loc["LATE_HIGHER", "median_catalogue"]:.3f} against
+    {_o.loc["LATE_HIGHER", "median_storm_v4"]:.3f} late-century higher (Odériz & Losada
+    {_l.loc["LATE_HIGHER", "median_catalogue"]:.3f}). The later Knutson baseline isn't why:
+    on STORM v4's 1980-2018 baseline our late-higher median is
+    {_v.loc["LATE_HIGHER", "median_catalogue"]:.3f}. It's the tracks: Knutson raises Cat 4-5
+    frequency and lowers the rest, so a catalogue with fewer major hurricanes reaching the
+    coast, as both reruns have against STORM v4 (section 2), gets a smaller multiplier.
     """)
     return
 
