@@ -5,7 +5,7 @@ Can the environmental-justice screening data that came down in 2025 be rebuilt a
 | Dataset | What it is | Rows | Columns | GeoParquet | PMTiles |
 |---|---|---|---|---|---|
 | `epa-ejscreen-2024-block-groups` | EPA EJScreen 2.3 (2024), ACS 2018–2022, EPA's last official release | 243,022 | 233 | 196.8 MB | 114.9 MB |
-| `pedp-ejam-acs2024-block-groups` | PEDP's EJAM `v3.2024.0`, EJScreen-style indicators from ACS 2020–2024 | 242,983 | 427 | 302.4 MB | PMTILES_EJAM |
+| `pedp-ejam-acs2024-block-groups` | PEDP's EJAM `v3.2024.0`, EJScreen-style indicators from ACS 2020–2024 | 242,983 | 427 | 302.4 MB | 126.9 MB |
 | `cejst-v2-census-tracts` | CEJST v2.0 (December 2024), 2010 tracts | 74,134 | 138 | 411.0 MB | 138.6 MB |
 
 Column counts include `geoid`, `geometry` and `census_aland` (the Census land area of the joined shape).
@@ -49,7 +49,7 @@ All numbers come from `outputs/summary.json`, `outputs/validation.csv`, `outputs
 
 - **Faithful to EJAM's code.** Run with R installed, the Python port and EJAM's own R function give the same percentile in all 2,187,198 cells compared (5 columns, national and state, every `v3.2022.3` block group).
 - **Reproduces EPA nationally.** The same code on `v3.2022.3` and its lookups reproduces EPA 2024's national `P_` columns in 12,151,099 of 12,151,100 cells (49 of 50 columns exactly; one block group's `P_D2_RSEI_AIR` is off by 1). The map bins match EPA's `B_PM25` in 100% of rows.
-- **By state, everywhere but the territories.** Against EPA's `StatePct` file, 26 of 50 columns match exactly and 12,461 cells differ. 12,193 of those are the four island territories: EPA ranked them within each territory, but EJAM has no values and empty state lookups for them, so their `s_p_*` columns are empty. The other 268 differ by at most 5 points, almost all in Superfund proximity, where 193 block groups share exactly the same score and that value spans several percentiles of some states' lookups (92 to 97 in Nebraska), so the tie rule decides.
+- **By state, everywhere but the territories.** Against EPA's `StatePct` file, 26 of 50 columns match exactly and 12,461 cells differ. 12,194 of those are the four island territories: EPA ranked them within each territory, but EJAM has no values and empty state lookups for them, so their `s_p_*` columns are empty. The other 267 differ by at most 5 points, almost all in Superfund proximity, where 193 block groups share exactly the same score and that value spans several percentiles of some states' lookups (92 to 97 in Nebraska), so the tie rule decides.
 
 **What's missing from the public copies.**
 
@@ -58,7 +58,7 @@ All numbers come from `outputs/summary.json`, `outputs/validation.csv`, `outputs
 - The 231 EPA-named columns inside EJAM's `v3.2024.0` table are empty in every row and are dropped.
 - CEJST v2.0 is still on 2010 tracts and ACS 2015–2019; no newer CEJST exists.
 
-**Run time.** On 4 CPUs, the default `./run.sh` from a clean checkout took 14.7 minutes: 22 s of downloads, about 11 minutes parsing EJAM's two block-group R files, about a minute for the percentiles (both vintages), and the rest reading, writing and checking. A rerun with vector tiles and everything cached took RERUN_MIN minutes, most of it building the three PMTiles files.
+**Run time.** On 4 CPUs, the default `./run.sh` from a clean checkout took 14.7 minutes: 22 s of downloads, about 11 minutes parsing EJAM's two block-group R files, about a minute for the percentiles (both vintages), and the rest reading, writing and checking. A rerun with vector tiles and everything cached took 22.1 minutes, most of it building the three PMTiles files.
 
 ![Change in percent low income by block group, Louisiana](outputs/map_lowinc_change_la.png)
 
