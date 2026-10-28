@@ -17,7 +17,7 @@ export OPENROUTER_API_KEY=...   # Jev and the comparison chat model are called t
 ```
 
 To read it as a notebook: `uv run marimo edit campus_dedup.py`. Downloads and cached model answers go to `data/`
-(not committed), results to `output/`. About 8 GB of free memory is enough.
+(not committed), results to `output/`.
 
 ## The data
 
@@ -34,74 +34,88 @@ All public, fetched at run time.
 | [Census Bureau batch geocoder](https://geocoding.geo.census.gov/geocoder/) | each school's reported address, geocoded independently of its HIFLD point |
 | [USGS National Map](https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer) imagery | an aerial chip of each pair, both points marked |
 
-A **candidate pair** is two records within 150 m of each other, or with the same street address in the same city.
-The regions with a key are New York City (1,271 pairs, 1,142 with an answer) and Los Angeles County (327 pairs, 83
-with an answer). Each key is split by a hash into a *tune* half, which sets thresholds, and a *test* half, which
-scores them.
+A **candidate pair** is two records within 150 m of each other, or with the same street address in the same city
+(ignoring room, floor, annex or trailer). The regions with a key are New York City (1,283 pairs, 1,152 with an
+answer) and Los Angeles County (327 pairs, 83 with an answer). Each key is split by a hash into a *tune* half,
+which sets thresholds, and a *test* half, which scores them.
 
 ## Results (from one clean `./run.sh`)
 
 **No record is a copy.** Every NCES ID in the layer appears once; each record is a separate school with its own
 enrollment. Deduplication here means giving co-located records a shared `site_id`, not deleting rows.
 
-**The problem is large.** Nationally 23,317 candidate pairs involve 27,783 records (27% of the layer). 14,026 pairs
-share a street address, and in 3,556 of those the two points are more than 150 m apart.
+**The problem is large.** Nationally 23,333 candidate pairs involve 27,789 records (27% of the layer). 14,111 pairs
+share a street address, and in 3,572 of those the two points are more than 150 m apart.
 
-**Distance alone is not safe** (`output/same_site_by_distance.csv`, NYC key). Of pairs 1–10 m apart, 18% are in
+**HIFLD's points are often off.** For NYC schools in both files, HIFLD's point is a median 29 m from the DOE's,
+but the 90th percentile is 106 m and the 95th 485 m (`output/hifld_point_offset_nyc.csv`).
+
+**So distance alone is not safe** (`output/same_site_by_distance.csv`, NYC key). Of pairs 1–10 m apart, 18% are in
 different buildings; of pairs 50–100 m apart, 27% are in the same building.
 
 **S2 cells behave like a distance cut with edges** (`output/s2_split.csv`). Of pairs within 10 m of each
 other, 19% fall in different level-18 cells (~38 m) and 68% in different level-20 cells (~10 m).
 
-**Each signal on the NYC test half** (`output/triage.csv`). "Plain" means merge when the rule says yes. "Decided"
-means the pairs a method merges or keeps apart automatically at thresholds set on the tune half for ≥97% precision.
-The rest go to review.
+**Each signal on the NYC test half** (549 pairs, `output/triage.csv`). "Plain" means merge when the rule says yes.
+"Decided" means the pairs a method merges or keeps apart automatically at thresholds set on the tune half for ≥97%
+precision; the rest go to review.
 
 | Method | Plain precision | Plain recall | Decided | Wrong among decided |
 |---|---:|---:|---:|---:|
-| Distance ≤ 50 m | 0.81 | 0.83 | 0% | – |
-| Same S2 cell, level 18 | 0.83 | 0.52 | 0% | – |
-| Same Overture building | 0.81 | 0.85 | 0% | – |
-| Same OSM school grounds | 0.80 | 0.72 | 0% | – |
-| Same street address | 0.99 | 0.91 | 58% | 2 of 317 |
-| Geocoded addresses (any cut) | 0.97 | 0.93 | 61% | 7 of 330 |
-| Jev, text | 0.81 | 0.89 | 62% | 9 of 340 |
-| Jev, text + aerial image | 0.81 | 0.88 | 44% | 9 of 242 |
-| **Jev, text + address geocodes** | 0.89 | 1.00 | **87%** | 7 of 475 |
-| Gemini 3.8 Flash, text + image | 0.90 | 0.97 | 0% | – |
+| Distance ≤ 50 m | 0.81 | 0.82 | 0% | – |
+| Same S2 cell, level 18 | 0.83 | 0.51 | 0% | – |
+| Same Overture building | 0.81 | 0.84 | 0% | – |
+| Same OSM school grounds | 0.80 | 0.71 | 0% | – |
+| Same street address | 0.99 | 0.98 | 64% | 5 of 349 |
+| Geocoded addresses (any cut) | 0.97 | 0.93 | 61% | 7 of 333 |
+| Jev: records, point distance, footprint and grounds flags | 0.81 | 0.88 | 62% | 9 of 339 |
+| Jev: the same + aerial image | 0.81 | 0.87 | 42% | 8 of 230 |
+| Jev: the same + distance between address geocodes | 0.90 | 0.99 | 85% | 8 of 469 |
+| **Jev: the pair described in words, no map points** | 0.94 | 0.99 | **90%** | 8 of 494 |
+| Gemini 3.8 Flash: records, flags and image | 0.90 | 0.97 | 0% | – |
 
-The geometry signals all trust HIFLD's point. In NYC, 11% of HIFLD points are more than 100 m from where the DOE
-places the same school, so pairs on "the same building" are often schools on different streets. The address each
-school reports is the strongest single signal. Jev given the independent address geocodes decides the most pairs,
-and it is the only method that also keeps pairs apart with confidence (167 of the 475).
+The geometry signals all trust HIFLD's point. Pairs whose points share a building are often schools on different
+streets. The address each school reports is the strongest single signal, but a rule can only merge.
 
-On the Los Angeles test half (48 pairs) the same Jev variant decides 63% with 1 error, and the geocode rule 77% with
+Jev does best when the pair is **described in words**. Each school gets its type, charter and virtual status,
+district, website, Census-matched address, and the OSM school grounds its address falls in. The pair gets how the
+addresses relate (identical, same address with a different unit, same street, different streets) and roughly how
+far apart they geocode. It decides 90% of the test pairs, keeps 182 apart with 2 wrong, and merges 312 with 6 wrong.
+
+On the Los Angeles test half (48 pairs), that variant decides 67% with 1 error, and the geocode rule 77% with
 1 error. That key is too small to rank them.
 
 **Calibration** (`output/calibration.csv`, `output/calibration.png`, all keyed pairs).
 
 | Model | Brier | ECE | AUC | Cost per pair |
 |---|---:|---:|---:|---:|
-| Jev, text | 0.148 | 0.152 | 0.907 | $0.00003 |
-| Jev, text + image | 0.163 | 0.136 | 0.892 | $0.00010 |
-| Jev, text + address geocodes | 0.062 | 0.066 | 0.981 | $0.00003 |
-| Gemini 3.8 Flash, text + image | 0.099 | 0.087 | 0.933 | $0.0030 |
+| Jev, records and flags | 0.152 | 0.157 | 0.904 | $0.00003 |
+| Jev, + image | 0.168 | 0.142 | 0.889 | $0.00010 |
+| Jev, + address geocodes | 0.063 | 0.062 | 0.979 | $0.00003 |
+| Jev, described in words | 0.040 | 0.025 | 0.980 | $0.00003 |
+| Gemini 3.8 Flash, + image | 0.098 | 0.086 | 0.944 | $0.0031 |
 
-Jev ranks pairs well but its raw probabilities are not calibrated: with geocodes, pairs it scores 0.3–0.6 are the
-same site only about 3–20% of the time. Its thresholds have to be tuned on a labelled sample, as
-[TypeSafe's guidance](https://docs.typesafe.ai/confidence) says. Running the best variant on all 23,317 national
-pairs would cost about $0.75 (`output/national_cost.csv`); the geocoder is free.
+Jev's probabilities are only usable once thresholds are tuned. The words variant has the lowest ECE, but most of
+its pairs sit near 0 or 1; in between it is not calibrated (pairs scored 0.3–0.6 are mostly different sites). Its
+thresholds have to come from a labelled sample, as [TypeSafe's guidance](https://docs.typesafe.ai/confidence) says.
+Running it on all 23,333 national pairs would cost about $0.82 (`output/national_cost.csv`); the geocoder is free.
 
-**Sites** (`output/school_sites.csv`, `output/site_summary.csv`). With the tuned thresholds, NYC's 1,868 records
-become 1,434 sites; 158 pairs (236 records) are left for review. Los Angeles has 2,250 records and 2,139 sites, but
-no keep-apart threshold could be set from its small key, so 190 pairs go to review.
+**Sites** (`output/school_sites.csv`, `output/site_summary.csv`). With the tuned thresholds of the words variant,
+NYC's 1,868 records become 1,421 sites, and 127 pairs (172 records) are left for review. Los Angeles has 2,250
+records and 2,146 sites, but no keep-apart threshold could be set from its small key, so 193 pairs go to review.
 
 ## What didn't work, and what this doesn't show
 
+- **The wording of Jev's state moves the result.** An earlier version of the words variant gave a unit suffix
+  ("-TRAILER 30", "-12TH FL") as "different streets". It decided 98.5% of a slightly different test half.
+  Describing units properly gave 90%: some pairs the key calls different (a trailer, an annex, a charter school
+  with its own building code) now score about 0.98, which pushes the merge threshold above that band. We stopped
+  changing the wording there, because each change we kept for scoring better would be tuning to the test set.
 - **The aerial image made Jev worse.** Image requests run in Jev's long-context mode, which TypeSafe says is less
   accurate. The imagery is also coarse at campus scale.
-- **The chat model** ranked better than Jev on text or image (AUC 0.93) but below Jev with geocodes, at ~100× the
-  cost per pair. Its stated probabilities cluster at a few values, so in NYC it never cleared 97% in either direction.
+- **The chat model** ranked better than Jev given the same flags (AUC 0.94) but worse than Jev described in words,
+  at ~100× the cost per pair. Its stated probabilities cluster at a few values, so in NYC it never cleared 97% in
+  either direction. It was not given the words state.
 - **Some "errors" are the key's conventions.** NYC gives a separate building code to a trailer, an annex, or a
   charter school on another floor of an office tower, even at the same street address. "Same campus" is looser
   than the key, so true error rates are lower than the table shows.
@@ -113,8 +127,8 @@ no keep-apart threshold could be set from its small key, so 190 pairs go to revi
   A state directory (California's [CDE file](https://www.cde.ca.gov/ds/si/ds/pubschls.asp), for one) can.
 - **The keyed regions are two big cities.** Rural districts, where one building often holds the elementary, middle
   and high school under separate IDs, are not measured.
-- **We didn't separate the geocode from the instruction.** The best Jev variant got both the geocoded distance and
-  a sentence saying points are sometimes misplaced; which one did the work isn't tested.
+- **We didn't separate the geocodes from the instruction.** Both address-based Jev variants were also told that map
+  points are sometimes misplaced; which one did the work isn't tested.
 - **No OCR was needed.** Every source here is machine-readable.
 
 ## Licences

@@ -58,7 +58,7 @@ with app.setup:
     # Precision we ask of an automatic decision, in both directions (merge, keep separate).
     TARGET_PRECISION = 0.97
     # The method whose thresholds turn pairs into sites (chosen from the scoring table below).
-    SITE_METHOD = "jev_geocoded"
+    SITE_METHOD = "jev_semantic"
 
     @dataclass(frozen=True)
     class Region:
@@ -125,10 +125,20 @@ def _():
             path.write_bytes(fetch_bytes(url, data, headers))
         return path
 
+    # Where a room, floor, annex or trailer starts: "26 BROADWAY-12TH FL", "3740 BAYCHESTER AVE ANNEX".
+    UNIT_MARKER = (
+        r"\s(?:-?RM|ROOM|STE|SUITE|UNIT|BLDG|FL|FLOOR|ANNEX|TRAILER|LOWER|UPPER)\b|#|-(?=[A-Z]|\d+(?:ST|ND|RD|TH)\b)"
+    )
+
+    def address_unit(address: str) -> str:
+        """The room, floor, annex or trailer part of an address, or '' if there is none."""
+        _parts = re.split(f"({UNIT_MARKER})", str(address).upper(), maxsplit=1)
+        return "".join(_parts[1:]).strip(" -#") if len(_parts) > 1 else ""
+
     def normalise_address(address: str) -> str:
         """House number and street, upper case, without punctuation, room numbers or street-type words."""
         text = re.sub(r"[.,]", " ", str(address).upper())
-        text = re.split(r"\s(?:-?RM|ROOM|STE|SUITE|UNIT|BLDG|FL|FLOOR|#)\b|#|-RM", text)[0]
+        text = re.split(UNIT_MARKER, text)[0]
         words = [
             w
             for w in text.split()
@@ -153,7 +163,7 @@ def _():
         ]
         return " ".join(words)
 
-    return cached, fetch_bytes, normalise_address
+    return address_unit, cached, fetch_bytes, normalise_address
 
 
 @app.cell(hide_code=True)
@@ -277,7 +287,7 @@ def _(cached, fetch_bytes):
             assert not _url, f"CCD for {_region} has more than 10 pages"
             _path.write_text(json.dumps(_rows))
         _frames.append(pd.DataFrame(json.loads(_path.read_text())))
-    ccd = pd.concat(_frames, ignore_index=True)[["ncessch", "seasch", "charter", "virtual", "school_name"]]
+    ccd = pd.concat(_frames, ignore_index=True)[["ncessch", "seasch", "charter", "virtual", "school_name", "lea_name"]]
     # New York's state school ID ends in the 12-digit BEDS code; California's is the 14-digit CDS code with dashes.
     ccd["beds"] = ccd["seasch"].str.split("-").str[-1]
     ccd["cds"] = ccd["seasch"].str.replace("-", "")
@@ -422,13 +432,19 @@ def _():
 
 
 @app.cell
-def _(building_files, cached, candidate_pairs, ccd, la_key, normalise_address, nyc_key, osm_areas, schools):
-    def nearest_within(points: gpd.GeoDataFrame, shapes: gpd.GeoDataFrame, column: str) -> pd.Series:
-        """For each point, `column` of the shape containing it or, failing that, the nearest within 10 m."""
-        _hit = gpd.sjoin_nearest(points[["geometry"]], shapes[[column, "geometry"]], max_distance=10, distance_col="d")
+def _(
+    address_unit, building_files, cached, candidate_pairs, ccd, la_key, normalise_address, nyc_key, osm_areas, schools
+):
+    def nearest_within(
+        points: gpd.GeoDataFrame, shapes: gpd.GeoDataFrame, column: str, metres: float = 10
+    ) -> pd.Series:
+        """For each point, `column` of the shape containing it or, failing that, the nearest within `metres`."""
+        _hit = gpd.sjoin_nearest(
+            points[["geometry"]], shapes[[column, "geometry"]], max_distance=metres, distance_col="d"
+        )
         return pd.Series(_hit.sort_values("d").groupby(level=0)[column].first().reindex(points.index))
 
-    def census_geocode(frame: pd.DataFrame, name: str) -> gpd.GeoSeries:
+    def census_geocode(frame: pd.DataFrame, name: str) -> gpd.GeoDataFrame:
         """Each record's reported address geocoded by the Census Bureau, independently of its HIFLD point."""
         assert len(frame) <= 10_000, "the Census batch geocoder takes at most 10,000 addresses"
         _csv = frame[["NCESID", "ADDRESS", "CITY", "STATE", "ZIP"]].to_csv(index=False, header=False)
@@ -444,12 +460,18 @@ def _(building_files, cached, candidate_pairs, ccd, la_key, normalise_address, n
             _body,
             {"Content-Type": f"multipart/form-data; boundary={_boundary}"},
         )
-        _out = pd.read_csv(_path, header=None, dtype=str, usecols=[0, 2, 5], names=["NCESID", "match", "lonlat"])
-        _xy = _out.set_index("NCESID")["lonlat"].str.split(",", expand=True).astype(float)
-        _xy = _xy.reindex(frame["NCESID"])
-        return gpd.GeoSeries(gpd.points_from_xy(_xy[0], _xy[1]), crs="EPSG:4326").to_crs(METRIC)
+        _out = pd.read_csv(_path, header=None, dtype=str, usecols=[0, 4, 5], names=["NCESID", "matched", "lonlat"])
+        _out = _out.set_index("NCESID").reindex(frame["NCESID"])
+        _xy = _out["lonlat"].str.split(",", expand=True).astype(float)
+        return gpd.GeoDataFrame(
+            {"census_address": _out["matched"].to_numpy()},
+            geometry=gpd.points_from_xy(_xy[0], _xy[1]),
+            crs="EPSG:4326",
+        ).to_crs(METRIC)
 
-    _charter = ccd.set_index("ncessch")["charter"]
+    _ccd = ccd.set_index("ncessch")
+    _school_types = {"1": "regular", "2": "special education", "3": "career and technical", "4": "alternative"}
+    _virtual = {0: "no", 1: "fully virtual", 2: "virtual with face-to-face options", 3: "supplemental virtual"}
     _frames = []
     for _region, _spec in REGIONS.items():
         _local = schools[schools["COUNTYFIPS"].isin(_spec.counties)].reset_index(drop=True)
@@ -467,13 +489,27 @@ def _(building_files, cached, candidate_pairs, ccd, la_key, normalise_address, n
         _areas = osm_areas[osm_areas["region"] == _region]
         _local["osm_area"] = nearest_within(_local, _areas, "osm_id")
         _local["osm_area_name"] = _local["osm_area"].map(_areas.set_index("osm_id")["osm_name"])
-        _local["charter"] = _local["NCESID"].map(_charter)
+        _local["charter"] = _local["NCESID"].map(_ccd["charter"])
+        _local["district_name"] = _local["NCESID"].map(_ccd["lea_name"])
+        _local["virtual"] = _local["NCESID"].map(_ccd["virtual"]).map(_virtual)
+        _local["school_type"] = _local["TYPE"].map(_school_types)
         _geocoded = census_geocode(_local, str(_spec.osm_relation))
+        _local["census_address"] = _geocoded["census_address"].to_numpy()
+        _placed = _geocoded[~_geocoded.geometry.is_empty & _geocoded.geometry.x.notna()]
+        # Census points are interpolated along the street, so they sit just outside the grounds they front.
+        _local["address_grounds_name"] = (
+            nearest_within(_placed, _areas, "osm_id", metres=30)
+            .map(_areas.set_index("osm_id")["osm_name"])
+            .reindex(_local.index)
+        )
         _pairs = candidate_pairs(_local)
         _a, _b = _local.iloc[_pairs["i"]].reset_index(drop=True), _local.iloc[_pairs["j"]].reset_index(drop=True)
         _pairs["region"] = _region
         _pairs["geocoded_distance_m"] = (
-            _geocoded.iloc[_pairs["i"]].distance(_geocoded.iloc[_pairs["j"]], align=False).round().to_numpy()
+            _geocoded.geometry.iloc[_pairs["i"]]
+            .distance(_geocoded.geometry.iloc[_pairs["j"]], align=False)
+            .round()
+            .to_numpy()
         )
         for _side, _rows in (("a", _a), ("b", _b)):
             for _column in [
@@ -491,6 +527,12 @@ def _(building_files, cached, candidate_pairs, ccd, la_key, normalise_address, n
                 "building",
                 "building_area_m2",
                 "osm_area_name",
+                "WEBSITE",
+                "district_name",
+                "virtual",
+                "school_type",
+                "census_address",
+                "address_grounds_name",
             ]:
                 _pairs[f"{_side}_{_column.lower()}"] = _rows[_column].to_numpy()
             _lonlat = _rows.geometry.to_crs("EPSG:4326")
@@ -504,6 +546,28 @@ def _(building_files, cached, candidate_pairs, ccd, la_key, normalise_address, n
         _pairs["same_phone"] = (_a["TELEPHONE"].to_numpy() == _b["TELEPHONE"].to_numpy()) & (
             _a["TELEPHONE"] != "NOT AVAILABLE"
         ).to_numpy()
+        # How the two addresses relate, in words. House number and street come from the Census match when there is
+        # one (it fixes spellings like COMMONWLTH); only the reported address has the room, floor, annex or trailer.
+        _relations = []
+        for _ra, _rb in zip(_a.itertuples(), _b.itertuples(), strict=True):
+            _base = [
+                normalise_address(r.census_address.split(",")[0] if isinstance(r.census_address, str) else r.ADDRESS)
+                for r in (_ra, _rb)
+            ]
+            _units = [address_unit(r.ADDRESS) for r in (_ra, _rb)]
+            _number = [b.split(" ", 1)[0] for b in _base]
+            _street = [b.split(" ", 1)[1] if " " in b else "" for b in _base]
+            if _base[0] == _base[1] and _units[0] == _units[1]:
+                _relations.append("identical street address")
+            elif _base[0] == _base[1]:
+                _relations.append(
+                    f"same street address, different unit: '{_units[0] or 'none'}', '{_units[1] or 'none'}'"
+                )
+            elif _street[0] == _street[1] and _ra.CITY == _rb.CITY:
+                _relations.append(f"same street, house numbers {_number[0]} and {_number[1]}")
+            else:
+                _relations.append("different streets")
+        _pairs["street_relation"] = _relations
         _pairs["name_similarity"] = [fuzz.token_set_ratio(x, y) for x, y in zip(_a["NAME"], _b["NAME"], strict=True)]
         _pairs["same_district"] = _a["DISTRICTID"].to_numpy() == _b["DISTRICTID"].to_numpy()
         if _region == "New York City":
@@ -609,7 +673,7 @@ def _():
 
     [Jev](https://openrouter.ai/docs/guides/community/jev) is a *decision model*: it takes a state and a typed
     question and returns a probability, not text. We ask one yes/no ("Noul") question per pair, through OpenRouter's
-    Decisions API, in three forms:
+    Decisions API, in four forms:
 
     - **text**: the two records and the geometry facts above, as JSON;
     - **text + image**: the same, plus a USGS aerial image of the pair (public domain, from The National Map) with
@@ -617,7 +681,10 @@ def _():
     - **text + address geocodes**: the text, plus the distance between the two reported addresses as geocoded by the
       [Census Bureau's batch geocoder](https://geocoding.geo.census.gov/geocoder/) (free, no key), and a sentence
       saying the map points are sometimes misplaced. We added this after the first run: in the answer key, many
-      pairs whose points sit in one building have different addresses and really are in different buildings.
+      pairs whose points sit in one building have different addresses and really are in different buildings;
+    - **described in words**: no map points or footprint flags at all. Each school's type, charter and virtual
+      status, district, website, Census-matched address and the OSM grounds its address falls in, and how the two
+      addresses relate (identical, same address with a different unit, same street, different streets).
 
     For comparison we put the same text and image to a cheap chat model and ask it to state a probability. Every
     answer is checked against a schema and cached in `data/answers/`, so a rerun costs nothing.
@@ -689,6 +756,37 @@ def _(fetch_bytes):
             _state["distance_between_geocoded_addresses_m"] = None if pd.isna(_d) else int(_d)
         return _state
 
+    def semantic_state(row: pd.Series) -> dict:
+        """The same pair described in words: what each school is, where its address falls, how the addresses relate.
+        No map points and no footprint flags, since those come from the source layer's coordinates."""
+
+        def text(value: object) -> str | None:
+            return value if isinstance(value, str) and value != "NOT AVAILABLE" else None
+
+        def record(side: str) -> dict:
+            return {
+                "name": row[f"{side}_name"],
+                "reported_address": f"{row[f'{side}_address']}, {row[f'{side}_city']}",
+                "address_as_matched_by_census": text(row[f"{side}_census_address"]) or "not found",
+                "address_lies_within_school_grounds_named": text(row[f"{side}_address_grounds_name"]),
+                "district": text(row[f"{side}_district_name"]),
+                "school_type": text(row[f"{side}_school_type"]),
+                "charter": bool(row[f"{side}_charter"] == 1),
+                "virtual": text(row[f"{side}_virtual"]),
+                "grades": f"{row[f'{side}_st_grade']}-{row[f'{side}_end_grade']}",
+                "enrollment": int(row[f"{side}_enrollment"]),
+                "phone": text(row[f"{side}_telephone"]),
+                "website": text(row[f"{side}_website"]),
+            }
+
+        _d = row["geocoded_distance_m"]
+        return {
+            "record_a": record("a"),
+            "record_b": record("b"),
+            "street_addresses": row["street_relation"],
+            "addresses_geocode": "one could not be geocoded" if pd.isna(_d) else f"about {int(round(_d, -1))} m apart",
+        }
+
     def aerial_chip(row: pd.Series) -> str:
         """A base64 JPEG of the pair on USGS imagery, A in red and B in blue, cached on disk."""
         _path = DATA / "chips" / f"{row['pair_id']}.jpg"
@@ -716,7 +814,7 @@ def _(fetch_bytes):
         _path = DATA / "answers" / method / f"{row['pair_id']}.json"
         if _path.exists():
             return json.loads(_path.read_text())
-        _state = pair_state(row, geocoded=method == "jev_geocoded")
+        _state = semantic_state(row) if method == "jev_semantic" else pair_state(row, geocoded=method == "jev_geocoded")
         _headers = {"Authorization": f"Bearer {os.environ['OPENROUTER_API_KEY']}", "Content-Type": "application/json"}
         if method.startswith("jev"):
             if method == "jev_text_image":
@@ -724,7 +822,7 @@ def _(fetch_bytes):
                     "type": "image_url",
                     "image_url": {"url": f"data:image/jpeg;base64,{aerial_chip(row)}"},
                 }
-            _question = QUESTION + (GEOCODED_NOTE if method == "jev_geocoded" else "")
+            _question = QUESTION + (GEOCODED_NOTE if method in ("jev_geocoded", "jev_semantic") else "")
             _body = {
                 "model": JEV_MODEL,
                 "state": _state,
@@ -758,7 +856,7 @@ def _(fetch_bytes):
 
 @app.cell
 def _(ask, pairs):
-    METHODS = ["jev_text", "jev_text_image", "chat_text_image", "jev_geocoded"]
+    METHODS = ["jev_text", "jev_text_image", "chat_text_image", "jev_geocoded", "jev_semantic"]
     answers = pairs[["pair_id"]].copy()
     model_runs = []
     for _method in METHODS:
@@ -826,6 +924,7 @@ def _(METHODS, answers, pairs):
         "Jev, text": "jev_text",
         "Jev, text + image": "jev_text_image",
         "Jev, text + address geocodes": "jev_geocoded",
+        "Jev, described in words (no map points)": "jev_semantic",
         f"{CHAT_MODEL}, text + image": "chat_text_image",
     }
 
@@ -888,7 +987,7 @@ def _(METHODS, scored):
     _fig, _ax = plt.subplots(figsize=(5.5, 5))
     _ax.plot([0, 1], [0, 1], color="#999", lw=1, ls="--")
     _rows = []
-    for _method, _colour in zip(METHODS, ["#4c72b0", "#c44e52", "#55a868", "#8172b2"], strict=True):
+    for _method, _colour in zip(METHODS, ["#4c72b0", "#c44e52", "#55a868", "#8172b2", "#dd8452"], strict=True):
         _p, _y = _known[_method].astype(float), _known["truth"].astype(float)
         _bins = np.minimum((_p * 10).astype(int), 9)
         _cal = (
@@ -1014,10 +1113,12 @@ def _():
     - **The points are the weak part.** Distance, S2 cells, a shared Overture building and shared OSM grounds are
       each right about 80% of the time, because they all trust HIFLD's point, and some points sit on the wrong
       building. The street address each school reports is right about 99% of the time when two addresses match.
-    - **Jev is useful once it sees independent evidence and its thresholds are tuned.** With the address geocodes it
-      ranks pairs well and decides most New York pairs automatically, in both directions. Its raw probabilities are
-      not calibrated (see the chart: a 0.5 is rarely the same site), so the thresholds have to come from a labelled
-      sample, as TypeSafe's own guidance says.
+    - **Jev is useful once the pair is described in words and its thresholds are tuned.** Without map points, and
+      with the schools and their addresses described, it decides most New York pairs automatically, in both
+      directions. Its probabilities in the middle are not calibrated (see the chart), so the thresholds have to come
+      from a labelled sample, as TypeSafe's own guidance says.
+    - **The wording matters.** Small changes to how units ("-TRAILER 30") are described moved the share decided by
+      several points. We stopped changing it once the description was faithful, to avoid tuning to the test set.
     - **The image did not help.** Jev with the aerial image did worse than Jev on text alone. Requests with an image
       run in Jev's long-context mode, which TypeSafe says is less accurate.
     - **The chat model ranked well but cost about 100 times more per pair** and its stated probabilities are coarse,
