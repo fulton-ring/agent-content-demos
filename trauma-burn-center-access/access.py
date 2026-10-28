@@ -374,7 +374,6 @@ def _():
 @app.cell
 def _(files):
     _centres = pd.read_csv(files["centres"], dtype=str, encoding="utf-8-sig")
-    _centres["geoid"] = _centres["STATEFP"] + _centres["COUNTYFP"] + _centres["TRACTCE"] + _centres["BLKGRPCE"]
     _centres[["lat", "lon"]] = _centres[["LATITUDE", "LONGITUDE"]].astype(float)
     _ej = pd.read_csv(
         files["ejscreen"],
@@ -398,8 +397,16 @@ def _(files):
     _age["children"] = _age[_age_columns].sum(axis=1)
     _acs = _race.merge(_age[["GEO_ID", "children"]], on="GEO_ID")
     _acs = _acs[_acs["GEO_ID"].str.startswith("1500000US")].assign(geoid=lambda d: d["GEO_ID"].str[9:])
-    _ruca = pd.read_csv(files["ruca"], dtype={"TractFIPS20": str}, usecols=["TractFIPS20", "PrimaryRUCA"])
-    _ruca = _ruca.drop_duplicates("TractFIPS20")
+    _ruca = pd.read_csv(
+        files["ruca"],
+        dtype={"TractFIPS20": str, "TractFIPS23": str},
+        usecols=["TractFIPS20", "TractFIPS23", "PrimaryRUCA"],
+    )
+    # The 2022 ACS moved Connecticut's tracts to planning regions; RUCA maps the 2020 codes to the new ones.
+    _tract_now = dict(zip(_ruca["TractFIPS20"], _ruca["TractFIPS23"], strict=True))
+    _tract_2020 = _centres["STATEFP"] + _centres["COUNTYFP"] + _centres["TRACTCE"]
+    _centres["geoid"] = _tract_2020.map(_tract_now).fillna(_tract_2020) + _centres["BLKGRPCE"]
+    _ruca = _ruca.drop_duplicates("TractFIPS23")
     _ruca["rurality"] = pd.cut(
         _ruca["PrimaryRUCA"], [0, 3, 6, 9, 10], labels=["Metropolitan", "Micropolitan", "Small town", "Rural"]
     )
@@ -409,7 +416,7 @@ def _(files):
         .merge(_centres[["geoid", "lat", "lon"]], on="geoid", how="left")
         .merge(_acs.drop(columns=["GEO_ID", "B03002_E001"]), on="geoid", how="left")
         .assign(tract=lambda d: d["geoid"].str[:11])
-        .merge(_ruca.rename(columns={"TractFIPS20": "tract"}), on="tract", how="left")
+        .merge(_ruca.drop(columns="TractFIPS20").rename(columns={"TractFIPS23": "tract"}), on="tract", how="left")
     )
     bg["low_income"] = bg["LOWINCOME"]
     bg["not_low_income"] = bg["poverty_base"] - bg["LOWINCOME"]
@@ -532,7 +539,7 @@ def _(bg, facilities, nearest, routed_states, tiles):
         # TimeDistanceMatrix expands once from each hospital, much faster than CostMatrix for many-to-few.
         _config["thor"]["source_to_target_algorithm"] = "timedistancematrix"
         _config["service_limits"]["auto"]["max_matrix_location_pairs"] = 2_000_000
-        _config["service_limits"]["auto"]["max_matrix_distance"] = 500_000
+        _config["service_limits"]["auto"]["max_matrix_distance"] = 1_000_000
         _actor = valhalla.Actor(_config)
         _sources = bg[bg["state"] == _state].reset_index()
         _in_box = facilities[
@@ -674,6 +681,8 @@ def _(bg):
     def beyond(minutes: pd.Series, weights: pd.Series) -> dict:
         valid = minutes.notna() & weights.notna()
         people = weights[valid].sum()
+        if people == 0:
+            return {"people": 0, "beyond 30 min": np.nan, "beyond 60 min": np.nan, "people beyond 60 min": 0}
         return {
             "people": people,
             "beyond 30 min": weights[valid & (minutes > 30)].sum() / people,
@@ -852,7 +861,7 @@ def _(bg):
             _ax.scatter(
                 _sub["lon"], _sub["lat"], s=0.3, color=_color, label=["under 30", "30–60", "60–120", "over 120"][_b]
             )
-        _ax.set_title(f"Estimated drive time to the nearest {_label.lower()} (minutes)")
+        _ax.set_title(f"Estimated drive time to the nearest {_label.replace('Burn', 'burn')} (minutes)")
         _ax.set_aspect(1.25)
         _ax.axis("off")
         _ax.legend(markerscale=20, loc="lower left", fontsize=8)
