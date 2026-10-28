@@ -103,7 +103,7 @@ The same documents, prompts, schema and scoring. The first figure is the share o
 
 | Real document | Reducto Parse | Reducto Extract | Best open pipeline |
 |---|---|---|---|
-| Census 1951, table 33 (88 cells) | 95%, **4 wrong** | 95%, **4 wrong** | 100% |
+| Census 1951, table 33 (88 cells) | 95%, **4 wrong** | 14–95%: **4 wrong**, or a dropped column (**67 wrong**) | 100% |
 | USGS OF 49-60, clipped well table (90) | 100% | 100% | 100% |
 | NACA 824, tables 63-009 and 63-006 (208) | 100% | 100% | 100% |
 | USGS OF 61-50, microfilm (216) | 99%, 3 wrong | 99%, 2 wrong | 100% |
@@ -115,15 +115,15 @@ The same documents, prompts, schema and scoring. The first figure is the share o
 |---|---|---|---|
 | Modes 1, 2, 3, 5, 8, 10, 11 | 100% | 100% | 93% to 100% |
 | 4. Wide table cut in half | 50% | 100% | 100% |
-| 6. Columns change between pages | 91% | **89%, 174 wrong** | 100% |
+| 6. Columns change between pages | 91% | **89–97%, 26–174 wrong** | 100% |
 | 7. Merged cells | 87% | 100% | 95% |
 | 9. Footnotes, (negatives), dashes, n/a | 96% | 100% | 100% |
 | 12. Handwritten corrections | 96% | 98% | 97% |
 | 13. Everything at once | 96% | 96% | 95% |
 
-- **On the broken tables, Reducto Extract roughly matches Gemini.** It does better on merged cells (it fills a merged fund down) and on the rotated page, where Gemini given the whole PDF got 93%. It does worse where columns are reordered on page 2: it kept the printed order instead of putting values under the columns asked for, giving 174 believable wrong values.
+- **On the broken tables, Reducto Extract roughly matches Gemini.** It does better on merged cells (it fills a merged fund down) and on the rotated page, where Gemini given the whole PDF got 93%. It does worse where columns are reordered on page 2: it kept the printed order instead of putting values under the columns asked for, giving 26 to 174 believable wrong values, by run.
 - **On the real documents it does worse, and with the same kind of error.**
-  - **Census.** Parse and Extract both misread the same four digits, giving 0.1 for 9.1, 7,706 for 7,796, 2,701 for 2,761 and 3.8 for 8.8. Every Gemini pipeline read them right.
+  - **Census.** Parse and Extract both misread the same four digits, giving 0.1 for 9.1, 7,706 for 7,796, 2,701 for 2,761 and 3.8 for 8.8. Every Gemini pipeline read them right. In a review run, Extract instead dropped the 1940 column and shifted every value one column left (14%, 67 believable wrong values); Parse repeated its 95%.
   - **990-EZ.** Extract read every amount right but put lines 12 to 21 one line off, so each value sits on the line above its own.
   - **WSP 1050.** Parse called both table pages "a completely empty page with no visible content", in Hebrew. So did the three pages either side, and the legacy parser returned nothing. Gemini, Docling and pypdfium read the same file. In a check outside the notebooks, Reducto read page 248 sent as a PNG, with a few misread digits (83.5 for 88.5, 53 for 33). So it fails silently on some valid PDFs.
 - **It costs 2 to 200 times as much.** Parse is $0.010 a page and Extract $0.020, against $0.0001 to $0.0057 for Gemini. Extract took 5 to 20 seconds a page on the real documents.
@@ -156,7 +156,7 @@ The biggest risk is not a blank cell but a believable wrong one, and these failu
 
 ## What it doesn't show
 
-- **Reducto's other modes.** Only Parse r-1 and plain Extract were run. Deep Extract ($40 per 1,000 pages), agentic table enhancement, citations and Reducto's own page splitting weren't tried. Reducto runs once, so its run-to-run spread isn't measured.
+- **Reducto's other modes.** Only Parse r-1 and plain Extract were run. Deep Extract ($40 per 1,000 pages), agentic table enhancement, citations and Reducto's own page splitting weren't tried. Reducto was run twice, by the author and by the reviewer; Extract's census and mode-6 scores changed between runs (see above), so treat single Reducto numbers as one draw.
 - **EPA NEPIS 2000V9TU** isn't keyed. Its 45-by-15 typewritten table across three pages would take about an hour by hand. The issue's other optional documents aren't keyed either.
 - **The real-document keys were checked by the agent that keyed them, not by a person.** Each key has a note on how it was checked: column sums, airfoil symmetry, or the IRS extract. On the 990-EZ, lines 13 to 16 sit under the stamp. They're keyed so they add to line 17 as written, and Argon reads them the same way.
 - **The synthetic handwriting** is one font at one size. Real corrections vary more.
