@@ -821,6 +821,55 @@ def _(ALBERS, FACILITY_LAYERS, HIFLD, bg, KDTree, fetch, gpd, lookalikes, np, pd
 @app.cell
 def _(mo):
     mo.md(r"""
+    ### False positives
+
+    Being flagged doesn't make a look-alike right: in these two states most block groups
+    are flagged, often for demographic reasons alone. A stricter test of a fenceline match
+    is whether there is any heavy industry (refinery, RMP facility, TSDF or petroleum
+    terminal in HIFLD Next) within 3 km. Look-alikes without any count as false positives
+    here, flagged or not. This undercounts real matches next to facilities HIFLD Next
+    doesn't list.
+    """)
+    return
+
+
+@app.cell
+def _(facility_summary, lookalikes, pd, sim):
+    _look = sim.loc[lookalikes.index].assign(near_seed=lookalikes["near_seed"])
+    false_positives = _look[~_look["heavy_industry_3km"]]
+    _groups = {
+        "within 10 km of a seed": _look[_look["near_seed"]],
+        "more than 10 km from a seed": _look[~_look["near_seed"]],
+        "all look-alikes": _look,
+    }
+    false_positive_summary = pd.DataFrame(
+        {
+            name: {
+                "look-alikes": len(g),
+                "no heavy industry within 3 km": int((~g["heavy_industry_3km"]).sum()),
+                "share": round((~g["heavy_industry_3km"]).mean(), 3),
+                "of those, flagged anyway": int((~g["heavy_industry_3km"] & g["flag_any"]).sum()),
+            }
+            for name, g in _groups.items()
+        }
+    ).T
+    false_positives_by_county = (
+        false_positives.groupby(["st_abbrev", "cnty_name"]).size().sort_values(ascending=False)
+    )
+    assert len(facility_summary)  # runs after the facility counts are added to sim
+    false_positive_summary
+    return false_positive_summary, false_positives_by_county
+
+
+@app.cell
+def _(false_positives_by_county):
+    false_positives_by_county.rename("false positives").to_frame()
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
     Then a hand check. Up to 20 unflagged look-alikes, drawn at random with a fixed seed
     (with fewer than 20, all of them), each get a chip of the newest NAIP aerial photos
     (USDA, public domain, mosaicked from Microsoft's Planetary Computer, which needs no
@@ -1108,8 +1157,9 @@ def _(mo):
     - **Look-alikes.** The most similar block groups are overwhelmingly ones EJScreen or
       CEJST already flag, and half of them are the seeds' own neighbours. The unflagged
       ones mostly look like the seeds' surroundings (river-parish cane fields and swamp,
-      Houston suburbs), not like their industry. The held-out fenceline places rank in the
-      thousands. Mean-pooled embeddings describe what most of a block group looks like,
+      Houston suburbs), not like their industry. Away from the seeds, over a third of the
+      look-alikes have no heavy industry within 3 km, most of them flagged anyway. The
+      held-out fenceline places rank in the thousands. Mean-pooled embeddings describe what most of a block group looks like,
       and in a fenceline community most of it is houses.
     - **Asthma.** Embeddings add to the EJ indicators about what coordinates add, so we
       can't tell them apart from location.
@@ -1125,6 +1175,8 @@ def _(
     aef_stats,
     asthma_scores,
     facility_summary,
+    false_positive_summary,
+    false_positives_by_county,
     fit_seconds,
     flag_summary,
     hand_result,
@@ -1153,6 +1205,10 @@ def _(
             "variants": variants.to_dict(),
         },
         "facilities_within_3km": facility_summary.round(3).to_dict("index"),
+        "false_positives": false_positive_summary.to_dict("index"),
+        "false_positives_by_county": {
+            f"{st}: {county}": int(n) for (st, county), n in false_positives_by_county.items()
+        },
         "hand_check": hand_result,
         "naip_dates": naip_dates,
         "asthma_r2_county_cv": asthma_scores.to_dict("records"),
