@@ -14,6 +14,7 @@ with app.setup:
     import urllib.parse
     import urllib.request
     from concurrent.futures import ThreadPoolExecutor
+    from dataclasses import dataclass
     from pathlib import Path
 
     import duckdb
@@ -46,6 +47,7 @@ with app.setup:
     OVERTURE_RELEASE = "2026-10-21.0"
     OVERTURE = f"s3://overturemaps-us-west-2/release/{OVERTURE_RELEASE}"
     USGS_IMAGERY = "https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/export"
+    CENSUS_GEOCODER = "https://geocoding.geo.census.gov/geocoder/locations/addressbatch"
     DECISIONS_URL = "https://openrouter.ai/api/alpha/decisions"
     CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
     JEV_MODEL = os.environ.get("JEV_MODEL", "typesafe/jev-1.14")
@@ -55,19 +57,21 @@ with app.setup:
     NEAR_M = 150
     # Precision we ask of an automatic decision, in both directions (merge, keep separate).
     TARGET_PRECISION = 0.97
+    # The method whose thresholds turn pairs into sites (chosen from the scoring table below).
+    SITE_METHOD = "jev_geocoded"
+
+    @dataclass(frozen=True)
+    class Region:
+        state_fips: int
+        counties: list[str]
+        osm_relation: int
+        bbox: tuple[float, float, float, float]
+
     REGIONS = {
-        "New York City": {
-            "state_fips": 36,
-            "counties": ["36005", "36047", "36061", "36081", "36085"],
-            "osm_relation": 175905,
-            "bbox": (-74.26, 40.49, -73.69, 40.92),
-        },
-        "Los Angeles County": {
-            "state_fips": 6,
-            "counties": ["06037"],
-            "osm_relation": 396479,
-            "bbox": (-118.95, 33.30, -117.64, 34.83),
-        },
+        "New York City": Region(
+            36, ["36005", "36047", "36061", "36081", "36085"], 175905, (-74.26, 40.49, -73.69, 40.92)
+        ),
+        "Los Angeles County": Region(6, ["06037"], 396479, (-118.95, 33.30, -117.64, 34.83)),
     }
     RUN_STARTED = time.perf_counter()
 
@@ -97,7 +101,7 @@ def _():
 
 @app.cell(hide_code=True)
 def _():
-    def fetch_bytes(url: str, data: bytes | None = None, headers: dict | None = None, timeout: int = 300) -> bytes:
+    def fetch_bytes(url: str, data: bytes | None = None, headers: dict | None = None, timeout: int = 900) -> bytes:
         """GET (or POST data) with up to four tries and a growing pause between them."""
         _headers = {"User-Agent": "school-campus-dedup spike", **(headers or {})}
         for attempt in range(4):
@@ -172,7 +176,9 @@ def _(cached):
     _collection_url = [link["href"] for link in _versions["links"] if link["rel"] == "child"][-1]
     _collection = json.loads(urllib.request.urlopen(_collection_url).read())
     hifld_url = next(a["href"] for k, a in _collection["assets"].items() if k.startswith("geoparquet"))
-    hifld_release = re.search(r"releases/([0-9a-f]{8})", _collection_url).group(1)
+    _release = re.search(r"releases/([0-9a-f]{8})", _collection_url)
+    assert _release, f"no release ID in {_collection_url}"
+    hifld_release = _release.group(1)
     _raw = gpd.read_parquet(cached("public-schools.parquet", hifld_url))
     schools = (
         _raw[~_raw["STATE"].isin(["PR", "GU", "VI", "AS", "MP", "PW", "FM", "MH"])]
@@ -259,9 +265,9 @@ def _():
 def _(cached, fetch_bytes):
     _frames = []
     for _region, _spec in REGIONS.items():
-        _path = DATA / f"ccd-2022-{_spec['state_fips']}.json"
+        _path = DATA / f"ccd-2022-{_spec.state_fips}.json"
         if not _path.exists():
-            _rows, _url = [], f"{CCD_API}?fips={_spec['state_fips']}"
+            _rows, _url = [], f"{CCD_API}?fips={_spec.state_fips}"
             for _page in range(10):
                 _body = json.loads(fetch_bytes(_url))
                 _rows += _body["results"]
@@ -284,13 +290,13 @@ def _(cached, fetch_bytes):
             PREFIX osmrel: <https://www.openstreetmap.org/relation/>
             PREFIX geo: <http://www.opengis.net/ont/geosparql#>
             SELECT ?osm ?name ?wkt WHERE {{
-              osmrel:{_spec["osm_relation"]} ogc:sfContains ?osm . ?osm osmkey:amenity "school" .
+              osmrel:{_spec.osm_relation} ogc:sfContains ?osm . ?osm osmkey:amenity "school" .
               ?osm geo:hasGeometry/geo:asWKT ?wkt .
               FILTER(STRSTARTS(STR(?wkt), "POLYGON") || STRSTARTS(STR(?wkt), "MULTIPOLYGON"))
               OPTIONAL {{ ?osm osmkey:name ?name }}
             }}"""
         _path = cached(
-            f"osm-school-areas-{_spec['osm_relation']}.tsv",
+            f"osm-school-areas-{_spec.osm_relation}.tsv",
             QLEVER,
             urllib.parse.urlencode({"query": _query}).encode(),
             {"Accept": "text/tab-separated-values"},
@@ -323,9 +329,9 @@ def _():
     _con.sql("SET memory_limit = '4GB'")
     building_files = {}
     for _region, _spec in REGIONS.items():
-        _path = DATA / f"overture-buildings-{OVERTURE_RELEASE}-{_spec['osm_relation']}.parquet"
+        _path = DATA / f"overture-buildings-{OVERTURE_RELEASE}-{_spec.osm_relation}.parquet"
         if not _path.exists():
-            _x0, _y0, _x1, _y1 = _spec["bbox"]
+            _x0, _y0, _x1, _y1 = _spec.bbox
             _con.sql(f"""
                 COPY (SELECT id, ST_AsWKB(geometry) AS wkb, height, num_floors
                       FROM read_parquet('{OVERTURE}/theme=buildings/type=building/*')
@@ -368,7 +374,10 @@ def _(cached, ccd, normalise_address, schools):
         """Every feature of one LAUSD map-service layer, 1,000 at a time."""
         _parts = []
         for _page in range(20):
-            _url = f"{LAUSD_GIS}/{layer}/query?where=1%3D1&outFields=*&outSR=4326&f=geojson&resultOffset={_page * 1000}&resultRecordCount=1000"
+            _url = (
+                f"{LAUSD_GIS}/{layer}/query?where=1%3D1&outFields=*&outSR=4326&f=geojson"
+                f"&resultOffset={_page * 1000}&resultRecordCount=1000"
+            )
             _part = gpd.read_file(cached(f"lausd-{layer}-{_page}.geojson", _url))
             if _part.empty:
                 return pd.concat(_parts, ignore_index=True).to_crs(METRIC)
@@ -377,10 +386,13 @@ def _(cached, ccd, normalise_address, schools):
 
     _points = arcgis_layer(0)[["CDSCODE", "geometry"]]
     _campuses = arcgis_layer(2)[["ID", "LABEL", "geometry"]]
-    _on_campus = gpd.sjoin(_points, _campuses, predicate="within")
-    _cds_to_nces = ccd.set_index("cds")["ncessch"]
-    _on_campus["NCESID"] = _on_campus["CDSCODE"].map(_cds_to_nces)
-    la_key = _on_campus.dropna(subset=["NCESID"]).groupby("NCESID")["ID"].agg(frozenset)
+    _placed = gpd.sjoin(_points, _campuses, how="left", predicate="within")
+    # A point on no campus is a site of its own (a charter in its own building, say), named after its school.
+    _placed["site"] = (
+        _placed["ID"].map(lambda i: f"campus {int(i)}", na_action="ignore").fillna("own " + _placed["CDSCODE"])
+    )
+    _placed["NCESID"] = _placed["CDSCODE"].map(ccd.set_index("cds")["ncessch"])
+    la_key = _placed.dropna(subset=["NCESID"]).groupby("NCESID")["site"].agg(frozenset)
     mo.md(
         f"NYC key: {len(nyc_key):,} HIFLD schools with a building code. "
         f"LAUSD key: {len(la_key):,} HIFLD schools placed on one of {len(_campuses):,} campuses."
@@ -401,16 +413,37 @@ def _():
 
 
 @app.cell
-def _(building_files, candidate_pairs, ccd, la_key, normalise_address, nyc_key, osm_areas, schools):
+def _(building_files, cached, candidate_pairs, ccd, la_key, normalise_address, nyc_key, osm_areas, schools):
     def nearest_within(points: gpd.GeoDataFrame, shapes: gpd.GeoDataFrame, column: str) -> pd.Series:
         """For each point, `column` of the shape containing it or, failing that, the nearest within 10 m."""
         _hit = gpd.sjoin_nearest(points[["geometry"]], shapes[[column, "geometry"]], max_distance=10, distance_col="d")
-        return _hit.sort_values("d").groupby(level=0)[column].first().reindex(points.index)
+        return pd.Series(_hit.sort_values("d").groupby(level=0)[column].first().reindex(points.index))
+
+    def census_geocode(frame: pd.DataFrame, name: str) -> gpd.GeoSeries:
+        """Each record's reported address geocoded by the Census Bureau, independently of its HIFLD point."""
+        assert len(frame) <= 10_000, "the Census batch geocoder takes at most 10,000 addresses"
+        _csv = frame[["NCESID", "ADDRESS", "CITY", "STATE", "ZIP"]].to_csv(index=False, header=False)
+        _boundary = "----school-campus-dedup"
+        _body = (
+            f'--{_boundary}\r\nContent-Disposition: form-data; name="benchmark"\r\n\r\nPublic_AR_Current\r\n'
+            f'--{_boundary}\r\nContent-Disposition: form-data; name="addressFile"; filename="a.csv"\r\n'
+            f"Content-Type: text/csv\r\n\r\n{_csv}\r\n--{_boundary}--\r\n"
+        ).encode()
+        _path = cached(
+            f"census-geocode-{name}.csv",
+            CENSUS_GEOCODER,
+            _body,
+            {"Content-Type": f"multipart/form-data; boundary={_boundary}"},
+        )
+        _out = pd.read_csv(_path, header=None, dtype=str, usecols=[0, 2, 5], names=["NCESID", "match", "lonlat"])
+        _xy = _out.set_index("NCESID")["lonlat"].str.split(",", expand=True).astype(float)
+        _xy = _xy.reindex(frame["NCESID"])
+        return gpd.GeoSeries(gpd.points_from_xy(_xy[0], _xy[1]), crs="EPSG:4326").to_crs(METRIC)
 
     _charter = ccd.set_index("ncessch")["charter"]
     _frames = []
     for _region, _spec in REGIONS.items():
-        _local = schools[schools["COUNTYFIPS"].isin(_spec["counties"])].reset_index(drop=True)
+        _local = schools[schools["COUNTYFIPS"].isin(_spec.counties)].reset_index(drop=True)
         _buildings = pd.read_parquet(building_files[_region])
         _buildings = gpd.GeoDataFrame(
             _buildings[["id"]], geometry=shapely.from_wkb(_buildings["wkb"]), crs="EPSG:4326"
@@ -426,9 +459,13 @@ def _(building_files, candidate_pairs, ccd, la_key, normalise_address, nyc_key, 
         _local["osm_area"] = nearest_within(_local, _areas, "osm_id")
         _local["osm_area_name"] = _local["osm_area"].map(_areas.set_index("osm_id")["osm_name"])
         _local["charter"] = _local["NCESID"].map(_charter)
+        _geocoded = census_geocode(_local, str(_spec.osm_relation))
         _pairs = candidate_pairs(_local)
         _a, _b = _local.iloc[_pairs["i"]].reset_index(drop=True), _local.iloc[_pairs["j"]].reset_index(drop=True)
         _pairs["region"] = _region
+        _pairs["geocoded_distance_m"] = (
+            _geocoded.iloc[_pairs["i"]].distance(_geocoded.iloc[_pairs["j"]], align=False).round().to_numpy()
+        )
         for _side, _rows in (("a", _a), ("b", _b)):
             for _column in [
                 "NCESID",
@@ -464,10 +501,12 @@ def _(building_files, candidate_pairs, ccd, la_key, normalise_address, nyc_key, 
             _ka, _kb = _a["NCESID"].map(nyc_key), _b["NCESID"].map(nyc_key)
             _pairs["truth"] = np.where(_ka.notna() & _kb.notna(), _ka == _kb, np.nan)
         else:
-            _ka, _kb = _a["NCESID"].map(la_key), _b["NCESID"].map(la_key)
-            _known = _ka.notna() & _kb.notna()
-            _pairs["truth"] = np.nan
-            _pairs.loc[_known, "truth"] = [float(bool(x & y)) for x, y in zip(_ka[_known], _kb[_known], strict=True)]
+            _ka, _kb = (_rec["NCESID"].map(lambda n: la_key.get(n, frozenset())) for _rec in (_a, _b))
+            # Two schools that are both off campus could still share a private building, so they get no answer.
+            _pairs["truth"] = [
+                float(bool(x & y)) if x and y and any(s.startswith("campus") for s in x | y) else np.nan
+                for x, y in zip(_ka, _kb, strict=True)
+            ]
         _frames.append(_pairs.drop(columns=["i", "j"]))
     pairs = pd.concat(_frames, ignore_index=True)
     pairs["pair_id"] = pairs["a_ncesid"] + "-" + pairs["b_ncesid"]
@@ -570,10 +609,15 @@ def _(fetch_bytes):
         "false": "They are at separate sites, even if they are close together, belong to the same organization, or "
         "share a phone number or mailing address.",
     }
+    # The fourth variant also sees where the Census Bureau geocodes each reported address, and is told why.
+    GEOCODED_NOTE = (
+        " The map points come from the source layer and are sometimes misplaced by hundreds of metres. The reported "
+        "street addresses, and the distance between their independent Census Bureau geocodes, are more reliable."
+    )
     to_mercator = Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True)
 
-    def pair_state(row: pd.Series) -> dict:
-        """What a person would look at: both records and the geometry facts."""
+    def pair_state(row: pd.Series, geocoded: bool) -> dict:
+        """What a person would look at: both records and the geometry facts (and the address geocodes if asked)."""
 
         def record(side: str) -> dict:
             return {
@@ -593,7 +637,7 @@ def _(fetch_bytes):
                 else int(row[f"{side}_building_area_m2"]),
             }
 
-        return {
+        _state = {
             "record_a": record("a"),
             "record_b": record("b"),
             "distance_between_points_m": round(float(row["distance_m"])),
@@ -601,6 +645,10 @@ def _(fetch_bytes):
             "same_building_footprint": bool(row["same_building"]),
             "same_openstreetmap_school_grounds": bool(row["same_osm_grounds"]),
         }
+        if geocoded:
+            _d = row["geocoded_distance_m"]
+            _state["distance_between_geocoded_addresses_m"] = None if pd.isna(_d) else int(_d)
+        return _state
 
     def aerial_chip(row: pd.Series) -> str:
         """A base64 JPEG of the pair on USGS imagery, A in red and B in blue, cached on disk."""
@@ -629,16 +677,19 @@ def _(fetch_bytes):
         _path = DATA / "answers" / method / f"{row['pair_id']}.json"
         if _path.exists():
             return json.loads(_path.read_text())
-        _state = pair_state(row)
+        _state = pair_state(row, geocoded=method == "jev_geocoded")
         _headers = {"Authorization": f"Bearer {os.environ['OPENROUTER_API_KEY']}", "Content-Type": "application/json"}
-        _image = {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{aerial_chip(row)}"}}
         if method.startswith("jev"):
             if method == "jev_text_image":
-                _state["aerial_image_red_marker_is_a_blue_marker_is_b"] = _image
+                _state["aerial_image_red_marker_is_a_blue_marker_is_b"] = {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/jpeg;base64,{aerial_chip(row)}"},
+                }
+            _question = QUESTION + (GEOCODED_NOTE if method == "jev_geocoded" else "")
             _body = {
                 "model": JEV_MODEL,
                 "state": _state,
-                "questions": {"same_site": {"type": "noul", "instructions": QUESTION, "criteria": CRITERIA}},
+                "questions": {"same_site": {"type": "noul", "instructions": _question, "criteria": CRITERIA}},
             }
             _reply = JevResponse.model_validate_json(
                 fetch_bytes(DECISIONS_URL, json.dumps(_body).encode(), _headers, 120)
@@ -650,6 +701,7 @@ def _(fetch_bytes):
                 f"The aerial image shows record_a as a red circle and record_b as a blue circle.\n"
                 f'{json.dumps(_state)}\nReply with JSON: {{"same_site_probability": <0 to 1>}}'
             )
+            _image = {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{aerial_chip(row)}"}}
             _body = {
                 "model": CHAT_MODEL,
                 "messages": [{"role": "user", "content": [{"type": "text", "text": _prompt}, _image]}],
@@ -667,7 +719,7 @@ def _(fetch_bytes):
 
 @app.cell
 def _(ask, pairs):
-    METHODS = ["jev_text", "jev_text_image", "chat_text_image"]
+    METHODS = ["jev_text", "jev_text_image", "chat_text_image", "jev_geocoded"]
     answers = pairs[["pair_id"]].copy()
     model_runs = []
     for _method in METHODS:
@@ -675,7 +727,7 @@ def _(ask, pairs):
         _rows = pairs if _method != "chat_text_image" else pairs.dropna(subset=["truth"])
         _started = time.perf_counter()
         with ThreadPoolExecutor(max_workers=8) as _pool:
-            _out = list(_pool.map(lambda r: ask(_method, r), [r for _, r in _rows.iterrows()]))
+            _out = list(_pool.map(ask, [_method] * len(_rows), [r for _, r in _rows.iterrows()]))
         answers.loc[_rows.index, _method] = [o["p"] for o in _out]
         model_runs.append(
             {
@@ -731,6 +783,7 @@ def _(METHODS, answers, pairs):
         "count of the four signals": "rules",
         "Jev, text": "jev_text",
         "Jev, text + image": "jev_text_image",
+        "Jev, text + address geocodes": "jev_geocoded",
         f"{CHAT_MODEL}, text + image": "chat_text_image",
     }
 
@@ -753,6 +806,8 @@ def _(METHODS, answers, pairs):
             _merge_at, _apart_at = thresholds(_tune[_column].astype(float), _tune["truth"])
             _s, _y = _test[_column].astype(float), _test["truth"]
             _merge, _apart = _s >= _merge_at, (_s <= _apart_at) & ~(_s >= _merge_at)
+            # A plain yes/no reading of the same score: 0.5 for probabilities and rules, 25 m, S2 level 18.
+            _said_yes = _s >= {"closeness": -25, "s2_shared_level": 18}.get(_column, 0.5)
             _rows.append(
                 {
                     "region": _region,
@@ -764,6 +819,8 @@ def _(METHODS, answers, pairs):
                     "kept apart wrongly": int((_apart & (_y == 1)).sum()),
                     "to review": int((~_merge & ~_apart).sum()),
                     "decided %": round(100 * (_merge | _apart).mean(), 1),
+                    "plain precision": round(float(_y[_said_yes].mean()), 3),
+                    "plain recall": round(float(_said_yes[_y == 1].mean()), 3),
                 }
             )
     triage = pd.DataFrame(_rows)
@@ -789,7 +846,7 @@ def _(METHODS, scored):
     _fig, _ax = plt.subplots(figsize=(5.5, 5))
     _ax.plot([0, 1], [0, 1], color="#999", lw=1, ls="--")
     _rows = []
-    for _method, _colour in zip(METHODS, ["#4c72b0", "#c44e52", "#55a868"], strict=True):
+    for _method, _colour in zip(METHODS, ["#4c72b0", "#c44e52", "#55a868", "#8172b2"], strict=True):
         _p, _y = _known[_method].astype(float), _known["truth"].astype(float)
         _bins = np.minimum((_p * 10).astype(int), 9)
         _cal = (
@@ -836,7 +893,7 @@ def _():
 
 @app.cell
 def _(scored, schools, thresholds):
-    _method = "jev_text_image"
+    _method = SITE_METHOD
     _rows = []
     _regional = []
     for _region, _spec in REGIONS.items():
@@ -846,7 +903,7 @@ def _(scored, schools, thresholds):
         _decision = np.select(
             [_all[_method] >= _merge_at, _all[_method] <= _apart_at], ["merge", "keep apart"], "review"
         )
-        _local = schools[schools["COUNTYFIPS"].isin(_spec["counties"])][
+        _local = schools[schools["COUNTYFIPS"].isin(_spec.counties)][
             ["NCESID", "NAME", "ADDRESS", "CITY", "ENROLLMENT"]
         ]
         _index = pd.Series(range(len(_local)), index=_local["NCESID"])
@@ -856,7 +913,7 @@ def _(scored, schools, thresholds):
             shape=(len(_local),) * 2,
         )
         _, _labels = connected_components(_graph, directed=False)
-        _local = _local.assign(region=_region, site_id=[f"{_spec['osm_relation']}-{s}" for s in _labels])
+        _local = _local.assign(region=_region, site_id=[f"{_spec.osm_relation}-{s}" for s in _labels])
         _review_ids = set(_all.loc[_decision == "review", ["a_ncesid", "b_ncesid"]].to_numpy().ravel())
         _local["has_pair_to_review"] = _local["NCESID"].isin(_review_ids)
         _regional.append(_local)
