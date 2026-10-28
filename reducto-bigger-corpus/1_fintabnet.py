@@ -326,6 +326,41 @@ def _(OPEN_AND_REDUCTO, STRATA, run1, run2, score):
 @app.cell(hide_code=True)
 def _():
     mo.md(r"""
+    ## Where Reducto Extract's cells go: the shape of the answer
+
+    Most of Reducto Extract's lost cells aren't misread digits. The table comes back the wrong shape: empty, all
+    in one row, short of rows, or with rows of the wrong width. Counted for each pipeline's run 1 against the key's
+    rows and columns.
+    """)
+    return
+
+
+@app.cell
+def _(KEYS, OPEN_AND_REDUCTO, run1):
+    def shape(rows: list[list[str]], key: list[list[str]]) -> str:
+        if not rows:
+            return "empty"
+        if len(rows) == 1 and len(key) > 2:
+            return "one row"
+        if len(rows) < 0.8 * len(key):
+            return "under 80% of the rows"
+        if any(len(r) != len(key[0]) for r in rows):
+            return "a row of the wrong width"
+        return "right shape"
+
+    _kinds = ["right shape", "empty", "one row", "under 80% of the rows", "a row of the wrong width"]
+    _lines = ["| Pipeline | " + " | ".join(_kinds) + " |", "|---" * (len(_kinds) + 1) + "|"]
+    for _p in OPEN_AND_REDUCTO[1:]:
+        _shapes = [shape((r.output or {}).get("rows", []), KEYS[n]) for (n, p), r in run1.items() if p == _p]
+        _lines.append(f"| {_p} | " + " | ".join(str(_shapes.count(k)) for k in _kinds) + " |")
+    shape_table = "\n".join(_lines)
+    mo.md(shape_table)
+    return (shape_table,)
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
     ## The wrong values, by example
 
     The tables where a pipeline gave the most believable wrong values, with a few of them next to the key.
@@ -356,6 +391,7 @@ def _(
     run2,
     run3,
     same,
+    shape_table,
     stratum_table,
     subset_table,
     subset_tallies,
@@ -364,7 +400,8 @@ def _(
     (HERE / "results").mkdir(exist_ok=True)
     (HERE / "results" / "fintabnet.md").write_text(
         f"# FinTabNet, 102 tables\n\n{main_table}\n\n## 22-table subset\n\n{subset_table}\n\n"
-        f"## By kind of table\n\n{stratum_table}\n\n## Reducto's cache\n\n{cache_note}\n"
+        f"## By kind of table\n\n{stratum_table}\n\n## Shape of each answer, run 1\n\n{shape_table}\n\n"
+        f"## Reducto's cache\n\n{cache_note}\n"
     )
     (OUT / "results.json").write_text(
         json.dumps(

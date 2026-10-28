@@ -123,8 +123,10 @@ def _():
     mo.md(r"""
     ## The returns and the prompt
 
-    The first 100 returns of the draw that downloaded, each as a one-page PDF of page 1. Every pipeline is asked for
-    the same 20 lines, with #136's form schema (line number and amount as written).
+    The first 100 returns of the draw that downloaded, each as a one-page PDF of the file's first page. One file
+    starts with Schedule A instead of the 990-EZ itself; it's marked `not page 1` in `adjudications.json` and the
+    next return takes its place. Every pipeline is asked for the same 20 lines, with #136's form schema (line
+    number and amount as written).
     """)
     return
 
@@ -142,7 +144,9 @@ def _(downloaded):
             strict=True,
         )
     )
-    RETURNS = downloaded[:100]
+    _adjudications = json.loads((HERE / "adjudications.json").read_text())
+    _not_page_1 = {a["page"] for a in _adjudications if a["kind"] == "not page 1"}
+    RETURNS = [(row, pdf) for row, pdf in downloaded if pdf.stem not in _not_page_1][:100]
     TASKS = [
         Task(
             name=pdf.stem,

@@ -29,6 +29,16 @@
 | small, merged cells | Gemini, whole PDF | 99.6% | 72.8% | 81.3% |
 | small, no merged cells | Gemini, page by page | 99.6% | 97.5% | 92.5% |
 
+## Shape of each answer, run 1
+
+| Pipeline | right shape | empty | one row | under 80% of the rows | a row of the wrong width |
+|---|---|---|---|---|---|
+| Gemini, whole PDF | 102 | 0 | 0 | 0 | 0 |
+| Gemini, page by page | 102 | 0 | 0 | 0 | 0 |
+| Docling, then Gemini | 101 | 0 | 0 | 1 | 0 |
+| Reducto Parse | 70 | 6 | 0 | 0 | 26 |
+| Reducto Extract | 82 | 3 | 4 | 5 | 8 |
+
 ## Reducto's cache
 
 Reducto Extract on the 22 subset tables. Same files again: 22 of 22 answers identical to run 1, 0.4 seconds a table. New bytes: 16 of 22 answers differ. Cells right: 488 in run 1, 488 on the same files, 462 on new bytes.
