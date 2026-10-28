@@ -10,7 +10,7 @@ How far is each US block group from a Level I or II trauma center and from a bur
 ./run.sh
 ```
 
-It needs [uv](https://docs.astral.sh/uv/), [osmium-tool](https://osmcode.org/osmium-tool/) (`apt install osmium-tool` or `brew install osmium-tool`), about 5 GB of disk. The first run downloads about 2.6 GB into `data/`, then builds routing tiles for both states and routes them. `ACCESS_DATA_DIR` and `ACCESS_OUT_DIR` move the data and output folders. To read the notebook with its outputs, run `uv run marimo edit access.py`.
+It needs [uv](https://docs.astral.sh/uv/), [osmium-tool](https://osmcode.org/osmium-tool/) (`apt install osmium-tool` or `brew install osmium-tool`) and about 5 GB of disk. The first run downloads about 2.6 GB into `data/`, then builds routing tiles for both states and routes them. `ACCESS_DATA_DIR` and `ACCESS_OUT_DIR` move the data and output folders. To read the notebook with its outputs, run `uv run marimo edit access.py`.
 
 ## Where the data comes from
 
