@@ -462,9 +462,9 @@ def _(mo):
     ### How much does a pixel move in six years?
 
     Most pixels barely move: their 2018 and 2024 vectors have a cosine similarity above
-    0.9. We call a pixel **changed** if its similarity is below 0.6, which is roughly the
-    lowest 1% of pixels. The threshold is a choice, not a fit; the histogram shows where it
-    sits.
+    0.9. We call a pixel **changed** if its similarity is below 0.6, which is the lowest
+    1.4% of pixels in the eleven counties. The threshold is a choice, not a fit; the
+    histogram shows where it sits.
     """)
     return
 
@@ -846,7 +846,6 @@ def _(
 ):
     from rasterio.merge import merge
     from rasterio.vrt import WarpedVRT
-    from rasterio.windows import Window
     from shapely.geometry import box
 
     _pc = "https://planetarycomputer.microsoft.com/api"
@@ -906,27 +905,26 @@ def _(
 
     def outline(area_id: int, ext: tuple) -> list:
         """Polygons of one change area inside the chip extent, from the label raster."""
-        c0, r0 = ~grid * (ext[0], ext[3])
-        c1, r1 = ~grid * (ext[2], ext[1])
-        win = Window(int(c0), int(r0), int(c1 - c0) + 1, int(r1 - r0) + 1)
-        sub = area_labels[
-            max(win.row_off, 0) : win.row_off + win.height,
-            max(win.col_off, 0) : win.col_off + win.width,
-        ]
-        transform = grid * grid.translation(max(win.col_off, 0), max(win.row_off, 0))
+        c0, r0 = (max(int(v), 0) for v in ~grid * (ext[0], ext[3]))
+        c1, r1 = (int(v) + 1 for v in ~grid * (ext[2], ext[1]))
+        sub = area_labels[r0:r1, c0:c1]
+        transform = grid * grid.translation(c0, r0)
         mask = (sub == area_id).astype(np.uint8)
         return [shape(g) for g, v in shapes(mask, mask=mask > 0, transform=transform) if v]
 
-    def chip(name: str, ext: tuple, title: str, area_id: int, tokens: dict) -> None:
-        """Three panels (NAIP before, NAIP after, Sentinel-2 late 2024) saved as a PNG."""
-        path = OUT_DIR / "chips" / f"{name}.png"
-        if path.exists():
-            return
-        panels = naip_pair(ext, tokens["naip"]) + [sentinel_late_2024(ext, tokens["s2"])]
+    def panels(ext: tuple) -> list[tuple[str, np.ndarray]]:
+        """NAIP before, NAIP after and Sentinel-2 late 2024. Tokens last an hour, so fetch anew."""
+        return naip_pair(ext, pc_token("naip")) + [
+            sentinel_late_2024(ext, pc_token("sentinel-2-l2a"))
+        ]
+
+    def draw_chip(name: str, ext: tuple, title: str, area_id: int, images: list) -> None:
+        """The three panels with the change area outlined and facilities marked, as a PNG."""
+        path = OUT_DIR / "chips" / f"{name}.jpg"
         polys = gpd.GeoSeries(outline(area_id, ext) if area_id else [], crs=UTM)
         near = registry.cx[ext[0] : ext[2], ext[1] : ext[3]]
         fig, axes = plt.subplots(1, 3, figsize=(13, 4.6))
-        for ax, (label, img) in zip(axes, panels, strict=True):
+        for ax, (label, img) in zip(axes, images, strict=True):
             ax.imshow(img, extent=(ext[0], ext[2], ext[1], ext[3]))
             if len(polys):
                 polys.boundary.plot(ax=ax, color="cyan", lw=1)
@@ -948,21 +946,23 @@ def _(
             axes[0].legend(loc="lower left", fontsize=7)
         fig.suptitle(title, fontsize=9)
         fig.tight_layout()
-        fig.savefig(path, dpi=90)
+        fig.savefig(path, dpi=90, pil_kwargs={"quality": 85})
         plt.close(fig)
 
     def extent(x: float, y: float, half: float) -> tuple:
         return (x - half, y - half, x + half, y + half)
 
-    return chip, extent, pc_token
+    return draw_chip, extent, panels
 
 
 @app.cell
 def _(
+    OUT_DIR,
     RES,
-    chip,
+    ThreadPoolExecutor,
+    draw_chip,
     extent,
-    pc_token,
+    panels,
     pd,
     sample_facilities,
     sample_random,
@@ -970,30 +970,37 @@ def _(
     time,
 ):
     _t = time.perf_counter()
-    _tokens = {"naip": pc_token("naip"), "s2": pc_token("sentinel-2-l2a")}
+    _jobs = []  # (name, extent, title, area id to outline)
     _areas = pd.concat([sample_random, sample_top]).drop_duplicates("area_id")
     for _, _a in _areas.iterrows():
         _span = max(_a["row_max"] - _a["row_min"], _a["col_max"] - _a["col_min"]) + 1
         _half = max(_span * RES / 2 + 400, 750)
-        chip(
-            f"area-{_a['area_id']}",
-            extent(_a.geometry.x, _a.geometry.y, _half),
-            f"change area {_a['area_id']}, {_a['county']}, {_a['hectares']:.0f} ha, "
-            f"mean cosine {_a['mean_cosine']:.2f}, {2 * _half / 1000:.1f} km across",
-            int(_a["area_id"]),
-            _tokens,
+        _jobs.append(
+            (
+                f"area-{_a['area_id']}",
+                extent(_a.geometry.x, _a.geometry.y, _half),
+                f"change area {_a['area_id']}, {_a['county']}, {_a['hectares']:.0f} ha, "
+                f"mean cosine {_a['mean_cosine']:.2f}, {2 * _half / 1000:.1f} km across",
+                int(_a["area_id"]),
+            )
         )
     for _, _f in sample_facilities.iterrows():
-        chip(
-            f"facility-{_f['key']}",
-            extent(_f.geometry.x, _f.geometry.y, 750),
-            f"new {_f['registry']} facility {_f['name']} (first {_f['first_year']:.0f}), "
-            f"{'caught' if _f['caught'] else 'missed'}, 1.5 km across",
-            int(_f["area_id"]) if _f["caught"] else 0,
-            _tokens,
+        _jobs.append(
+            (
+                f"facility-{_f['key']}",
+                extent(_f.geometry.x, _f.geometry.y, 750),
+                f"new {_f['registry']} facility {_f['name']} (first {_f['first_year']:.0f}), "
+                f"{'caught' if _f['caught'] else 'missed'}, 1.5 km across",
+                int(_f["area_id"]) if _f["caught"] else 0,
+            )
         )
+    _todo = [j for j in _jobs if not (OUT_DIR / "chips" / f"{j[0]}.jpg").exists()]
+    # Downloads run in parallel; drawing stays on this thread, since pyplot isn't thread-safe.
+    with ThreadPoolExecutor(6) as _pool:
+        for _job, _images in zip(_todo, _pool.map(lambda j: panels(j[1]), _todo), strict=True):
+            draw_chip(*_job, _images)
     chip_seconds = round(time.perf_counter() - _t)
-    {"chips": len(_areas) + len(sample_facilities), "seconds": chip_seconds}
+    {"chips": len(_jobs), "drawn this run": len(_todo), "seconds": chip_seconds}
     return (chip_seconds,)
 
 
@@ -1060,15 +1067,51 @@ def _(HAND_CHECK, area_counts, areas, pd, sample_facilities, sample_random, samp
         share_with_ci(int(_built["caught"].sum()), len(_built)) if len(_built) else "none"
     )
     unregistered = _industry[~_industry["registered_facility_300m"]]
+    new_builds = _built
     assert len(areas)
     hand_shares
-    return hand_result, hand_shares, labels, unregistered
+    return hand_result, hand_shares, labels, new_builds, unregistered
 
 
 @app.cell
 def _(hand_result):
     hand_result
     return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    ### Why the new plants were missed
+
+    For each sampled new facility where the photos show new construction, the lowest
+    cosine similarity within 300 m of its registered point, and how many pixels there
+    are below 0.6. A plant whose site was already cleared and under construction during
+    2018 starts the comparison as a construction site, not as woods or pasture.
+    """)
+    return
+
+
+@app.cell
+def _(MATCH_M, RES, cosine, grid, labels, new_builds, np, pd):
+    _notes = labels[labels["kind"] == "facility"].set_index("id")["note"]
+    _rows = []
+    for _, _f in new_builds.iterrows():
+        _c, _r = ~grid * (_f.geometry.x, _f.geometry.y)
+        _k = MATCH_M // RES
+        _win = cosine[int(_r) - _k : int(_r) + _k + 1, int(_c) - _k : int(_c) + _k + 1]
+        _rows.append(
+            {
+                "facility": _f["name"],
+                "first registered": int(_f["first_year"]),
+                "lowest cosine within 300 m": round(float(np.nanmin(_win)), 2),
+                "pixels below 0.6": int((_win < 0.6).sum()),
+                "what the photos show": _notes[_f["key"]],
+            }
+        )
+    missed_builds = pd.DataFrame(_rows)
+    missed_builds
+    return (missed_builds,)
 
 
 @app.cell
@@ -1123,6 +1166,7 @@ def _(
     hand_result,
     hand_shares,
     json,
+    missed_builds,
     recall,
     score_check,
     t_start,
@@ -1145,6 +1189,7 @@ def _(
         "hand_result": hand_result,
         "unregistered_industry_area_ids": unregistered["area_id"].tolist(),
         "industry_score": score_check,
+        "new_builds": missed_builds.drop(columns="what the photos show").to_dict("records"),
         "chip_seconds": chip_seconds,
         "total_seconds": round(time.perf_counter() - t_start),
     }
