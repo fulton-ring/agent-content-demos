@@ -782,10 +782,10 @@ def _(bins_match, mo, pctile_check, pl):
     them are in the four island territories, which EPA ranked within each territory but
     EJAM can't: it has no values for them and its state lookups there are empty. The other
     {_st["mismatches"] - _st["missing_in_ours_only"]:,} differ by at most
-    {_st["max_abs_diff"]} points, almost all in proximity to Superfund sites (`PNPL`): 193
+    {_st["max_abs_diff"]} points, almost all in proximity to Superfund sites (`PNPL`): 370
     block groups have exactly the same score, 11.0, which fills several percentiles of
-    some states' lookups (92 to 97 in Nebraska), so a tie rule decides, and EPA's state
-    ranking broke those ties differently from EJAM's lookup.
+    some states' lookups (92 to 97 in Nebraska, where 88 of them are), so a tie rule
+    decides, and EPA's state ranking broke those ties differently from EJAM's lookup.
     `outputs/percentile_check.csv` has every column.
     """)
     return

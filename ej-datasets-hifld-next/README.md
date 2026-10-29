@@ -17,7 +17,7 @@ Column counts include `geoid`, `geometry` and `census_aland` (the Census land ar
 EJ_PMTILES=1 ./run.sh    # also vector tiles, about 18 minutes more
 ```
 
-It needs [uv](https://docs.astral.sh/uv/) and about 5 GB of disk. If R is installed, the run also checks its percentile code against EJAM's R function (base R only); without R that step is skipped. The first run downloads 76 files (1.82 GB) into `data/` and spends about 11 minutes parsing EJAM's two R data files, which are then cached. `EJ_DATA_DIR` and `EJ_OUT_DIR` move the download and output folders. To read the notebook with its outputs, run `uv run marimo edit ej_datasets.py`.
+It needs [uv](https://docs.astral.sh/uv/), about 5 GB of disk and about 12 GB of free memory (the run peaks above 10 GB). If R is installed, the run also checks its percentile code against EJAM's R function (base R only); without R that step is skipped. The first run downloads 76 files (1.82 GB) into `data/` and spends about 11 minutes parsing EJAM's two R data files, which are then cached. `EJ_DATA_DIR` and `EJ_OUT_DIR` move the download and output folders. To read the notebook with its outputs, run `uv run marimo edit ej_datasets.py`.
 
 ## Where the data comes from
 
@@ -49,7 +49,7 @@ All numbers come from `outputs/summary.json`, `outputs/validation.csv`, `outputs
 
 - **Faithful to EJAM's code.** Run with R installed, the Python port and EJAM's own R function give the same percentile in all 2,187,198 cells compared (5 columns, national and state, every `v3.2022.3` block group).
 - **Reproduces EPA nationally.** The same code on `v3.2022.3` and its lookups reproduces EPA 2024's national `P_` columns in 12,151,099 of 12,151,100 cells (49 of 50 columns exactly; one block group's `P_D2_RSEI_AIR` is off by 1). The map bins match EPA's `B_PM25` in 100% of rows.
-- **By state, everywhere but the territories.** Against EPA's `StatePct` file, 26 of 50 columns match exactly and 12,461 cells differ. 12,194 of those are the four island territories: EPA ranked them within each territory, but EJAM has no values and empty state lookups for them, so their `s_p_*` columns are empty. The other 267 differ by at most 5 points, almost all in Superfund proximity, where 193 block groups share exactly the same score and that value spans several percentiles of some states' lookups (92 to 97 in Nebraska), so the tie rule decides.
+- **By state, everywhere but the territories.** Against EPA's `StatePct` file, 26 of 50 columns match exactly and 12,461 cells differ. 12,194 of those are the four island territories: EPA ranked them within each territory, but EJAM has no values and empty state lookups for them, so their `s_p_*` columns are empty. The other 267 differ by at most 5 points, almost all in Superfund proximity, where 370 block groups share exactly the same score, 11.0, and that value spans several percentiles of some states' lookups (92 to 97 in Nebraska, which has 88 of them), so the tie rule decides.
 
 **What's missing from the public copies.**
 
