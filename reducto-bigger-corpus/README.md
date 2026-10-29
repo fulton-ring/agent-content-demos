@@ -32,11 +32,11 @@ From nothing, a run takes about 3 to 4 hours on 4 cores, mostly Docling and #136
 
 ## Reducto answers a file it has seen from a cache
 
-Our first second run of Reducto came back identical on all 102 FinTabNet tables, under new job IDs, in about 0.2 seconds a table. Sending the 22 subset tables again with one comment line added after the end of each PDF (the same pages, a different file hash) changed 16 of the 22 answers, and the cells right went from 488 to 462. Reducto's docs don't mention this. In #136's two runs here, 57 of 94 Reducto answers in run 2 were cache hits. So every second Reducto read in this spike is on such a copy. Reducto run twice on the same file measures its cache, not its reading. #136's own run-to-run Reducto comparison was partly this.
+Our first second run of Reducto came back identical on all 102 FinTabNet tables, under new job IDs, in about 0.2 seconds a table (0.4 seconds on the 22-table check in `results/fintabnet.md`). Sending the 22 subset tables again with one comment line added after the end of each PDF (the same pages, a different file hash) changed 16 of the 22 answers, and the cells right went from 488 to 462. Reducto's docs don't mention this. In #136's two runs here, 57 of 94 Reducto answers in run 2 were cache hits. So every second Reducto read in this spike is on such a copy. Reducto run twice on the same file measures its cache, not its reading. #136's own run-to-run Reducto comparison was partly this.
 
 ## Results
 
-**FinTabNet, 102 tables, 3,838 keyed cells** ([`results/fintabnet.md`](results/fintabnet.md)):
+**FinTabNet, 102 tables, 3,838 keyed cells, of which 3,729 are scored** (the other 109 are dashes, which the scorer reads as empty) ([`results/fintabnet.md`](results/fintabnet.md)):
 
 | Pipeline | Cells right, run 1 / run 2 | Wrong | Empty answers | Cost per page | Seconds per page |
 |---|---|---|---|---|---|
