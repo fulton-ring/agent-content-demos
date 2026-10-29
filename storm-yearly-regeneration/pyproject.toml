@@ -1,0 +1,53 @@
+[project]
+name = "storm-yearly-regeneration"
+version = "0.1.0"
+description = "Regenerate STORM synthetic North Atlantic hurricane tracks from the latest IBTrACS and publish them"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "cartopy>=0.26.0",
+    "climada>=6.1.0",
+    "geopandas>=1.2.0",
+    "marimo>=0.25.2",
+    "matplotlib>=3.11.2",
+    "netcdf4>=1.7.5.1.post1",
+    "numcodecs>=0.17.1",
+    "numpy<2.4",
+    "pandas>=3.1.0",
+    "portolan-cli>=0.8.0",
+    "pyarrow>=25.0.1",
+    "pystac>=1.15.2",
+    "remotezip>=0.12.6",
+    "requests>=2.34.2",
+    "scipy>=1.18.1",
+    "shapely>=2.2.0",
+    "xarray>=2026.9.0",
+]
+
+[tool.uv]
+package = false
+# CLIMADA lists the GDAL Python bindings, which have no wheels and need system GDAL headers.
+# The parts we use (STORM tracks, wind fields, climate scaling) don't need them.
+override-dependencies = ["gdal; sys_platform == 'never'"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+# A bare expression at the end of a marimo cell is what the cell displays.
+"*.py" = ["B018"]
+
+[dependency-groups]
+dev = [
+    "pandas-stubs>=3.0.5.260914",
+    "pytest>=9.2.0",
+    "ruff>=0.17.3",
+    "scipy-stubs>=1.18.1.1",
+    "ty>=0.0.93",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
