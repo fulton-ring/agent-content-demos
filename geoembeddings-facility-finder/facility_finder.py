@@ -213,7 +213,8 @@ def _(Callable, DATA_DIR, DatasetReader, GDAL_ENV, HIFLD, Path, httpx, rasterio,
         rows = [line.split(":") for line in lines]
         return sum(int(stats.split()[0]) for name, stats in rows if name.strip() != "lo")
 
-    return fetch, hifld_layer, read_remote, rx_bytes
+    rx_start = rx_bytes()
+    return fetch, hifld_layer, read_remote, rx_bytes, rx_start
 
 
 @app.cell
@@ -544,14 +545,17 @@ def _(mo):
     (25 grid pixels) are dropped. A site's type is the facility class with the highest
     mean probability over its pixels.
 
-    The threshold (0.9) and the operating point for candidates (sites of 5 ha or more,
-    about the size of a small tank farm) were set from the held-out registry scores below,
-    before any photo was looked at. Small sites are mostly false alarms.
+    The threshold (0.9) was fixed before the scan. The operating point for candidates,
+    sites of 5 ha or more (about a small tank farm), was picked from the first table below,
+    which shows small sites are mostly away from any registered facility, before any
+    photo was looked at.
 
     Each site is then matched against the four training registries: it is **registered**
     if a facility of any of the four types is within 500 m of one of its pixels, and a
     **candidate** (a possible registry gap) if none is within 1 km. A facility is
-    **found** if some site comes within 500 m of it.
+    **found** if some site comes within 500 m of it. Precision here is a floor on how
+    often the classifier finds real industry, since a site away from these four registries
+    can still be a real plant; the hand check in step 4 measures that.
     """)
     return
 
@@ -580,7 +584,7 @@ def _(
     _t = time.perf_counter()
     _fold_of_idx = np.array([fold_of_county.get(c, -1) for c in counties["county"]])
     _g = BLOCK // STRIDE
-    _sites, _pixels = [], []
+    _pixels = []
     for _tile, _rows in block_meta.groupby("tile"):
         _n = 8192 // BLOCK
         prob = np.zeros((len(KINDS), _n * _g, _n * _g), np.float32)
@@ -863,7 +867,7 @@ def _(
     }
     naip_dates = {}
     for _site, _row in hand_sample.iterrows():
-        _png = OUT_DIR / "naip" / f"{_site}.png"
+        _chip = OUT_DIR / "naip" / f"{_site}.jpg"
         _px = site_pixels[site_pixels["site"] == _site]
         _x0, _y0, _x1, _y1 = _px["x"].min(), _px["y"].min(), _px["x"].max(), _px["y"].max()
         _half = max(_x1 - _x0, _y1 - _y0, 500) / 2 + 500
@@ -898,7 +902,7 @@ def _(
         _items = [f for f in _items if f["properties"]["naip:year"] == _year]
         _dates = sorted(f["properties"]["datetime"][:10] for f in _items)
         naip_dates[_site] = f"{_dates[0]} to {_dates[-1]}"
-        if _png.exists():
+        if _chip.exists():
             continue
         with rasterio.Env(**GDAL_ENV):
             _srcs = [
@@ -928,7 +932,7 @@ def _(
             fontsize=8,
         )
         _fig.tight_layout()
-        _fig.savefig(_png, dpi=110)
+        _fig.savefig(_chip, dpi=110, pil_kwargs={"quality": 85})
         plt.close(_fig)
     hand_sample[["county", "area_ha", "kind", "d_registry", "d_frs", "lat", "lon"]].round(0)
     return hand_sample, naip_dates
@@ -1038,20 +1042,20 @@ def _(OUT_DIR, candidates, counties, hand, plt, sites, train_fac):
     for _ax, _states in zip(_axes, (("48",), ("22",)), strict=True):
         _c = counties[counties["county"].str[:2].isin(_states)]
         _c.boundary.plot(ax=_ax, color="grey", lw=0.5)
-        _s = sites[sites["county"].str[:2].isin(_states)]
+        _s = sites[sites["kept"] & sites["county"].str[:2].isin(_states)]
         _ax.scatter(
             _s.loc[_s["registered"], "x"],
             _s.loc[_s["registered"], "y"],
             s=4,
             c="tab:blue",
-            label="site near a registered facility",
+            label="site of 5 ha or more within 500 m of a registered facility",
         )
         _ax.scatter(
             _s.loc[_s["candidate"], "x"],
             _s.loc[_s["candidate"], "y"],
             s=4,
             c="tab:red",
-            label="candidate (> 1 km)",
+            label="candidate, more than 1 km away",
         )
         _f = train_fac[train_fac["county"].str[:2].isin(_states)]
         _ax.scatter(
@@ -1100,9 +1104,61 @@ def _(OUT_DIR, candidates, counties, hand, plt, sites, train_fac):
 
 
 @app.cell
+def _(candidate_registry, hand_result, mo, pixel_auc, registry_scores, site_counts):
+    _all = registry_scores.loc["all four"]
+    _hl = hand_result["heavy or light share, 95% CI"]
+    _h = hand_result["heavy share, 95% CI"]
+    mo.md(f"""
+    ## What we found
+
+    - **Pixels: easy.** In counties the model never saw, the probability of "any
+      facility" separates facility pixels from background pixels with an AUC of
+      {pixel_auc["held-out AUC vs background"].min():.2f} to
+      {pixel_auc["held-out AUC vs background"].max():.2f}.
+    - **Sites: much harder.** Scanning every pixel turns that into
+      {site_counts["sites of 5 ha or more"]} sites of 5 ha or more. Only
+      {_all["precision: any of the four within 500 m"]:.0%} of them are within 500 m of a
+      registered refinery, terminal, TSDF or RMP facility, and they find
+      {_all["recall: found within 500 m"]:.0%} of those facilities
+      (refineries {registry_scores.loc["refinery", "recall: found within 500 m"]:.0%}).
+      Background pixels vastly outnumber facility pixels, so a pixel-level AUC near 0.97
+      still leaves most sites unregistered.
+    - **Types: not separable.** The model can't tell the four types apart: sites typed as
+      refineries are almost never near one. It learns "industrial-looking land".
+    - **Candidates.** {site_counts["candidates (over 1 km)"]} sites of 5 ha or more are more
+      than 1 km from any registered facility of the four types. Of those,
+      {candidate_registry["an FRS site within 500 m"]} have a site in EPA's FRS within 500 m,
+      and {candidate_registry["nothing in FRS within 1 km"]} has nothing in FRS within 1 km.
+    - **Hand check of {hand_result["random sample"]} random candidates.**
+      {hand_result["heavy"]} is heavy industry of the kind the classifier was trained on,
+      {hand_result["light"]} are other industry (rail yards, salvage yards, shipyards,
+      factories, warehouses, a wastewater plant) and {hand_result["no"]} are not
+      industrial. That puts heavy industry at {_h[0]:.0%} to {_h[1]:.0%} of candidates and
+      any industry at {_hl[0]:.0%} to {_hl[1]:.0%} (95% intervals).
+    - **Registry gaps.** {hand_result["real (heavy or light) with an FRS site within 500 m"]}
+      of the {hand_result["heavy"] + hand_result["light"]} real sites in the sample have an
+      EPA FRS record within 500 m: they are gaps in the four HIFLD Next layers, not sites
+      EPA has never heard of. The
+      tank farm in the sample belongs to a pipeline company that shows up in FRS only as
+      a hazardous-waste and water-permit site. The one candidate with nothing in FRS
+      within 1 km is part of a registered LNG terminal whose point sits 2 km away.
+
+    ## What didn't work
+
+    - Telling refineries, terminals, TSDFs and RMP facilities apart.
+    - Sites under 5 ha: most are roofs, parking and yards.
+    - Windowed reads: the files store each band in 10 km blocks, so a read around one
+      facility costs as much as a whole block.
+    """)
+    return
+
+
+@app.cell
 def _(
     OUT_DIR,
+    by_size,
     candidate_registry,
+    exposure,
     exposure_summary,
     hand_result,
     json,
@@ -1110,6 +1166,8 @@ def _(
     pixel_auc,
     read_stats,
     registry_scores,
+    rx_bytes,
+    rx_start,
     site_counts,
     t_start,
     time,
@@ -1118,14 +1176,17 @@ def _(
         "read": read_stats,
         "pixel_auc": pixel_auc.to_dict(orient="index"),
         "registry_scores": registry_scores.to_dict(orient="index"),
+        "by_size": by_size.to_dict(orient="index"),
         "site_counts": site_counts,
         "candidate_registry": candidate_registry,
         "hand_check": hand_result,
         "exposure": {
             f"{lab} {k} km": v for (lab, k), v in exposure_summary.to_dict(orient="index").items()
         },
+        "exposure_heavy_sites": exposure[exposure["label"] == "heavy"].round(0).to_dict("records"),
         "naip_dates": naip_dates,
         "total_seconds": round(time.perf_counter() - t_start),
+        "total_downloaded_gb": round((rx_bytes() - rx_start) / 1e9, 2),
     }
     (OUT_DIR / "summary.json").write_text(json.dumps(summary, indent=2, default=str))
     summary["total_seconds"]
