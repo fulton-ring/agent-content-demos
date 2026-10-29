@@ -7,17 +7,28 @@ merges the school across the street. This spike measures how well distance, S2 c
 OpenStreetMap school grounds, aerial imagery and a decision model
 ([Jev](https://openrouter.ai/docs/guides/community/jev)) tell the two apart, against two published answer keys.
 
-## How to run it
+## How to read and run it
 
-Everything is in one marimo notebook, [`campus_dedup.py`](campus_dedup.py).
+Four marimo notebooks, each readable on its own, in order. `reports/` has each one exported as HTML with its
+outputs, so you can read them without installing anything (download and open in a browser).
+
+| Notebook | Report | What it does |
+|---|---|---|
+| [`1_pairs.py`](1_pairs.py) | [`reports/1_pairs.html`](reports/1_pairs.html) | the records, the sources, the two answer keys, the evidence for each pair |
+| [`2_rules.py`](2_rules.py) | [`reports/2_rules.html`](reports/2_rules.html) | distance, S2 cells, footprints, school grounds and addresses, scored |
+| [`3_jev.py`](3_jev.py) | [`reports/3_jev.html`](reports/3_jev.html) | what Jev is asked and told, five model variants, scoring and calibration |
+| [`4_sites.py`](4_sites.py) | [`reports/4_sites.html`](reports/4_sites.html) | from pairs to sites, the cost of a national pass, what didn't work |
+
+[`common.py`](common.py) holds only what several notebooks share: settings, downloads, address handling,
+candidate pairs and the threshold scoring.
 
 ```bash
 export OPENROUTER_API_KEY=...   # Jev and the comparison chat model are called through OpenRouter
-./run.sh                        # needs uv; first run ~35 min and ~$4 of model calls, later runs ~2 min and $0
+./run.sh                        # needs uv; first run ~35 min and ~$4 of model calls, later runs ~10 min and $0
 ```
 
-Read it as a notebook with `uv run marimo edit campus_dedup.py`. Downloads and cached model answers go to `data/`
-(not committed), results to `output/`. It needs about 12 GB of memory (the Los Angeles footprints).
+`uv run marimo edit 1_pairs.py` opens a notebook. Downloads and cached model answers go to `data/` (not committed),
+results to `output/`. It needs about 12 GB of memory (the Los Angeles footprints).
 
 ## The data
 
@@ -56,9 +67,8 @@ different buildings; of pairs 50–100 m apart, 27% are in the same building.
 **S2 cells behave like a distance cut with edges** (`output/s2_split.csv`). Of pairs within 10 m of each
 other, 19% fall in different level-18 cells (~38 m) and 68% in different level-20 cells (~10 m).
 
-**Each signal on the NYC test half** (549 pairs, `output/triage.csv`). "Plain" means merge when the rule says yes.
-"Decided" means the pairs a method merges or keeps apart automatically at thresholds set on the tune half for ≥97%
-precision; the rest go to review.
+**Each signal on the NYC test half** (549 pairs; `output/triage_rules.csv`, `output/triage_models.csv`). "Plain":
+merge when the rule says yes. "Decided": merged or kept apart at tune-half thresholds for ≥97% precision.
 
 | Method | Plain precision | Plain recall | Decided | Wrong among decided |
 |---|---:|---:|---:|---:|
@@ -74,13 +84,11 @@ precision; the rest go to review.
 | **Jev: the pair described in words, no map points** | 0.94 | 0.99 | **91%** | 10 of 498 |
 | Gemini 3.8 Flash: records, flags and image | 0.88 | 0.98 | 11% | 3 of 62 |
 
-The geometry signals all trust HIFLD's point. Pairs whose points share a building are often schools on different
-streets. The address each school reports is the strongest single signal, but a rule can only merge.
-
-Jev does best when the pair is **described in words**. Each school gets its type, charter and virtual status,
-district, website, Census-matched address, and the OSM school grounds its address falls in. The pair gets how the
-addresses relate (identical, same address with a different unit, same street, different streets) and roughly how
-far apart they geocode. It decides 91% of the test pairs, keeps 179 apart with 2 wrong, and merges 319 with 8 wrong.
+The geometry signals all trust HIFLD's point; the address each school reports is the strongest single signal, but
+a rule can only merge. Jev does best with the pair **described in words** (each school's type, district, charter
+and virtual status, website, Census-matched address and the OSM grounds it falls in; how the addresses relate; how
+far apart they geocode). It keeps 179 apart with 2 wrong, and merges 319 with 8 wrong. `reports/3_jev.html` shows
+an example of each state.
 
 On the Los Angeles test half (48 pairs), that variant decides 67% with 1 error, and the geocode rule 77% with
 1 error. That key is too small to rank them.
@@ -95,9 +103,8 @@ On the Los Angeles test half (48 pairs), that variant decides 67% with 1 error, 
 | Jev, described in words | 0.040 | 0.026 | 0.982 | $0.00003 |
 | Gemini 3.8 Flash, + image | 0.099 | 0.085 | 0.933 | $0.0031 |
 
-Jev's probabilities are only usable once thresholds are tuned. The words variant has the lowest ECE, but most of
-its pairs sit near 0 or 1; in between it is not calibrated (pairs scored 0.3–0.6 are mostly different sites). Its
-thresholds have to come from a labelled sample, as [TypeSafe's guidance](https://docs.typesafe.ai/confidence) says.
+Most words-variant pairs sit near 0 or 1, but in between it is not calibrated (pairs scored 0.3–0.6 are mostly
+different sites), so thresholds must come from a labelled sample, as [TypeSafe](https://docs.typesafe.ai/confidence) says.
 Running it on all 23,333 national pairs would cost about $0.82 (`output/national_cost.csv`); the geocoder is free.
 
 **Sites** (`output/school_sites.csv`, `output/site_summary.csv`). With the tuned thresholds of the words variant,
@@ -106,30 +113,25 @@ records and 2,144 sites, but no keep-apart threshold could be set from its small
 
 ## What didn't work, and what this doesn't show
 
-- **The wording of Jev's state moves the result.** An earlier version of the words variant gave a unit suffix
-  ("-TRAILER 30", "-12TH FL") as "different streets". It decided 98.5% of a slightly different test half.
-  Describing units properly gave 90%: some pairs the key calls different (a trailer, an annex, a charter school
-  with its own building code) now score about 0.98, which pushes the merge threshold above that band. We stopped
-  changing the wording there, because each change we kept for scoring better would be tuning to the test set.
+- **The wording of Jev's state moves the result.** An earlier words variant, which called a unit suffix
+  ("-TRAILER 30") "different streets", decided 98.5% of a slightly different test half; describing units properly
+  gave 90%. We stopped there: keeping wording because it scores better would be tuning to the test set.
 - **Jev's answers vary between runs, and weak variants' thresholds with them.** Rerun from scratch, the words
   variant decided 90.0% and then 91%; Jev on records and flags decided 62% and then 38%, because a few answers near
   its threshold moved the tuned cut. Pick thresholds from more labelled pairs than this, and pin the model version.
 - **The aerial image made Jev worse.** Image requests run in Jev's long-context mode, which TypeSafe says is less
-  accurate. The imagery is also coarse at campus scale.
+  accurate.
 - **The chat model** ranked better than Jev given the same flags (AUC 0.93) but worse than Jev described in words,
   at ~100× the cost per pair. Its stated probabilities cluster at a few values, so in NYC only 11% of pairs cleared
   97%. It was not given the words state.
 - **Some "errors" are the key's conventions.** NYC gives a separate building code to a trailer, an annex, or a
   charter school on another floor of an office tower, even at the same street address. "Same campus" is looser
   than the key, so true error rates are lower than the table shows.
-- **The NYC key is from 2019–20** and HIFLD's source from 2022–23. We drop schools whose house number changed;
-  some other moves will remain.
+- **The NYC key is from 2019–20**, HIFLD's source from 2022–23; we drop schools whose house number changed.
 - **The 150 m radius misses big campuses.** A school with its own street number more than 150 m from its campus
-  partners is never compared. A campus polygon from OSM could widen the search there.
-- **Closed schools stay in.** HIFLD carries records for schools that have since closed; nothing here detects that.
-  A state directory (California's [CDE file](https://www.cde.ca.gov/ds/si/ds/pubschls.asp), for one) can.
-- **The keyed regions are two big cities.** Rural districts, where one building often holds the elementary, middle
-  and high school under separate IDs, are not measured.
+  partners is never compared.
+- **Closed schools stay in.** A state directory ([California's](https://www.cde.ca.gov/ds/si/ds/pubschls.asp), say) catches them.
+- **The keyed regions are two big cities.** Rural districts, where one building often holds several schools, aren't measured.
 - **We didn't separate the geocodes from the instruction** that map points are sometimes misplaced.
 - **No OCR was needed.** Every source here is machine-readable.
 
@@ -143,8 +145,6 @@ and © Overture Maps Foundation. `output/school_sites.csv` holds only HIFLD fiel
 
 ## What we looked at first
 
-[Splink](https://moj-analytical-services.github.io/splink/) for probabilistic record linkage (suited to many noisy
-fields; here the deciding evidence is spatial and comes from outside the records), Placekey (address-based, US POIs, needs an API key), and NCES's EDGE geocode
-documentation (it derives points from the reported address, with no campus field). We used DuckDB's
-`spatial` and community `geography` (S2) extensions, GeoPandas, rapidfuzz, the Census geocoder, OpenRouter's
-Decisions API and marimo, and wrote no matcher beyond those.
+[Splink](https://moj-analytical-services.github.io/splink/) (record linkage for many noisy fields; here the deciding
+evidence is spatial and external), Placekey (needs an API key) and NCES's EDGE geocode docs (no campus field). We
+used DuckDB `spatial` and `geography` (S2), GeoPandas, rapidfuzz, the Census geocoder, OpenRouter and marimo.
