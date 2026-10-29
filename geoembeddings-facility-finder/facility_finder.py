@@ -267,10 +267,9 @@ def _(ALBERS, COUNTIES, EJ_DIR, OTHER_LAYERS, TRAIN_LAYERS, gpd, hifld_layer, pd
     for _kind, _layer in {**TRAIN_LAYERS, **OTHER_LAYERS}.items():
         _f = gpd.read_parquet(hifld_layer(_layer)).to_crs(ALBERS)
         _f = _f[_f.geometry.notna() & ~_f.geometry.is_empty]
-        _name = next(c for c in ("PRIMARY_NAME", "Site", "NAME", "Name", "name") if c in _f)
         _frames.append(
             gpd.GeoDataFrame(
-                {"kind": _kind, "name": _f[_name].astype(str).to_numpy()},
+                {"kind": [_kind] * len(_f)},
                 geometry=_f.geometry.centroid.to_numpy(),
                 crs=ALBERS,
             )
@@ -437,7 +436,8 @@ def _(
         np.savez(cache, **out)
         return out
 
-    with ThreadPoolExecutor(8) as _pool:
+    # Each block is 64 range requests in a row, so throughput comes from reading many at once.
+    with ThreadPoolExecutor(32) as _pool:
         blocks = list(_pool.map(read_block, _blocks))
     block_meta = pd.DataFrame(_blocks, columns=["tile", "bi", "bj"])
     block_meta["utm_zone"] = tiles.loc[block_meta["tile"], "utm_zone"].to_numpy()
@@ -544,6 +544,10 @@ def _(mo):
     (25 grid pixels) are dropped. A site's type is the facility class with the highest
     mean probability over its pixels.
 
+    The threshold (0.9) and the operating point for candidates (sites of 5 ha or more,
+    about the size of a small tank farm) were set from the held-out registry scores below,
+    before any photo was looked at. Small sites are mostly false alarms.
+
     Each site is then matched against the four training registries: it is **registered**
     if a facility of any of the four types is within 500 m of one of its pixels, and a
     **candidate** (a possible registry gap) if none is within 1 km. A facility is
@@ -644,10 +648,12 @@ def _(
 
 
 @app.cell
-def _(KDTree, THRESHOLD, TRAIN_LAYERS, facilities, np, pd, site_pixels, sites):
+def _(KDTree, TRAIN_LAYERS, facilities, np, pd, site_pixels, sites):
     MATCH_M, CANDIDATE_M = 500, 1000
+    MIN_HA = 5  # the operating point for candidates: tank-farm scale and up
     train_fac = facilities[facilities["train"]].copy()
     _xy = site_pixels[["x", "y"]].to_numpy()
+    _fac_xy = np.c_[train_fac.geometry.x, train_fac.geometry.y]
     # Distance from each site to the nearest training facility of each type, over its pixels.
     for _kind in TRAIN_LAYERS:
         _f = train_fac[train_fac["kind"] == _kind]
@@ -655,14 +661,33 @@ def _(KDTree, THRESHOLD, TRAIN_LAYERS, facilities, np, pd, site_pixels, sites):
         sites[f"d_{_kind}"] = pd.Series(_d).groupby(site_pixels["site"].to_numpy()).min()
     sites["d_registry"] = sites[[f"d_{k}" for k in TRAIN_LAYERS]].min(axis=1)
     sites["registered"] = sites["d_registry"] <= MATCH_M
-    sites["candidate"] = sites["d_registry"] > CANDIDATE_M
-    # A facility is found if any site pixel is within MATCH_M of it.
-    _d, _ = KDTree(_xy).query(np.c_[train_fac.geometry.x, train_fac.geometry.y])
-    train_fac["found"] = _d <= MATCH_M
+    sites["kept"] = sites["area_ha"] >= MIN_HA
+    sites["candidate"] = sites["kept"] & (sites["d_registry"] > CANDIDATE_M)
+    _pixel_area = site_pixels["site"].map(sites["area_ha"]).to_numpy()
 
+    def found(min_ha: float) -> np.ndarray:
+        """Whether each training facility has a pixel of a site of at least min_ha nearby."""
+        d, _ = KDTree(_xy[_pixel_area >= min_ha]).query(_fac_xy)
+        return d <= MATCH_M
+
+    by_size = pd.DataFrame(
+        {
+            f"sites of {_ha} ha or more": {
+                "sites": int((sites["area_ha"] >= _ha).sum()),
+                "precision": round(sites.loc[sites["area_ha"] >= _ha, "registered"].mean(), 3),
+                "recall": round(found(_ha).mean(), 3),
+                "candidates (over 1 km)": int(
+                    ((sites["area_ha"] >= _ha) & (sites["d_registry"] > CANDIDATE_M)).sum()
+                ),
+            }
+            for _ha in (1, MIN_HA, 20)
+        }
+    ).T
+    train_fac["found"] = found(MIN_HA)
+    _kept = sites[sites["kept"]]
     _rows = {}
     for _kind in TRAIN_LAYERS:
-        _s = sites[sites["kind"] == _kind]
+        _s = _kept[_kept["kind"] == _kind]
         _f = train_fac[train_fac["kind"] == _kind]
         _rows[_kind] = {
             "facilities": len(_f),
@@ -674,21 +699,26 @@ def _(KDTree, THRESHOLD, TRAIN_LAYERS, facilities, np, pd, site_pixels, sites):
     _rows["all four"] = {
         "facilities": len(train_fac),
         "recall: found within 500 m": round(train_fac["found"].mean(), 3),
-        "sites typed as this": len(sites),
+        "sites typed as this": len(_kept),
         "precision: this type within 500 m": np.nan,
-        "precision: any of the four within 500 m": round(sites["registered"].mean(), 3),
+        "precision: any of the four within 500 m": round(_kept["registered"].mean(), 3),
     }
     registry_scores = pd.DataFrame(_rows).T
     site_counts = {
-        "threshold": THRESHOLD,
-        "sites": len(sites),
-        "registered (within 500 m)": int(sites["registered"].sum()),
-        "500 m to 1 km": int((~sites["registered"] & ~sites["candidate"]).sum()),
-        "candidates (over 1 km)": int(sites["candidate"].sum()),
-        "candidate area, ha": round(sites.loc[sites["candidate"], "area_ha"].sum()),
+        f"sites of {MIN_HA} ha or more": len(_kept),
+        "registered (within 500 m)": int(_kept["registered"].sum()),
+        "500 m to 1 km": int((~_kept["registered"] & ~_kept["candidate"]).sum()),
+        "candidates (over 1 km)": int(_kept["candidate"].sum()),
+        "candidate area, ha": round(_kept.loc[_kept["candidate"], "area_ha"].sum()),
     }
+    by_size
+    return CANDIDATE_M, MATCH_M, MIN_HA, by_size, registry_scores, site_counts, train_fac
+
+
+@app.cell
+def _(registry_scores):
     registry_scores
-    return CANDIDATE_M, MATCH_M, registry_scores, site_counts, train_fac
+    return
 
 
 @app.cell
@@ -744,14 +774,11 @@ def _(
     _by_site: dict[str, set[int]] = {}
     for _site, _idx in zip(_cand_px["site"], _near, strict=True):
         _by_site.setdefault(_site, set()).update(_idx)
-    candidates["frs_within_500m"] = [
-        "; ".join(sorted(set(frs["INTEREST_TYPE"].iloc[sorted(_by_site.get(s, ()))])))[:300]
-        for s in candidates.index
-    ]
-    candidates["frs_names"] = [
-        "; ".join(sorted(set(frs["PRIMARY_NAME"].iloc[sorted(_by_site.get(s, ()))])))[:300]
-        for s in candidates.index
-    ]
+    for _col, _out in (("INTEREST_TYPE", "frs_within_500m"), ("PRIMARY_NAME", "frs_names")):
+        candidates[_out] = [
+            "; ".join(sorted(set(frs[_col].iloc[sorted(_by_site.get(s, ()))].dropna())))[:300]
+            for s in candidates.index
+        ]
     _ll = gpd.GeoSeries.from_xy(candidates["x"], candidates["y"], crs=ALBERS).to_crs("EPSG:4326")
     candidates["lon"], candidates["lat"] = _ll.x.round(5).to_numpy(), _ll.y.round(5).to_numpy()
     candidate_registry = {
@@ -964,7 +991,9 @@ def _(ALBERS, bg, gpd, hand, np, pd, site_pixels):
                     "in either": _pop[_hit["flag_any"].astype(bool)].sum(),
                 }
             )
-    exposure = pd.DataFrame(_rows)
+    _cols = ["site", "label", "km", "people", "in EJScreen-flagged block groups"]
+    _cols += ["in CEJST-disadvantaged tracts", "in either"]
+    exposure = pd.DataFrame(_rows, columns=_cols)
     exposure_summary = (
         exposure.groupby(["label", "km"])
         .agg(
