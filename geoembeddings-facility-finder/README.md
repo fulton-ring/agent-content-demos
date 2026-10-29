@@ -10,7 +10,7 @@ Can the 10 m AlphaEarth satellite embeddings of known heavy-industry sites find 
 ./run.sh
 ```
 
-It needs [uv](https://docs.astral.sh/uv/), about 12 GB of disk and about 19 GB of downloads. The first run builds the EJScreen and CEJST GeoParquet files by running `../ej-datasets-hifld-next/run.sh` unchanged, with its folders pointed into `data/ej/` (1.4 GB, about 12 minutes). It then runs the notebook `facility_finder.py` as a script. To read the notebook with its outputs, run `uv run marimo edit facility_finder.py`.
+It needs [uv](https://docs.astral.sh/uv/), about 12 GB of disk and about 35 GB of downloads. The first run builds the EJScreen and CEJST GeoParquet files by running `../ej-datasets-hifld-next/run.sh` unchanged, with its folders pointed into `data/ej/` (1.4 GB, about 12 minutes). It then runs the notebook `facility_finder.py` as a script. To read the notebook with its outputs, run `uv run marimo edit facility_finder.py`.
 
 ## Where the data comes from
 
@@ -47,7 +47,7 @@ All numbers come from `outputs/summary.json` and `outputs/candidates.csv`, writt
 - The model can't tell the types apart. Sites it types as refineries are almost never near one. It learns "industrial-looking land".
 - Precision here is a floor on finding real industry. The hand check below measures the rest.
 
-**Candidates.** 324 sites of 5 ha or more (4,535 ha) are more than 1 km from any registered facility of the four types, 241 of them in Harris County. Of these, 246 have another HIFLD Next facility (TRI, power plant, Superfund, gas processing, LNG) within 1 km and 316 have an FRS site within 500 m. Only one has nothing in FRS within 1 km.
+**Candidates.** 324 sites of 5 ha or more (4,535 ha) are more than 1 km from any registered facility of the four types, 194 of them in Harris County. Of these, 246 have another HIFLD Next facility (TRI, power plant, Superfund, gas processing, LNG) within 1 km and 316 have an FRS site within 500 m. Only one has nothing in FRS within 1 km.
 
 **Hand check** of 30 candidates drawn at random (seed 0), on NAIP photos with registered and FRS sites marked (`hand_check.csv`, `outputs/naip/`):
 
@@ -58,19 +58,19 @@ All numbers come from `outputs/summary.json` and `outputs/candidates.csv`, writt
 | Heavy or other industry | 24 | 80% (63–91%) |
 | Not industrial (mall, offices, hospital, self-storage) | 6 | |
 
-- The heavy one is a six-tank storage farm near Sheldon with homes about 300 m away. HIFLD Next has it in no terminal or RMP layer. FRS lists it under Explorer Pipeline as a hazardous-waste and water-permit site, 450 m from the tanks. 1,779 people live within 1 km and about 29,000 within 3 km, all in EJScreen-flagged block groups.
+- The heavy one is a six-tank storage farm near Sheldon with homes about 300 m away. HIFLD Next has it in no terminal or RMP layer. FRS lists it under Explorer Pipeline as a hazardous-waste and water-permit site, 450 m from the tanks. 1,779 people live within 1 km and 31,123 within 3 km, all in EJScreen-flagged block groups.
 - The one candidate with nothing in FRS within 1 km (checked as well, outside the random sample) is equipment laydown inside the Cameron LNG export terminal, whose HIFLD Next point is 2.3 km away on the same site. It's a large-site location problem, not a missing facility.
 - Many of the 23 "other industry" sites sit against homes (rail yards in Beaumont, Baytown and southeast Houston, shipyards in Orange and Port Arthur, metal works in northeast Houston). Within 1 km of them live 73,779 people, 89% in block groups flagged by EJScreen or CEJST; within 3 km, 673,549 (86%). Those counts overlap where sites are close together.
 
 ![Sites and candidates](outputs/sites_map.png)
 
-**Cost and time.** Zero dollars, and no account or key is needed. Reading the 431 blocks downloads about 17 GB of 10 m embeddings. With the HIFLD Next layers (including 440 MB of FRS) and NAIP chips, the total is about 19 GB, plus 1.4 GB for the EJ build. On 4 CPUs the first run took about X minutes. The block reads take about 9 minutes with 32 parallel readers; the scan, about 1.5 minutes. A rerun reuses the cached blocks (7 GB in `data/aef/`) and takes about 4 minutes.
+**Cost and time.** Zero dollars, and no account or key is needed. The 431 blocks hold 17 GB of compressed 10 m embeddings, but GDAL fetched 32.9 GB to read them, about 2.2 times the block bytes, whatever chunk-size setting we tried. With the HIFLD Next layers (including 440 MB of FRS), the notebook downloaded 33.3 GB, plus 1.4 GB for the EJ build. On 4 CPUs a clean checkout took 16 minutes: 8 for the EJ build and 7.8 for the notebook. Of that, 4 minutes went to the block reads with 32 parallel readers and about 1.5 to the scan. Earlier runs on the same machine took 9 minutes for the reads. A rerun reuses the cached blocks (7 GB in `data/aef/`) and takes about 4 minutes.
 
 ## What didn't work
 
 - **Telling the four facility types apart.** Type precision is 0 to 34%, and the model calls refineries RMP sites.
 - **Small sites.** Below 5 ha, four in five flagged sites are away from any registry, and those are mostly roofs, parking and yards.
-- **Windowed reads.** The files store each of the 64 bands in separate 10 km blocks, so a read around one facility costs a whole block (about 40 MB). One block took 4 to 26 seconds on its own, so throughput comes from reading 32 blocks at once.
+- **Windowed reads.** The files store each of the 64 bands in separate 10 km blocks, so a read around one facility costs a whole block (about 40 MB compressed, and GDAL fetches about twice that). One block took 4 to 26 seconds on its own, so throughput comes from reading 32 blocks at once.
 - **The newest NAIP year** sometimes only grazed a chip and left it black. The notebook now takes the newest year that covers the whole chip.
 
 ## What it doesn't show
