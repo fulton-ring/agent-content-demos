@@ -10,7 +10,7 @@ Can the change in Google DeepMind's AlphaEarth satellite embeddings between 2018
 ./run.sh
 ```
 
-It needs [uv](https://docs.astral.sh/uv/), about 10 GB of disk and about 7 GB of downloads. On the first run it builds the EJScreen block groups by running `../ej-datasets-hifld-next/run.sh` unchanged, with its folders pointed into `data/ej/`, then runs the notebook `change_near_homes.py` as a script. To read the notebook with its outputs, run `uv run marimo edit change_near_homes.py`. The 117 photo chips the hand check used are drawn into `outputs/chips/` by the run (they are not committed; five examples are in `outputs/examples/`).
+It needs [uv](https://docs.astral.sh/uv/), about 8 GB of disk and about 6.5 GB of downloads. On the first run it builds the EJScreen block groups by running `../ej-datasets-hifld-next/run.sh` unchanged, with its folders pointed into `data/ej/`, then runs the notebook `change_near_homes.py` as a script. To read the notebook with its outputs, run `uv run marimo edit change_near_homes.py`. The 117 photo chips the hand check used are drawn into `outputs/chips/` by the run (they are not committed; five examples are in `outputs/examples/`).
 
 ## Where the data comes from
 
@@ -66,7 +66,7 @@ All numbers come from `outputs/summary.json`, written by the run.
 
 ![Missed: a power plant built 2018–2020](outputs/examples/facility-RMP-110070144338.jpg)
 
-**Cost and time.** Zero dollars; no account or key. A clean run on 4 CPUs: about 12 minutes for the sibling EJ build, then the notebook. See the verification note on the issue for the clean-run timings and download size. A rerun with caches takes about 3 minutes plus 4 for the chips.
+**Cost and time.** Zero dollars; no account or key. A clean checkout on 4 CPUs took 23 minutes: about 11 for the sibling EJ build (1.4 GB), then 12 for the notebook, of which 4 went to the 28 embedding tile reads (4.7 GB) and 4 to the 117 photo chips. Every result matched the development run exactly. A rerun reuses the downloads and takes about 3 minutes plus the chips. Failures seen: the first full run ran out of memory holding three tiles' float vectors at once (fixed by working in strips), and Planetary Computer tokens expired after an hour mid-run (fixed by a fresh token per chip).
 
 ## What it doesn't show
 
