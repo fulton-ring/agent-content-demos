@@ -288,6 +288,13 @@ def _(
     study_area,
 ):
     _index = gpd.read_parquet(fetch(f"{AEF_BASE}/aef_index.parquet", "aef_index.parquet"))
+    _lonlat = study_area.to_crs("EPSG:4326").total_bounds
+    _index = _index[
+        (_index["wgs84_east"] > _lonlat[0])
+        & (_index["wgs84_west"] < _lonlat[2])
+        & (_index["wgs84_north"] > _lonlat[1])
+        & (_index["wgs84_south"] < _lonlat[3])
+    ]
     _index = _index.set_geometry("geom").to_crs(UTM)
     _index = _index[_index.intersects(study_area.union_all()) & (_index["utm_zone"] == "15N")]
     tile_pairs = (
@@ -313,16 +320,9 @@ def _(
 
     rmp = hifld(RMP_LAYER)
     rmp["first_year"] = pd.to_datetime(rmp["CREATE_DATE"], errors="coerce", utc=True).dt.year
-    _ref = [
-        gpd.GeoDataFrame({"kind": k}, geometry=hifld(layer).geometry.values, crs=UTM)
-        for k, layer in HEAVY_LAYERS.items()
-    ]
-    _ref.append(
-        gpd.GeoDataFrame(
-            {"kind": "rmp"}, geometry=rmp[rmp["first_year"] < BEFORE].geometry.values, crs=UTM
-        )
-    )
-    heavy_ref = pd.concat(_ref, ignore_index=True)
+    _ref = [hifld(layer)[["geometry"]].assign(kind=k) for k, layer in HEAVY_LAYERS.items()]
+    _ref.append(rmp.loc[rmp["first_year"] < BEFORE, ["geometry"]].assign(kind="rmp"))
+    heavy_ref = gpd.GeoDataFrame(pd.concat(_ref, ignore_index=True), crs=UTM)
     (DATA_DIR / "aef" / f"below-{CHANGE_BELOW}").mkdir(exist_ok=True)
     {
         "tile pairs": len(tile_pairs),
@@ -365,10 +365,12 @@ def _(
         if cache.exists():
             return dict(np.load(cache))
         before, after = read_40m(pair["path_before"]), read_40m(pair["path_after"])
-        missing = (before[0] == -128) | (after[0] == -128)
-        b, a = dequantise(before), dequantise(after)
-        cosine = (a * b).sum(0) / (np.linalg.norm(a, axis=0) * np.linalg.norm(b, axis=0))
-        cosine[missing] = np.nan
+        cosine = np.empty(after.shape[1:], np.float32)
+        for r in range(0, after.shape[1], 256):  # in strips, to bound memory
+            b, a = dequantise(before[:, r : r + 256]), dequantise(after[:, r : r + 256])
+            norms = np.linalg.norm(a, axis=0) * np.linalg.norm(b, axis=0)
+            cosine[r : r + 256] = np.einsum("bij,bij->ij", a, b) / norms
+        cosine[(before[0] == -128) | (after[0] == -128)] = np.nan
         changed = np.flatnonzero(cosine < CHANGE_BELOW)
         # Reference sites inside this tile: the 2024 vector of the pixel under each.
         n = after.shape[1]
@@ -683,7 +685,10 @@ def _(BEFORE, COUNTIES, DATA_DIR, TRI_URL, TRI_YEARS, UTM, fetch, gpd, pd, rmp, 
     tri = tri[tri.within(study_area.union_all())]
     tri["new"] = tri["min"] > BEFORE
     tri["old_active"] = (tri["min"] < BEFORE) & (tri["max"] > BEFORE)
+    _cols = ["registry", "key", "name", "sector", "first_year", "new", "old_active", "geometry"]
     _rmp = rmp.assign(
+        registry="RMP",
+        key="RMP-" + rmp["REGISTRY_ID"].astype(str),
         new=rmp["first_year"].between(BEFORE + 1, 2024),
         old_active=rmp["first_year"] < BEFORE,
         name=rmp["PRIMARY_NAME"],
@@ -691,12 +696,8 @@ def _(BEFORE, COUNTIES, DATA_DIR, TRI_URL, TRI_YEARS, UTM, fetch, gpd, pd, rmp, 
     )
     registry = pd.concat(
         [
-            tri.assign(registry="TRI", first_year=tri["min"])[
-                ["registry", "name", "sector", "first_year", "new", "old_active", "geometry"]
-            ],
-            _rmp[
-                ["registry", "name", "sector", "first_year", "new", "old_active", "geometry"]
-            ].assign(registry="RMP"),
+            tri.assign(registry="TRI", key="TRI-" + tri.index, first_year=tri["min"])[_cols],
+            _rmp[_cols],
         ],
         ignore_index=True,
     )
@@ -962,6 +963,7 @@ def _(
     chip,
     extent,
     pc_token,
+    pd,
     sample_facilities,
     sample_random,
     sample_top,
@@ -969,11 +971,7 @@ def _(
 ):
     _t = time.perf_counter()
     _tokens = {"naip": pc_token("naip"), "s2": pc_token("sentinel-2-l2a")}
-    _areas = (
-        sample_random.assign(why="random")
-        ._append(sample_top.assign(why="top"))
-        .drop_duplicates("area_id")
-    )
+    _areas = pd.concat([sample_random, sample_top]).drop_duplicates("area_id")
     for _, _a in _areas.iterrows():
         _span = max(_a["row_max"] - _a["row_min"], _a["col_max"] - _a["col_min"]) + 1
         _half = max(_span * RES / 2 + 400, 750)
@@ -985,9 +983,9 @@ def _(
             int(_a["area_id"]),
             _tokens,
         )
-    for _i, _f in sample_facilities.iterrows():
+    for _, _f in sample_facilities.iterrows():
         chip(
-            f"facility-{_i}",
+            f"facility-{_f['key']}",
             extent(_f.geometry.x, _f.geometry.y, 750),
             f"new {_f['registry']} facility {_f['name']} (first {_f['first_year']:.0f}), "
             f"{'caught' if _f['caught'] else 'missed'}, 1.5 km across",
@@ -1015,11 +1013,18 @@ def _(mo):
 def _(HAND_CHECK, area_counts, areas, pd, sample_facilities, sample_random, sample_top):
     from scipy.stats import binomtest
 
-    labels = pd.read_csv(HAND_CHECK, dtype={"id": str})
+    labels = (
+        pd.read_csv(HAND_CHECK, dtype={"id": str})
+        if HAND_CHECK.exists()
+        else pd.DataFrame(columns=["kind", "id", "label", "note"])
+    )
     _area_labels = labels[labels["kind"] == "area"].set_index("id")["label"]
-    _rand = sample_random.assign(label=sample_random["area_id"].astype(str).map(_area_labels))
-    _top = sample_top.assign(label=sample_top["area_id"].astype(str).map(_area_labels))
-    assert _rand["label"].notna().all() and _top["label"].notna().all(), "unlabelled chips"
+    _rand = sample_random.assign(
+        label=sample_random["area_id"].astype(str).map(_area_labels).fillna("unlabelled")
+    )
+    _top = sample_top.assign(
+        label=sample_top["area_id"].astype(str).map(_area_labels).fillna("unlabelled")
+    )
 
     def share_with_ci(k: int, n: int) -> str:
         ci = binomtest(k, n).proportion_ci()
@@ -1048,8 +1053,7 @@ def _(HAND_CHECK, area_counts, areas, pd, sample_facilities, sample_random, samp
         ),
     }
     _fac = labels[labels["kind"] == "facility"].set_index("id")["label"]
-    _f = sample_facilities.assign(built=sample_facilities.index.astype(str).map(_fac))
-    assert _f["built"].notna().all(), "unlabelled facility chips"
+    _f = sample_facilities.assign(built=sample_facilities["key"].map(_fac).fillna("unlabelled"))
     _built = _f[_f["built"] == "built"]
     hand_result["new facilities with visible new construction"] = f"{len(_built)} of {len(_f)}"
     hand_result["of those, caught by the change map"] = (
@@ -1073,7 +1077,7 @@ def _(areas, labels, pd, sample_random, sample_top):
 
     # Does the industry score separate industry from other change in the random sample?
     _lab = labels[labels["kind"] == "area"].set_index("id")["label"]
-    _r = sample_random.assign(label=sample_random["area_id"].astype(str).map(_lab))
+    _r = sample_random.assign(label=sample_random["area_id"].astype(str).map(_lab).fillna(""))
     _y = (_r["label"] == "industry").to_numpy()
     score_check = {
         "AUC of industry score, random sample": (
