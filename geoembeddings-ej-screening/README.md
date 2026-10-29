@@ -56,7 +56,7 @@ All numbers come from `outputs/summary.json` and `outputs/prediction_scores.csv`
 - The land-use indicators we expected embeddings to do well on are predicted well, but NLCD does as well or better. Adding embeddings to NLCD changes them by −0.02 to +0.05.
 - Embeddings beat NLCD by 0.18 to 0.24 on PM2.5, ozone and RSEI air, and coordinates alone beat embeddings on all three. Trained on Texas and scored on Louisiana, the embeddings' R² falls to 0.27 (ozone), −0.15 (RSEI air) and −2.33 (PM2.5).
 - Embeddings do a little better than NLCD on demographics (median 0.18 against 0.12). That's still too weak to screen with.
-- Top-decile AUC per indicator is in `outputs/prediction_scores.csv`. It runs from 0.95 (traffic) down to 0.52 (children under 5) for embeddings, with the same ordering.
+- Top-decile AUC per indicator is in `outputs/prediction_scores.csv`. For embeddings it runs from 0.97 (PM2.5) and 0.95 (traffic) down to 0.52 (children under 5).
 
 **Look-alike search.** Seeds: the block groups containing Reserve (by the Denka plant) and Convent in Louisiana, and Manchester and Galena Park on the Houston Ship Channel. The top 250 by cosine similarity are the look-alikes.
 

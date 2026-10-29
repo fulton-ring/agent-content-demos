@@ -1159,8 +1159,9 @@ def _(mo):
       ones mostly look like the seeds' surroundings (river-parish cane fields and swamp,
       Houston suburbs), not like their industry. Away from the seeds, over a third of the
       look-alikes have no heavy industry within 3 km, most of them flagged anyway. The
-      held-out fenceline places rank in the thousands. Mean-pooled embeddings describe what most of a block group looks like,
-      and in a fenceline community most of it is houses.
+      held-out fenceline places rank in the thousands. Mean-pooled embeddings describe
+      what most of a block group looks like, and in a fenceline community most of it is
+      houses.
     - **Asthma.** Embeddings add to the EJ indicators about what coordinates add, so we
       can't tell them apart from location.
 
