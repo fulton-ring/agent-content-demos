@@ -44,9 +44,10 @@ From the clean-checkout run. Full tables, per filing, are in [`results/results.m
 
 **The answer: on clean SEC statements, Reducto doesn't beat the open pipelines. All of them read about 99% of
 values right and none of them returned a single wrong number.** Reducto Extract costs 3 to 5 times as much per
-page, and Deep Extract 6 to 10 times as much, for no gain in accuracy. Reducto was the most repeatable, and it
-was the only reader that never returned an empty statement. The open pipelines' failures were all silent ones on
-one hard page.
+page, and Deep Extract 6 to 10 times as much, for no gain in accuracy. Reducto's run-to-run spread isn't measured
+here: its second run sent the same PDF bytes, which Reducto answers from its cache (see "What it doesn't show").
+The only failures were silent empty statements, all on one hard page, from the two whole-PDF Gemini readers;
+the page-at-a-time pipelines and both Reducto modes read it.
 
 **Corpus:** 24 filings, 78 statement pages and 5,289 key values. 60 XBRL values (1.1%) weren't printed on the
 statement pages and are left out. 446 of the 6,513 numbers printed on those pages (6.8%) match no XBRL value.
@@ -59,7 +60,7 @@ All 24 filings, two runs each:
 | Gemini 3.8 Flash, whole PDF | 96.9% / 96.9% | 0 | 3.1% / 3.1% | 1 of 72 | 1 statement, both runs | 0.0042 | 11.3 |
 | Gemini, page by page | 98.9% / 99.0% | 0 | 1.1% / 1.0% | 1 of 72 | 0 | 0.0067 | 11.8 |
 | Docling, then Gemini | 99.0% / 99.0% | 0 | 1.0% / 1.0% | 2 of 72 | 0 | 0.0057 | 23.9 |
-| Reducto Extract | 98.9% / 98.9% | 0 | 1.1% / 1.1% | 0 of 72 | 0 | 0.0200 | 3.2 |
+| Reducto Extract | 98.9% / 98.9% | 0 | 1.1% / 1.1% | 0 of 72 (run 2 likely cached) | 0 | 0.0200 | 3.2 (both runs) |
 
 The subset of 8 filings (every third), where the stronger readers ran too:
 
@@ -108,6 +109,10 @@ readers converge, and the remaining differences are about cost, speed and the ra
 - **The key is as good as the match to print.** XBRL values that aren't printed on the statement pages are left
   out (counted in the corpus table). Printed numbers that match no XBRL value are counted but not scored. Most
   of them are page and note numbers, dates and figures inside labels.
+- **Reducto's repeatability.** Reducto returns its first answer when it is sent the same file again (found in #141,
+  after this run). Run 2 sent the same bytes as run 1, so Reducto's "0 of 72 changed" and Deep Extract's "0 of 24"
+  are most likely cache hits, and their seconds per page average a real run with a near-instant one. The run-2
+  durations weren't kept, so this can't be confirmed from the repo. Accuracy uses run 1 and is unaffected.
 - **One prompt, one schema.** Every pipeline gets the same prompt and schema. Reducto might do better with its
   own schema tuning or with Parse, which wasn't run because the budget went to Deep Extract.
 - **24 filings, 8 in the subset.** With 8 filings, the Deep Extract and Argon comparison is directional.
