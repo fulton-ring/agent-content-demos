@@ -807,6 +807,12 @@ def _(bg):
                 0.883,
             ),
             ("adult", "Choi et al. 2022, JAMA (2019 data)", "ACS-verified Level I/II, ground or air, 60 min", 0.892),
+            (
+                "adult",
+                "Choi et al. 2022, ground only",
+                "ACS-verified Level I-IV, ground, 60 min incl. dispatch and scene",
+                0.68,
+            ),
             ("peds", "Nance et al. 2009 (children under 15)", "Verified pediatric centers, ground only, 60 min", 0.43),
             (
                 "peds",
@@ -815,6 +821,12 @@ def _(bg):
                 0.51,
             ),
             ("burn", "Klein et al. 2009, JAMA (2008 list)", "ABA-verified burn centers, ground only, 60 min", 0.251),
+            (
+                "burn",
+                "Klein et al. 2009, all centers",
+                "All 128 ABA-directory burn centers, ground only, 60 min",
+                0.411,
+            ),
             (
                 "burn",
                 "Hur et al. 2024, JAMA Surgery (2019 data)",
