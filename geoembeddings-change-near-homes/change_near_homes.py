@@ -1145,6 +1145,34 @@ def _(areas, labels, pd, sample_random, sample_top):
 @app.cell
 def _(mo):
     mo.md(r"""
+    ## What it shows, and what didn't work
+
+    - **Large change near homes is mostly suburbs being built.** In the random sample,
+      new housing is the biggest group, and the rest is spread over industry, farm
+      rotation, commercial building, cleared land, forestry and ponds. A change map alone
+      needs a person (or a better classifier) to sort it.
+    - **The "industry" it finds is warehouses and industrial parks**, not plants, tank
+      farms or terminals. None of the sampled industry areas was heavy industry, and
+      almost none has a TRI or RMP facility within 300 m, since warehouses rarely have to
+      report. Unregistered, yes; hazardous in the EJ sense, mostly not.
+    - **The registries' "new" facilities are mostly not new buildings.** Most sampled
+      2019–2024 first-time TRI and RMP registrations near homes sit in plants that were
+      already there in 2018. That is why the change map's recall against them is low and
+      only a few points above the control rate for old facilities.
+    - **The real new plants were missed** for reasons the table above shows: a site
+      already cleared or under construction during 2018 doesn't look different enough by
+      2024, and a plant built on an already graded lot inside a complex is too small at
+      40 m.
+    - **The one-class industry score failed.** Ranked by likeness to existing heavy
+      industry, the top 30 change areas are almost all new subdivisions: the vector
+      seems to say "new, bright and built", not "industrial".
+    """)
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
     ## Outputs
 
     `outputs/change_areas.csv` lists every change area of 4 ha or more with its size,
