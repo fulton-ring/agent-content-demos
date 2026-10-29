@@ -819,6 +819,7 @@ def _(mo):
 @app.cell
 def _(
     ALBERS,
+    CANDIDATE_M,
     GDAL_ENV,
     OUT_DIR,
     candidates,
@@ -827,15 +828,26 @@ def _(
     gpd,
     httpx,
     np,
+    pd,
     plt,
     rasterio,
     site_pixels,
 ):
     from rasterio.merge import merge
     from rasterio.vrt import WarpedVRT
+    from shapely import unary_union
+    from shapely.geometry import box as shape_box
+    from shapely.geometry import shape
 
     HAND_N = 30
     hand_sample = candidates.sample(min(HAND_N, len(candidates)), random_state=0)
+    hand_sample["random"] = True
+    # Also look at every candidate with nothing at all in FRS within 1 km, outside the
+    # random sample, since those are the only ones that could be wholly unregistered.
+    _extra = candidates[
+        (candidates["d_frs"] > CANDIDATE_M) & ~candidates.index.isin(hand_sample.index)
+    ]
+    hand_sample = pd.concat([hand_sample, _extra.assign(random=False)])
     _pc = "https://planetarycomputer.microsoft.com/api"
     _token = httpx.get(f"{_pc}/sas/v1/token/naip", timeout=60).raise_for_status().json()["token"]
     _colors = {
@@ -873,7 +885,16 @@ def _(
             .json()["features"]
         )
         assert _items, f"no NAIP image for {_site}"
-        _year = max(f["properties"]["naip:year"] for f in _items)
+        # The newest year whose photos cover the whole chip; a year can graze its edge.
+        _need = shape_box(_box.x.min(), _box.y.min(), _box.x.max(), _box.y.max())
+        _years = sorted({f["properties"]["naip:year"] for f in _items}, reverse=True)
+        _year = next(
+            yr
+            for yr in _years
+            if unary_union(
+                [shape(f["geometry"]) for f in _items if f["properties"]["naip:year"] == yr]
+            ).covers(_need)
+        )
         _items = [f for f in _items if f["properties"]["naip:year"] == _year]
         _dates = sorted(f["properties"]["datetime"][:10] for f in _items)
         naip_dates[_site] = f"{_dates[0]} to {_dates[-1]}"
@@ -921,8 +942,9 @@ def _(HAND_CHECK, MATCH_M, candidates, hand_sample, np, pd):
         else pd.DataFrame(columns=["site", "label", "note"])
     )
     hand = hand_sample.join(hand_labels.set_index("site"), how="left")
-    _n = len(hand)
-    _real = int((hand["label"] == "heavy").sum())
+    _rand = hand[hand["random"]]
+    _n = len(_rand)
+    _real = int((_rand["label"] == "heavy").sum())
 
     def _wilson(k: int, n: int) -> list[float]:
         """95% Wilson interval for a share k / n."""
@@ -931,25 +953,22 @@ def _(HAND_CHECK, MATCH_M, candidates, hand_sample, np, pd):
         half = z * np.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / (1 + z * z / n)
         return [round(centre - half, 3), round(centre + half, 3)]
 
+    _labels = _rand["label"]
     hand_result = {
-        "sampled": _n,
+        "random sample": _n,
         "unlabelled": hand.index[hand["label"].isna()].tolist(),
         "heavy": _real,
-        "light": int((hand["label"] == "light").sum()),
-        "no": int((hand["label"] == "no").sum()),
-        "heavy share, 95% CI": _wilson(_real, _n) if _n else None,
-        "heavy or light share, 95% CI": _wilson(
-            int(hand["label"].isin(["heavy", "light"]).sum()), _n
-        )
-        if _n
-        else None,
-        "heavy with an FRS site within 500 m": int(
-            ((hand["label"] == "heavy") & (hand["d_frs"] <= MATCH_M)).sum()
-        ),
-        "heavy with another HIFLD Next layer within 1 km": int(
-            ((hand["label"] == "heavy") & (hand["d_other_hifld"] <= 1000)).sum()
+        "light": int((_labels == "light").sum()),
+        "no": int((_labels == "no").sum()),
+        "heavy share, 95% CI": _wilson(_real, _n),
+        "heavy or light share, 95% CI": _wilson(int(_labels.isin(["heavy", "light"]).sum()), _n),
+        "real (heavy or light) with an FRS site within 500 m": int(
+            (_labels.isin(["heavy", "light"]) & (_rand["d_frs"] <= MATCH_M)).sum()
         ),
         "candidates in all": len(candidates),
+        "extra: candidates with nothing in FRS within 1 km": hand.loc[
+            ~hand["random"], "label"
+        ].to_dict(),
     }
     hand_result
     return hand, hand_result
