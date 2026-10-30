@@ -29,7 +29,7 @@ OFL_EVENT=taxday uv run notebook.py      # one event: harvey (default) or taxday
 | Depressions | USGS 3DEP 1/3 arc-second DEM; WhiteboxTools `depth_in_sink` |
 | Rainfall | NOAA Atlas 14 PFDS, 100-year 24-hour depth at 12 points: 15.1–18.1 in |
 | Answer key 1 | OpenFEMA `NfipClaims` v3, Harvey: 42,400 paid claims (cause 2 river 13,816; cause 4 rainfall 19,585; cause 0, 8,039, is unspecified). `NfipPolicies` v3: 237,383 policies in force on 25 Aug 2017. |
-| Answer key 2 | OpenFEMA `IndividualsAndHouseholdsProgramValidRegistrations` v2, DR-4332: 449,326 registrations, 103,050 with `floodDamage` (OpenFEMA revises this dataset; it read 103,538 earlier on 2026-10-23) |
+| Answer key 2 | OpenFEMA `IndividualsAndHouseholdsProgramValidRegistrations` v2, DR-4332: 449,326 registrations, 103,532 with `floodDamage` on 2026-10-30 (OpenFEMA revises this dataset; it read 103,538 and 103,050 on 2026-10-23) |
 | Tax Day keys | `NfipClaims` tagged `Spring severe storms` with loss dates 15–25 April 2016: 6,505 paid claims (river 1,545; rainfall 3,832; unspecified 1,088). 230,353 policies in force on 17 April 2016. IHP DR-4269: 20,560 registrations, 9,767 with `floodDamage`. |
 | Tax Day rain | Harris County Flood Control District: 12–17 in in 12 hours over the north-west of the county, under 6 in east of US 59 ([HCFCD](https://hcfcd.org/storm-center/spring-floods-2016)) |
 
@@ -45,23 +45,23 @@ Every layer scores a block group by the **share of its NSI buildings it flags**:
 
 The keys are paid claims per policy (all causes, river and rainfall), paid claims per NSI building, and IHP flood-damage registrations per housing unit. We score them with Spearman ρ and AUC for the worst-hit fifth of block groups, using 500 bootstrap resamples. Differences from the SFHA are paired on the same resamples.
 
-## Results: Harvey (from a clean run on 2026-10-23)
+## Results: Harvey (from a clean run on 2026-10-30)
 
 Spearman ρ / AUC per layer and key. The marker is for ρ; ▼ means worse than the SFHA (the 95% interval of the paired difference is below zero); = means no detectable difference. No layer scored ▲. Per-policy keys cover the 1,639 block groups with at least 25 policies, the others 2,135–2,140 block groups.
 
 | Layer | Claims / policy | River claims / policy | Rain claims / policy | Claims / building | IHP flood / unit |
 |---|---|---|---|---|---|
 | **FEMA SFHA** | **0.38 / 0.71** | **0.35 / 0.71** | **0.34 / 0.68** | **0.45 / 0.77** | **0.33 / 0.69** |
-| FEMA SFHA + 0.2% | 0.37 / 0.70 = | 0.35 / 0.70 = | 0.35 / 0.68 = | 0.44 / 0.78 = | 0.34 / 0.70 = |
+| FEMA SFHA + 0.2% | 0.37 / 0.70 = | 0.35 / 0.70 = | 0.35 / 0.68 = | 0.44 / 0.78 = | 0.33 / 0.69 = |
 | OWP low HAND (SFHA's share) | 0.00 / 0.48 ▼ | 0.02 / 0.50 ▼ | 0.00 / 0.47 ▼ | 0.03 / 0.50 ▼ | 0.02 / 0.50 ▼ |
-| OWP HAND-FIM, Harvey flows | 0.29 / 0.68 ▼ | 0.33 / 0.72 = | 0.25 / 0.63 ▼ | 0.33 / 0.72 ▼ | 0.19 / 0.65 ▼ |
+| OWP HAND-FIM, Harvey flows | 0.29 / 0.68 ▼ | 0.33 / 0.72 = | 0.25 / 0.63 ▼ | 0.33 / 0.72 ▼ | 0.19 / 0.64 ▼ |
 | 3DEP depression ≥ 0.3 m | 0.12 / 0.53 ▼ | 0.12 / 0.54 ▼ | 0.11 / 0.53 ▼ | 0.07 / 0.54 ▼ | 0.03 / 0.52 ▼ |
-| HAND-FIM or depression | 0.31 / 0.69 ▼ | 0.35 / 0.73 = | 0.27 / 0.64 ▼ | 0.34 / 0.74 ▼ | 0.19 / 0.66 ▼ |
+| HAND-FIM or depression | 0.31 / 0.69 ▼ | 0.35 / 0.73 = | 0.27 / 0.64 ▼ | 0.34 / 0.74 ▼ | 0.19 / 0.65 ▼ |
 | Low HAND or depression | 0.03 / 0.50 ▼ | 0.04 / 0.51 ▼ | 0.03 / 0.49 ▼ | 0.04 / 0.51 ▼ | 0.01 / 0.51 ▼ |
 
 The closest result: on river claims, HAND-FIM or depression minus the SFHA is ρ −0.01 (−0.05 to +0.05) and AUC +0.02 (−0.02 to +0.06). The SFHA's own intervals are about ±0.04 on ρ. Full table with intervals: `results/harvey/scores.csv`. Chart: `results/harvey/scores.png`. Maps: `results/harvey/maps.png`.
 
-**Cut-off sweep** (`results/harvey/sensitivity.csv`). Static HAND at 0.5–3 m gives ρ of −0.02 to 0.04 against both per-building keys. Only HAND ≤ 8 m, which flags 59% of buildings, reaches 0.20–0.25. Depressions at any depth reach at most 0.15 against IHP and 0.09 against claims. The SFHA scores 0.45 and 0.33.
+**Cut-off sweep** (`results/harvey/sensitivity.csv`). Static HAND at 0.5–3 m gives ρ of −0.02 to 0.04 against both per-building keys. Only HAND ≤ 8 m, which flags 59% of buildings, reaches 0.20–0.25. Depressions at any depth reach at most 0.14 against IHP and 0.09 against claims. The SFHA scores 0.45 and 0.33.
 
 **NWM flows vs gauges** (`results/harvey/nwm_vs_usgs.csv`). Across 47 gauged reaches, NWM's median Harvey peak is 1.71× the observed peak. Only 51% are within a factor of 2. Buffalo Bayou below Addicks/Barker runs 11.8–17.9× high, and Vince Bayou 0.16×.
 
@@ -72,7 +72,7 @@ The closest result: on river claims, HAND-FIM or depression minus the SFHA is ρ
 - *HAND-FIM false alarms:* the Buffalo Bayou corridor (29.75–29.78, −95.48 to −95.50), fully flagged because NWM's flows there are 12× too high.
 - *HAND-FIM misses:* south-east block groups (29.59–29.65, −95.20 to −95.23) near Vince and Berry Bayous, where NWM under-ran the flows.
 
-**Run time and cost:** 5–8 minutes with a warm cache on a 4-CPU machine. From an empty cache, the clean-checkout run took about 1.5 hours across three restarts (two FEMA connection failures and one container restart), and resumed from the cache each time. A reviewer's run from an empty cache on 2026-10-23 took 106 minutes with no restarts; IHP scores moved by up to 0.005 because OpenFEMA had revised those records. Most of that time went on about 430 OpenFEMA queries, some of which take 70 seconds a page, plus the 1.3 GB NSI GeoJSON. Cache: 1.9 GB. Cost: $0, since every source is free and nothing uses a paid service.
+**Run time and cost:** 5–8 minutes with a warm cache on a 4-CPU machine. From an empty cache, the clean-checkout run took about 1.5 hours across three restarts (two FEMA connection failures and one container restart), and resumed from the cache each time. A reviewer's run from an empty cache on 2026-10-23 took 106 minutes with no restarts. The run on 2026-10-30, with every download except Harvey's OpenFEMA queries already cached by the Tax Day run, took 108 minutes. Between runs, IHP scores moved by up to 0.01 because OpenFEMA had revised those records; the other keys reproduced exactly. Most of that time went on about 430 OpenFEMA queries, some of which take 70 seconds a page, plus the 1.3 GB NSI GeoJSON. Cache: 1.9 GB. Cost: $0, since every source is free and nothing uses a paid service.
 
 ## Results: Tax Day floods (from a clean run on 2026-10-30)
 
