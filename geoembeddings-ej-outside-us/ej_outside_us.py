@@ -21,6 +21,7 @@ def _():
     import pandas as pd
     import pyogrio
     import rasterio
+    import shapely
     from rasterio.features import rasterize
     from rasterio.io import DatasetReader
     from rasterio.transform import Affine
@@ -59,6 +60,7 @@ def _():
         rasterio,
         rasterize,
         roc_auc_score,
+        shapely,
         time,
     )
 
@@ -1054,6 +1056,7 @@ def _(
     pd,
     provinces,
     rasterio,
+    shapely,
 ):
     # GHS tiles are 1000 km squares in Mollweide (ESRI:54009); these two cover the provinces.
     _bounds = provinces.to_crs("ESRI:54009").total_bounds + np.array([-4000, -4000, 4000, 4000])
@@ -1103,7 +1106,9 @@ def _(
                 }
             )
     exposure = pd.DataFrame(_rows).set_index(["model", "sites"])
-    population_total = int(round(pop.sum()))
+    # For scale: everyone living in the five provinces, from the same grid.
+    _inside = shapely.contains_xy(provinces.to_crs(RD).union_all(), pop_xy[:, 0], pop_xy[:, 1])
+    population_total = int(round(pop[_inside].sum()))
     exposure
     return exposure, population_total
 
@@ -1138,8 +1143,83 @@ def _(MIN_HA, OUT_DIR, RD, found, gpd, heavy_rd, pd, plt, provinces):
         _k["lat"], _k["lon"] = _ll.y.round(5).to_numpy(), _ll.x.round(5).to_numpy()
         _k.insert(0, "model", _model)
         _out.append(_k.drop(columns=["x", "y"]))
-    pd.concat(_out).round(1).to_csv(OUT_DIR / "sites.csv", index_label="site")
+    pd.concat(_out).round({"area_ha": 1, "d_heavy": 0, "d_register": 0}).to_csv(
+        OUT_DIR / "sites.csv", index_label="site"
+    )
     _fig
+    return
+
+
+@app.cell
+def _(
+    THRESHOLD,
+    MIN_HA,
+    exposure,
+    hand_result,
+    mo,
+    pixel_scores,
+    population_total,
+    score_table,
+):
+    _op = {m: score_table.loc[(m, THRESHOLD, MIN_HA)] for m in ("US", "local")}
+    _px = pixel_scores.loc["all five"]
+    _h = hand_result
+    _ex = {m: exposure.loc[(m, "all sites of 5 ha or more")] for m in ("US", "local")}
+    _nn = {m: exposure.loc[(m, "not near one")] for m in ("US", "local")}
+
+    def _pct(v: float) -> str:
+        return f"{v:.0%}"
+
+    def _ci(v: list[float]) -> str:
+        return f"{v[0]:.0%} to {v[1]:.0%}"
+
+    mo.md(f"""
+    ## What we found
+
+    - **Pixels carry over.** On Dutch pixels the US model separates heavy register
+      sites from background with an AUC of {_px["AUC, US model"]:.2f}, against
+      {_px["AUC, local model (held out)"]:.2f} for the local model on held-out provinces
+      (the US model scored 0.97 to 1.00 at home). But at the 0.9 threshold it calls
+      {_pct(_px["background over 0.9, US"])} of Dutch background pixels industrial,
+      against {_pct(_px["background over 0.9, local"])} for the local model.
+    - **Sites: the US model finds more and is wrong more often.** At the operating point
+      (sites of {MIN_HA} ha or more) the US model flags {_op["US"]["sites"]:.0f} sites; only
+      {_pct(_op["US"]["precision: heavy site within 500 m"])} are within 500 m of a heavy
+      register site, and it finds {_pct(_op["US"]["recall: heavy sites found"])} of those
+      sites. The local model flags {_op["local"]["sites"]:.0f} sites with precision
+      {_pct(_op["local"]["precision: heavy site within 500 m"])} and recall
+      {_pct(_op["local"]["recall: heavy sites found"])}.
+    - **The hand check is the clearer test.** Of {_h["US"]["sample"]} random US-model sites,
+      {_h["US"]["heavy"]} are heavy industry and {_h["US"]["light"]} other industry; the other
+      {_h["US"]["no"]} are greenhouses, housing, town centres and dunes (any industry:
+      {_ci(_h["US"]["industrial (heavy or light) share, 95% CI"])}). Of
+      {_h["local"]["sample"]} random local-model sites, {_h["local"]["heavy"]} are heavy and
+      {_h["local"]["light"]} other industry, and {_h["local"]["no"]} are not (any industry:
+      {_ci(_h["local"]["industrial (heavy or light) share, 95% CI"])}).
+    - **What is new.** Of the hand-checked sites that are not within 500 m of a heavy register
+      site, {_h["US"]["of those, heavy"]} (US) and {_h["local"]["of those, heavy"]} (local) are
+      heavy industry, such as tank farms the register doesn't list because bulk storage isn't
+      an E-PRTR activity.
+    - **People.** {_ex["US"]["people within 1 km"]:,.0f} people live within 1 km of the US
+      model's sites and {_ex["local"]["people within 1 km"]:,.0f} within 1 km of the local
+      model's, out of {population_total:,.0f} in the five provinces. Within 3 km the counts
+      are {_ex["US"]["people within 3 km"]:,.0f} and {_ex["local"]["people within 3 km"]:,.0f}.
+      In a country this dense, a screen with this many false alarms puts a large share of
+      the population "near industry", so the count means little without the hand check.
+      Within 1 km of sites that are not near a heavy register site live
+      {_nn["US"]["people within 1 km"]:,.0f} (US) and {_nn["local"]["people within 1 km"]:,.0f}
+      (local).
+
+    ## What didn't work
+
+    - **Using the US model unchanged.** Dutch greenhouses, dense brick housing and new
+      construction score as industrial: these land covers barely exist in the Gulf Coast
+      training counties.
+    - **Telling heavy from light industry.** Neither model separates tank farms and plants
+      from warehouses and shipyards.
+    - **The 0.99 threshold for the local model** leaves almost nothing; its probabilities
+      are less extreme than the US model's.
+    """)
     return
 
 
@@ -1180,7 +1260,7 @@ def _(
         "exposure": [
             {"model": m, "sites": s, **v} for (m, s), v in exposure.to_dict(orient="index").items()
         ],
-        "population_in_grid_window": population_total,
+        "population_of_five_provinces": population_total,
         "total_seconds": round(time.perf_counter() - t_start),
         "total_downloaded_gb": round((rx_bytes() - rx_start) / 1e9, 2),
     }
