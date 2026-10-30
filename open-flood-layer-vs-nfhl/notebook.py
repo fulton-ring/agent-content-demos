@@ -776,9 +776,11 @@ def _(mo):
 
     **Spearman ρ** asks whether a layer orders block groups the way the damage does. **AUC** asks
     how often a block group in the worst-hit fifth (by that key) gets a higher layer score than one
-    outside it; 0.5 is a coin flip. Intervals are the 2.5th–97.5th percentiles of 500 bootstrap
-    resamples of block groups. The difference from the SFHA is computed on the same resamples, so
-    its interval says whether a layer beats the SFHA, not just whether the two intervals overlap.
+    outside it; 0.5 is a coin flip. Where fewer than a fifth of block groups have any damage (Tax Day
+    river claims), the worst hit are all those with any. Intervals are the 2.5th–97.5th percentiles
+    of 500 bootstrap resamples of block groups. The difference from the SFHA is computed on the same
+    resamples, so its interval says whether a layer beats the SFHA, not just whether the two
+    intervals overlap.
     """)
 
 
@@ -788,7 +790,9 @@ def _(KEYS, LAYERS, bg, np, pd, roc_auc_score, spearmanr):
     _rows = []
     for _key, (_key_label, _rate, _keep) in KEYS.items():
         _y = _rate[_keep].to_numpy()
-        _top = _y >= np.quantile(_y, 0.8)
+        _q80 = np.quantile(_y, 0.8)
+        # A sparse key (most block groups at zero) has a zero 80th percentile; its worst hit are then any above zero.
+        _top = _y > 0 if _q80 == 0 else _y >= _q80
         _boots = [_rng.integers(0, len(_y), len(_y)) for _ in range(500)]
         _sfha_b = None  # the SFHA's bootstrap scores, to take paired differences against
         for _layer, _layer_label in LAYERS.items():  # LAYERS starts with the SFHA
