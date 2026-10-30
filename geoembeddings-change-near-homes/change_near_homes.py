@@ -71,11 +71,11 @@ def _(mo):
 
     1. **Change map.** How far each pixel's embedding moved between 2018 and 2024, and the
        large-change areas within 3 km of residential block groups.
-    2. **Hand check.** What a seeded random sample of those areas actually is, from NAIP
-       aerial photos before and after and a late-2024 Sentinel-2 image.
-    3. **Registries.** What share of the facilities that first appear in EPA's Toxics
+    2. **Registries.** What share of the facilities that first appear in EPA's Toxics
        Release Inventory or Risk Management Program records in 2019–2024 sit on a change
        area, and how many new industrial sites the change map finds that aren't registered.
+    3. **Hand check.** What a seeded random sample of those areas actually is, from NAIP
+       aerial photos before and after and a late-2024 Sentinel-2 image.
     4. **Sorting.** Whether ranking the change areas by how much their 2024 embedding looks
        like existing heavy industry separates industry from other change.
     """)
@@ -185,11 +185,18 @@ def _(Callable, DATA_DIR, DatasetReader, GDAL_ENV, Path, httpx, rasterio, time):
         if path.exists():
             return path
         tmp = path.with_suffix(path.suffix + ".part")
-        with httpx.stream("GET", url, follow_redirects=True, timeout=300) as response:
-            response.raise_for_status()
-            with tmp.open("wb") as f:
-                for chunk in response.iter_bytes(1 << 20):
-                    f.write(chunk)
+        for attempt in range(4):
+            try:
+                with httpx.stream("GET", url, follow_redirects=True, timeout=300) as response:
+                    response.raise_for_status()
+                    with tmp.open("wb") as f:
+                        for chunk in response.iter_bytes(1 << 20):
+                            f.write(chunk)
+                break
+            except httpx.TransportError:
+                if attempt == 3:
+                    raise
+                time.sleep(5 * 2**attempt)
         tmp.rename(path)
         return path
 
@@ -919,7 +926,7 @@ def _(
         ]
 
     def draw_chip(name: str, ext: tuple, title: str, area_id: int, images: list) -> None:
-        """The three panels with the change area outlined and facilities marked, as a PNG."""
+        """The three panels with the change area outlined and facilities marked, as a JPEG."""
         path = OUT_DIR / "chips" / f"{name}.jpg"
         polys = gpd.GeoSeries(outline(area_id, ext) if area_id else [], crs=UTM)
         near = registry.cx[ext[0] : ext[2], ext[1] : ext[3]]

@@ -10,7 +10,7 @@ Can the change in Google DeepMind's AlphaEarth satellite embeddings between 2018
 ./run.sh
 ```
 
-It needs [uv](https://docs.astral.sh/uv/), about 3 GB of disk and about 6.5 GB of downloads. On the first run it builds the EJScreen block groups by running `../ej-datasets-hifld-next/run.sh` unchanged, with its folders pointed into `data/ej/`, then runs the notebook `change_near_homes.py` as a script. To read the notebook with its outputs, run `uv run marimo edit change_near_homes.py`. The 117 photo chips the hand check used are drawn into `outputs/chips/` by the run (they are not committed; five examples are in `outputs/examples/`).
+It needs [uv](https://docs.astral.sh/uv/), about 13 GB of free memory (the notebook peaks at 12.8 GB), about 4.5 GB of disk (2.7 GB of data and 1.6 GB of Python environments) and about 6.5 GB of downloads. On the first run it builds the EJScreen block groups by running `../ej-datasets-hifld-next/run.sh` unchanged, with its folders pointed into `data/ej/`, then runs the notebook `change_near_homes.py` as a script. To read the notebook with its outputs, run `uv run marimo edit change_near_homes.py`. The 117 photo chips the hand check used are drawn into `outputs/chips/` by the run (they are not committed; five examples are in `outputs/examples/`).
 
 ## Where the data comes from
 
