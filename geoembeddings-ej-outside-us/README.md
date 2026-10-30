@@ -10,7 +10,7 @@ Can a heavy-industry classifier trained on 10 m AlphaEarth embeddings in one cou
 ./run.sh
 ```
 
-It needs [uv](https://docs.astral.sh/uv/), about 8 GB of free memory and about 5 GB of disk. It downloads about 50 GB, most of it AlphaEarth blocks that are read and thrown away. `run.sh` runs the notebook `ej_outside_us.py` as a script, and every number below is in `outputs/summary.json`. To read the notebook with its tables, run `uv run marimo edit ej_outside_us.py`.
+It needs [uv](https://docs.astral.sh/uv/), about 9 GB of free memory and about 5 GB of disk. It downloads about 51 GB, most of it AlphaEarth blocks that are read and thrown away. `run.sh` runs the notebook `ej_outside_us.py` as a script, and every number below is in `outputs/summary.json`. To read the notebook with its tables, run `uv run marimo edit ej_outside_us.py`.
 
 ## Where the data comes from
 
@@ -80,7 +80,7 @@ In a country this dense, a screen with false alarms puts most people "near indus
 
 ![Detected sites](outputs/sites_map.png)
 
-**Cost and time.** Zero dollars, and no account or key is needed. RUN_STATS_PLACEHOLDER
+**Cost and time.** Zero dollars, and no account or key is needed. A clean checkout on 4 CPUs took 10 minutes 19 seconds and downloaded 50.7 GB. That is 32.9 GB for the 431 US blocks, which are read only for training pixels and so take 4 minutes and almost no disk, and 17.6 GB for the 230 Dutch blocks, 2 minutes. The rest is the register (90 MB), two GHS-POP tiles (80 MB) and the photo chips. The scan of both models took about 1 minute. The Dutch blocks' 20 m grids are cached in `data/` (4.1 GB), so a rerun takes about 4 minutes. Peak memory was about 9 GB.
 
 ## What didn't work
 
