@@ -11,10 +11,11 @@ FEMA's flood map (the NFHL, and its 1%-a-year Special Flood Hazard Area, the SFH
 ## How to run it
 
 ```bash
-./run.sh     # needs uv; first run about 1.5 hours and 1.9 GB of downloads (mostly OpenFEMA); 5–8 minutes after
+./run.sh                                 # both events; needs uv. First run about 2.5 hours and 2 GB of downloads (mostly OpenFEMA)
+OFL_EVENT=taxday uv run notebook.py      # one event: harvey (default) or taxday
 ```
 
-`run.sh` runs `notebook.py` as a script, so every number below comes from code a reader can see. To read it with its outputs, run `uv run marimo edit notebook.py`. Downloads are cached in `$OFL_CACHE` (default `~/.cache/open-flood-layer-vs-nfhl`). Results go to `results/`.
+`run.sh` runs `notebook.py` as a script once per event, so every number below comes from code a reader can see. To read it with its outputs, run `OFL_EVENT=taxday uv run marimo edit notebook.py`. Downloads are cached in `$OFL_CACHE` (default `~/.cache/open-flood-layer-vs-nfhl`). Results go to `results/<event>/`.
 
 ## Data (all public, downloaded at run time, nothing committed)
 
@@ -56,13 +57,13 @@ Spearman ρ / AUC per layer and key. The marker is for ρ; ▼ means worse than 
 | HAND-FIM or depression | 0.31 / 0.69 ▼ | 0.35 / 0.73 = | 0.27 / 0.64 ▼ | 0.34 / 0.74 ▼ | 0.19 / 0.66 ▼ |
 | Low HAND or depression | 0.03 / 0.50 ▼ | 0.04 / 0.51 ▼ | 0.03 / 0.49 ▼ | 0.04 / 0.51 ▼ | 0.01 / 0.51 ▼ |
 
-The closest result: on river claims, HAND-FIM or depression minus the SFHA is ρ −0.01 (−0.05 to +0.05) and AUC +0.02 (−0.02 to +0.06). The SFHA's own intervals are about ±0.04 on ρ. Full table with intervals: `results/scores.csv`. Chart: `results/scores.png`. Maps: `results/maps.png`.
+The closest result: on river claims, HAND-FIM or depression minus the SFHA is ρ −0.01 (−0.05 to +0.05) and AUC +0.02 (−0.02 to +0.06). The SFHA's own intervals are about ±0.04 on ρ. Full table with intervals: `results/harvey/scores.csv`. Chart: `results/harvey/scores.png`. Maps: `results/harvey/maps.png`.
 
-**Cut-off sweep** (`results/sensitivity.csv`). Static HAND at 0.5–3 m gives ρ of −0.02 to 0.04 against both per-building keys. Only HAND ≤ 8 m, which flags 59% of buildings, reaches 0.20–0.25. Depressions at any depth reach at most 0.15 against IHP and 0.09 against claims. The SFHA scores 0.45 and 0.33.
+**Cut-off sweep** (`results/harvey/sensitivity.csv`). Static HAND at 0.5–3 m gives ρ of −0.02 to 0.04 against both per-building keys. Only HAND ≤ 8 m, which flags 59% of buildings, reaches 0.20–0.25. Depressions at any depth reach at most 0.15 against IHP and 0.09 against claims. The SFHA scores 0.45 and 0.33.
 
-**NWM flows vs gauges** (`results/nwm_vs_usgs.csv`). Across 47 gauged reaches, NWM's median Harvey peak is 1.71× the observed peak. Only 51% are within a factor of 2. Buffalo Bayou below Addicks/Barker runs 11.8–17.9× high, and Vince Bayou 0.16×.
+**NWM flows vs gauges** (`results/harvey/nwm_vs_usgs.csv`). Across 47 gauged reaches, NWM's median Harvey peak is 1.71× the observed peak. Only 51% are within a factor of 2. Buffalo Bayou below Addicks/Barker runs 11.8–17.9× high, and Vince Bayou 0.16×.
 
-**Where layers go most wrong** (`results/worst_block_groups.csv`, IHP key; the reasons are our reading of locations and the gauge table):
+**Where layers go most wrong** (`results/harvey/worst_block_groups.csv`, IHP key; the reasons are our reading of locations and the gauge table):
 
 - *SFHA misses:* heavily damaged block groups with no SFHA. They sit near the Addicks reservoir pool (29.84, −95.63, where 46% of buildings fall in a ≥ 0.3 m depression), in east Houston (29.84, −95.20 to −95.27) and along Clear Creek (29.52–29.54, −95.18). None is a 1% riverine floodplain.
 - *SFHA false alarms:* mostly SFHA block groups with insured, little-damaged homes, such as 29.71, −95.44, with 289 policies and 2 claims.
