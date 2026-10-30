@@ -38,17 +38,13 @@ def _():
     started = time.time()
     cache = Path(os.environ.get("OFL_CACHE", Path.home() / ".cache" / "open-flood-layer-vs-nfhl"))
     cache.mkdir(parents=True, exist_ok=True)
-    results = Path(__file__).parent / "results"
-    results.mkdir(exist_ok=True)
     ALBERS = "EPSG:5070"  # CONUS Albers, the CRS of OWP's HAND rasters; distances and areas in metres
     COUNTY = "48201"  # Harris County, TX
-    HARVEY = ("2017-08-25", "2017-09-05")  # landfall to the last reservoir-release peaks
     BBOX = (-95.97, 29.49, -94.90, 30.18)  # Harris County, lon/lat
     return (
         ALBERS,
         BBOX,
         COUNTY,
-        HARVEY,
         Path,
         Window,
         cache,
@@ -61,11 +57,11 @@ def _():
         merge,
         mo,
         np,
+        os,
         pd,
         plt,
         rasterio,
         requests,
-        results,
         roc_auc_score,
         rowcol,
         spearmanr,
@@ -79,9 +75,49 @@ def _():
 
 
 @app.cell
-def _(mo):
-    mo.md(r"""
-    # Can an open flood layer beat FEMA's flood map at finding Harvey's damage?
+def _(Path, date, mo, os):
+    # One flood event per run, chosen with OFL_EVENT. Everything else (county, layers, keys, scoring) is shared.
+    EVENTS = {
+        "harvey": {
+            "name": "Hurricane Harvey",
+            "short": "Harvey",
+            "when": "August 2017",
+            "date": date(2017, 8, 25),  # landfall; policies must be in force on this day
+            "window": ("2017-08-25", "2017-09-05"),  # landfall to the last reservoir-release peaks
+            "claims": "floodEvent eq 'Hurricane Harvey'",
+            "disaster": 4332,
+            "ihp_days": (date(2017, 8, 25), 310),  # applications ran into mid-2018
+            "rain": "Harvey dropped 30–50 in over four days, far beyond the 1% event across much of the county",
+        },
+        "taxday": {
+            "name": "the Tax Day floods",
+            "short": "Tax Day",
+            "when": "April 2016",
+            "date": date(2016, 4, 17),  # the storms began on the evening of the 17th
+            "window": ("2016-04-17", "2016-04-25"),  # rain to the end of the Addicks and Barker releases
+            # OpenFEMA tags these "Spring severe storms", a name it also uses for other spring storms
+            "claims": "floodEvent eq 'Spring severe storms' and dateOfLoss ge '2016-04-15' "
+            "and dateOfLoss le '2016-04-25'",
+            "disaster": 4269,
+            "ihp_days": (date(2016, 4, 1), 130),  # the earliest applications are dated before the storm
+            "rain": "the Tax Day storms dropped 12–17 in in 12 hours over north-west Harris County and under 6 in "
+            "east of US 59 (Harris County Flood Control District), close to the 1% 24-hour depth where it fell hardest",
+        },
+    }
+    EVENT = os.environ.get("OFL_EVENT", "harvey")
+    assert EVENT in EVENTS, f"OFL_EVENT must be one of {list(EVENTS)}"
+    event = EVENTS[EVENT]
+    WINDOW = event["window"]
+    results = Path(__file__).parent / "results" / EVENT
+    results.mkdir(parents=True, exist_ok=True)
+    mo.md(f"**Event: {event['name']} ({event['when']}, DR-{event['disaster']}).** Results go to `results/{EVENT}/`.")
+    return EVENT, WINDOW, event, results
+
+
+@app.cell
+def _(event, mo):
+    mo.md(rf"""
+    # Can an open flood layer beat FEMA's flood map at finding {event["short"]}'s damage?
 
     FEMA's National Flood Hazard Layer (NFHL) marks the Special Flood Hazard Area (SFHA), the
     land FEMA's studies put inside the 1%-a-year flood. It is what lenders, insurers and planners
@@ -92,9 +128,10 @@ def _(mo):
     built only from those rank places by observed flood damage better than the SFHA does?**
 
     Public damage data is only good to the census block group, so that is the unit here. The test
-    is Harris County, Texas, in Hurricane Harvey (August 2017). Harvey's rain far exceeded the 1%
-    event across much of the county, so no 1% map should be expected to contain it. The question is
-    only which layer ranks block groups closer to how badly they flooded.
+    is Harris County, Texas, in {event["name"]} ({event["when"]}). The notebook runs one event at a
+    time (`OFL_EVENT=harvey` or `taxday`); this run is {event["name"]}. Rainfall: {event["rain"]}.
+    A 1% map should not be expected to contain an event far beyond 1%, so the question is only
+    which layer ranks block groups closer to how badly they flooded.
 
     For each layer we compute, per block group, the share of buildings it flags. We score that share
     against two public answer keys and report Spearman rank correlation and AUC, with the SFHA as
@@ -229,19 +266,19 @@ def _(ALBERS, COUNTY, block_groups, block_groups_2020, cache, fetch, gpd, pd):
 
 
 @app.cell
-def _(mo):
-    mo.md(r"""
+def _(event, mo):
+    mo.md(rf"""
     ## 2. Layer 1, the baseline: FEMA's SFHA
 
     We download Harris County's NFHL extract (`48201C`) from FEMA's Map Service Center. A building
     is in the **SFHA** if a zone with `SFHA_TF = T` (A, AE, AO, VE) covers it, and in **SFHA + 0.2%**
-    if it is in the SFHA or the shaded X zone. This is today's NFHL, not the one in force in August
-    2017, so we also count the buildings on map panels that took effect after Harvey.
+    if it is in the SFHA or the shaded X zone. This is today's NFHL, not the one in force in
+    {event["when"]}, so we also count the buildings on map panels that took effect after the event.
     """)
 
 
 @app.cell
-def _(ALBERS, COUNTY, cache, fetch, gpd, pd, structures):
+def _(ALBERS, COUNTY, cache, event, fetch, gpd, pd, structures):
     # The Map Service Center redirects to the county's latest NFHL extract (48201C_<date>.zip).
     _zip = fetch(
         "https://msc.fema.gov/portal/downloadProduct",
@@ -259,21 +296,21 @@ def _(ALBERS, COUNTY, cache, fetch, gpd, pd, structures):
     nfhl_flags = pd.DataFrame(index=structures.index)
     nfhl_flags["sfha"] = structures.index.isin(_in_sfha)
     nfhl_flags["sfha_02"] = nfhl_flags.sfha | structures.index.isin(_in_x02)
-    nfhl_flags["panel_after_harvey"] = (pd.to_datetime(_panel.EFF_DATE) > "2017-08-25").reindex(
+    nfhl_flags["panel_after_event"] = (pd.to_datetime(_panel.EFF_DATE) > str(event["date"])).reindex(
         structures.index, fill_value=False
     )
     print(
         f"{len(nfhl_zones):,} zones. SFHA flags {nfhl_flags.sfha.mean():.1%} of buildings, "
         f"SFHA + 0.2% {nfhl_flags.sfha_02.mean():.1%}. "
-        f"{nfhl_flags.panel_after_harvey.mean():.1%} of buildings sit on panels made effective after Harvey."
+        f"{nfhl_flags.panel_after_event.mean():.1%} of buildings sit on panels made effective after the event."
     )
     return (nfhl_flags,)
 
 
 @app.cell
-def _(mo):
-    mo.md(r"""
-    ## 3. Layer 2: NOAA OWP HAND, static and driven by Harvey's flows
+def _(event, mo):
+    mo.md(rf"""
+    ## 3. Layer 2: NOAA OWP HAND, static and driven by the event's flows
 
     OWP's HAND-FIM 4.9.9.0 (the model behind NWS flood inundation maps, mirrored publicly by
     CIROH) gives every 10 m cell its **height above nearest drainage** and the stream reach it
@@ -284,8 +321,8 @@ def _(mo):
     - **Low HAND**, a static hazard layer: the buildings lowest above their stream, with the cut-off
       set so it flags exactly as many buildings as the SFHA. The two layers then differ only in
       *which* buildings they flag.
-    - **HAND-FIM, Harvey flows**: what NWS's flood inundation mapping would have drawn. For each
-      reach we take Harvey's peak flow from the National Water Model retrospective (v3.0, public on
+    - **HAND-FIM, {event["short"]} flows**: what NWS's flood inundation mapping would have drawn. For each
+      reach we take the event's peak flow from the National Water Model retrospective (v3.0, public on
       AWS), turn it into a stage with OWP's rating curve for that reach (`hydrotable`), and flag a
       building if its HAND is at or below that stage. This is an event map, not a 1% map: it shows
       what an open model refreshed at the time of the flood would have drawn.
@@ -319,8 +356,8 @@ def _(BBOX, cache, fetch, get, pd):
 
 
 @app.cell
-def _(HARVEY, cache, hydrotable, np, pd, xr):
-    _path = cache / "nwm_harvey_peaks.parquet"
+def _(EVENT, WINDOW, cache, hydrotable, np, pd, xr):
+    _path = cache / f"nwm_peaks_{EVENT}.parquet"
     if not _path.exists():
         _ds = xr.open_zarr(
             "https://noaa-nwm-retrospective-3-0-pds.s3.amazonaws.com/CONUS/zarr/chrtout.zarr",
@@ -329,24 +366,24 @@ def _(HARVEY, cache, hydrotable, np, pd, xr):
         )
         _ids = np.sort(hydrotable.feature_id.unique())
         _idx = np.flatnonzero(np.isin(_ds.feature_id.values, _ids))
-        _peak = _ds.streamflow.sel(time=slice(*HARVEY)).isel(feature_id=_idx).max("time").compute()
+        _peak = _ds.streamflow.sel(time=slice(*WINDOW)).isel(feature_id=_idx).max("time").compute()
         pd.DataFrame({"feature_id": _peak.feature_id.values, "peak_cms": _peak.values}).to_parquet(_path)
-    harvey_peaks = pd.read_parquet(_path)
-    print(f"Harvey peak flow for {len(harvey_peaks):,} reaches; median {harvey_peaks.peak_cms.median():.0f} m³/s")
-    return (harvey_peaks,)
+    event_peaks = pd.read_parquet(_path)
+    print(f"Event peak flow for {len(event_peaks):,} reaches; median {event_peaks.peak_cms.median():.0f} m³/s")
+    return (event_peaks,)
 
 
 @app.cell
 def _(mo):
     mo.md(r"""
     How good are those simulated flows? NWM links some reaches to USGS gauges, so we compare its
-    Harvey peak with each Harris County gauge's observed instantaneous peak.
+    event peak with each Harris County gauge's observed instantaneous peak.
     """)
 
 
 @app.cell
-def _(BBOX, HARVEY, cache, get, np, pd, results, xr):
-    _path = cache / "nwm_vs_usgs.parquet"
+def _(BBOX, EVENT, WINDOW, cache, get, np, pd, results, xr):
+    _path = cache / f"nwm_vs_usgs_{EVENT}.parquet"
     if not _path.exists():
         _ds = xr.open_zarr(
             "https://noaa-nwm-retrospective-3-0-pds.s3.amazonaws.com/CONUS/zarr/chrtout.zarr",
@@ -358,15 +395,15 @@ def _(BBOX, HARVEY, cache, get, np, pd, results, xr):
         _idx = np.flatnonzero(
             (_gage != "") & (_lon >= BBOX[0]) & (_lon <= BBOX[2]) & (_lat >= BBOX[1]) & (_lat <= BBOX[3])
         )
-        _nwm = _ds.streamflow.sel(time=slice(*HARVEY)).isel(feature_id=_idx).max("time").compute()
+        _nwm = _ds.streamflow.sel(time=slice(*WINDOW)).isel(feature_id=_idx).max("time").compute()
         _sites = list(_gage[_idx])
         _usgs = get(
             "https://waterservices.usgs.gov/nwis/iv/",
             {
                 "format": "json",
                 "sites": ",".join(_sites),
-                "startDT": HARVEY[0],
-                "endDT": HARVEY[1],
+                "startDT": WINDOW[0],
+                "endDT": WINDOW[1],
                 "parameterCd": "00060",
             },
         ).json()["value"]["timeSeries"]
@@ -388,7 +425,7 @@ def _(BBOX, HARVEY, cache, get, np, pd, results, xr):
     gauges = pd.read_parquet(_path).dropna().query("usgs_peak_cms > 0")
     gauges["nwm_over_usgs"] = gauges.nwm_peak_cms / gauges.usgs_peak_cms
     print(
-        f"{len(gauges)} gauged reaches. NWM / observed Harvey peak: median {gauges.nwm_over_usgs.median():.2f}, "
+        f"{len(gauges)} gauged reaches. NWM / observed event peak: median {gauges.nwm_over_usgs.median():.2f}, "
         f"{(gauges.nwm_over_usgs.between(0.5, 2)).mean():.0%} within a factor of 2."
     )
     gauges.sort_values("nwm_over_usgs", ascending=False).round(2).to_csv(results / "nwm_vs_usgs.csv", index=False)
@@ -397,15 +434,15 @@ def _(BBOX, HARVEY, cache, get, np, pd, results, xr):
 
 
 @app.cell
-def _(harvey_peaks, hydrotable, np, pd):
-    # Stage at Harvey's peak flow for every (branch, HydroID), from OWP's rating curves.
-    _ht = hydrotable.merge(harvey_peaks, on="feature_id").sort_values(["branch_id", "HydroID", "discharge_cms"])
+def _(event_peaks, hydrotable, np, pd):
+    # Stage at the event's peak flow for every (branch, HydroID), from OWP's rating curves.
+    _ht = hydrotable.merge(event_peaks, on="feature_id").sort_values(["branch_id", "HydroID", "discharge_cms"])
     _stages = []
     for (_branch, _hydroid), _g in _ht.groupby(["branch_id", "HydroID"], sort=False):
         _stages.append((_branch, _hydroid, float(np.interp(_g.peak_cms.iloc[0], _g.discharge_cms, _g.stage))))
-    harvey_stage = pd.DataFrame(_stages, columns=["branch_id", "HydroID", "stage"])
-    print(f"{len(harvey_stage):,} catchments; median Harvey stage {harvey_stage.stage.median():.1f} m")
-    return (harvey_stage,)
+    event_stage = pd.DataFrame(_stages, columns=["branch_id", "HydroID", "stage"])
+    print(f"{len(event_stage):,} catchments; median event stage {event_stage.stage.median():.1f} m")
+    return (event_stage,)
 
 
 @app.cell
@@ -413,9 +450,9 @@ def _(
     Window,
     cache,
     disjoint_bounds,
+    event_stage,
     fetch,
     from_bounds,
-    harvey_stage,
     hucs,
     log,
     nfhl_flags,
@@ -429,7 +466,7 @@ def _(
     _x, _y = structures.geometry.x.to_numpy(), structures.geometry.y.to_numpy()
     hand_min = np.full(len(structures), np.inf, dtype="float32")
     hand_fim = np.zeros(len(structures), dtype=bool)
-    _stage = harvey_stage.set_index(["branch_id", "HydroID"]).stage
+    _stage = event_stage.set_index(["branch_id", "HydroID"]).stage
     for _huc in hucs:
         _branches = pd.read_csv(
             fetch(f"{owp}/{_huc}/branch_ids.csv", cache / "owp" / f"{_huc}_branches.csv"), header=None
@@ -474,7 +511,7 @@ def _(
     print(
         f"HAND covers {np.isfinite(hand_min).mean():.0%} of buildings; {(hand_min <= 1).mean():.1%} sit 1 m or less "
         f"above their stream. HAND ≤ {hand_cut:.2f} m flags the SFHA's share, {hand_flags.hand_low.mean():.1%}. "
-        f"HAND-FIM at Harvey flows flags {hand_flags.hand_fim.mean():.1%}."
+        f"HAND-FIM at the event's flows flags {hand_flags.hand_fim.mean():.1%}."
     )
     return hand_cut, hand_flags
 
@@ -490,13 +527,13 @@ def _(mo):
 
     Atlas 14 rainfall was meant to say which depressions fill. We sample NOAA's 100-year, 24-hour
     depth across the county to see how much it varies. It turns out nearly flat across the county
-    and far below Harvey's totals, so it can't rank one depression above another, and the proxy
+    and, for Harvey, far below its totals, so it can't rank one depression above another, and the proxy
     uses depth alone.
     """)
 
 
 @app.cell
-def _(BBOX, get, json, np):
+def _(BBOX, event, get, json, np):
     _lons, _lats = np.linspace(BBOX[0], BBOX[2], 4), np.linspace(BBOX[1], BBOX[3], 3)
     atlas14 = []
     for _lat in _lats:
@@ -517,7 +554,7 @@ def _(BBOX, get, json, np):
             atlas14.append(float(_q[9][6]))
     print(
         f"Atlas 14 100-year 24-hour rain across Harris County: {min(atlas14):.1f}–{max(atlas14):.1f} in "
-        f"at {len(atlas14)} points. Harvey dropped 30–50 in over four days."
+        f"at {len(atlas14)} points. For comparison, {event['rain']}."
     )
     return (atlas14,)
 
@@ -574,13 +611,13 @@ def _(hand_flags, nfhl_flags, np, pd, rasterio, rowcol, sink_path, structures):
 
 
 @app.cell
-def _(mo):
-    mo.md(r"""
+def _(event, mo):
+    mo.md(rf"""
     ## 5. Answer key 1: NFIP claims per policy
 
     OpenFEMA's `NfipClaims` v3 tags each claim with its flood event and `causeOfDamage`: **2** is a
-    river, stream or lake overflowing, **4** is rainfall accumulating where it fell. We count Harvey
-    claims that paid something. The denominator is NFIP policies in force on 25 August 2017 from
+    river, stream or lake overflowing, **4** is rainfall accumulating where it fell. We count the
+    event's claims that paid something. The denominator is NFIP policies in force on {event["date"]} from
     `NfipPolicies` v3, fetched three days of effective dates at a time across Texas (OpenFEMA times
     out filtering the 70-million-row table by county).
 
@@ -590,29 +627,30 @@ def _(mo):
 
 
 @app.cell
-def _(COUNTY, cache, openfema, pd, to_2010):
+def _(COUNTY, EVENT, cache, event, openfema, pd, to_2010):
     _rows = openfema(
         "v3/NfipClaims",
-        f"startswith(censusGeoid,'{COUNTY}') and floodEvent eq 'Hurricane Harvey'",
+        f"startswith(censusGeoid,'{COUNTY}') and {event['claims']}",
         "censusGeoid,causeOfDamage,amountPaidOnBuildingClaim,amountPaidOnContentsClaim",
-        cache / "openfema" / "claims_harvey.json",
+        cache / "openfema" / f"claims_{EVENT}.json",
     )
     _claims = pd.DataFrame(_rows)
     _claims = _claims[(_claims.amountPaidOnBuildingClaim.fillna(0) + _claims.amountPaidOnContentsClaim.fillna(0)) > 0]
     claims = _claims.assign(bg=to_2010(_claims.censusGeoid.str[:12]))
     print(
-        f"{len(_rows):,} Harvey claims in Harris County, {len(claims):,} paid. "
+        f"{len(_rows):,} {event['short']} claims in Harris County, {len(claims):,} paid. "
         f"By cause: {claims.causeOfDamage.value_counts().to_dict()}"
     )
     return (claims,)
 
 
 @app.cell
-def _(COUNTY, cache, date, openfema, pd, timedelta, to_2010):
+def _(COUNTY, cache, event, openfema, pd, timedelta, to_2010):
+    # Policies run a year, so any policy in force on the event date took effect in the 366 days before it.
     _frames = []
-    _start = date(2016, 8, 26)
-    for _i in range(0, 366, 3):
-        _a, _b = _start + timedelta(days=_i), _start + timedelta(days=min(_i + 3, 365))
+    _start = event["date"] - timedelta(days=365)
+    for _i in range(0, 367, 3):
+        _a, _b = _start + timedelta(days=_i), _start + timedelta(days=min(_i + 3, 366))
         if _a >= _b:
             break
         _rows = openfema(
@@ -625,21 +663,21 @@ def _(COUNTY, cache, date, openfema, pd, timedelta, to_2010):
     _p = pd.concat(_frames, ignore_index=True)
     _p = _p[_p.censusGeoid.fillna("").str.startswith(COUNTY)]
     _cancel = pd.to_datetime(_p.cancellationDateOfFloodPolicy, utc=True)
-    _in_force = (pd.to_datetime(_p.policyTerminationDate, utc=True) > "2017-08-25") & (
-        _cancel.isna() | (_cancel > "2017-08-25")
-    )
+    _day = str(event["date"])
+    _in_force = (pd.to_datetime(_p.policyTerminationDate, utc=True) > _day) & (_cancel.isna() | (_cancel > _day))
     policies = _p[_in_force].assign(bg=lambda d: to_2010(d.censusGeoid.str[:12]))
-    print(f"{len(policies):,} NFIP policies in force in Harris County on 2017-08-25")
+    print(f"{len(policies):,} NFIP policies in force in Harris County on {_day}")
     return (policies,)
 
 
 @app.cell
-def _(mo):
-    mo.md(r"""
+def _(event, mo):
+    mo.md(rf"""
     ## 6. Answer key 2: FEMA aid registrations with flood damage
 
     Most flooded homes in Harris County had no flood insurance. FEMA's Individuals and Households
-    Program registrations for Harvey (DR-4332) cover them: `IndividualsAndHouseholdsProgramValidRegistrations`
+    Program registrations for {event["short"]} (DR-{event["disaster"]}) cover them:
+    `IndividualsAndHouseholdsProgramValidRegistrations`
     v2 records whether an inspector found **flood damage** (`floodDamage`). We count those per
     block group, fetched one application day at a time.
 
@@ -649,20 +687,23 @@ def _(mo):
 
 
 @app.cell
-def _(COUNTY, cache, date, openfema, pd, timedelta):
+def _(COUNTY, cache, event, openfema, pd, timedelta):
     _frames = []
-    _start = date(2017, 8, 25)
-    for _i in range(310):  # applications for DR-4332 ran into mid-2018
+    _start, _days = event["ihp_days"]
+    for _i in range(_days):
         _day = _start + timedelta(days=_i)
         _rows = openfema(
             "v2/IndividualsAndHouseholdsProgramValidRegistrations",
-            f"disasterNumber eq 4332 and appliedDate eq '{_day}' and fips eq '{COUNTY}'",
+            f"disasterNumber eq {event['disaster']} and appliedDate eq '{_day}' and fips eq '{COUNTY}'",
             "censusGeoid,floodDamage,ownRent",
-            cache / "openfema" / "ihp" / f"{_day}.json",
+            cache / "openfema" / "ihp" / str(event["disaster"]) / f"{_day}.json",
         )
         _frames.append(pd.DataFrame(_rows, columns=["censusGeoid", "floodDamage", "ownRent"]))
     ihp = pd.concat(_frames, ignore_index=True).assign(bg=lambda d: d.censusGeoid.str[:12])
-    print(f"{len(ihp):,} valid Harvey registrations in Harris County, {ihp.floodDamage.sum():,} with flood damage")
+    print(
+        f"{len(ihp):,} valid {event['short']} registrations in Harris County, "
+        f"{ihp.floodDamage.sum():,} with flood damage"
+    )
     return (ihp,)
 
 
@@ -681,12 +722,12 @@ def _(mo):
 
 
 @app.cell
-def _(block_groups, claims, flags, ihp, pd, policies):
+def _(block_groups, claims, event, flags, ihp, pd, policies):
     LAYERS = {
         "sfha": "FEMA SFHA",
         "sfha_02": "FEMA SFHA + 0.2%",
         "hand_low": "OWP low HAND (SFHA's share)",
-        "hand_fim": "OWP HAND-FIM, Harvey flows",
+        "hand_fim": f"OWP HAND-FIM, {event['short']} flows",
         "sink_30cm": "3DEP depression ≥ 0.3 m",
         "hand_low_or_sink": "Low HAND or depression",
         "hand_fim_or_sink": "HAND-FIM or depression",
@@ -797,7 +838,7 @@ def _(results, scores):
 
 
 @app.cell
-def _(KEYS, LAYERS, plt, results, scores):
+def _(KEYS, LAYERS, event, plt, results, scores):
     _fig, _axes = plt.subplots(1, 2, figsize=(13, 5.5), sharey=True)
     _keys = [k[0] for k in KEYS.values()]
     _layers = list(LAYERS.values())
@@ -819,7 +860,7 @@ def _(KEYS, LAYERS, plt, results, scores):
         _ax.set_yticks(range(len(_keys)), _keys)
     _axes[0].invert_yaxis()
     _fig.legend(*_axes[0].get_legend_handles_labels(), loc="lower center", ncol=4, fontsize=9)
-    _fig.suptitle("Harris County block groups, Hurricane Harvey: each layer's share of flagged buildings vs damage")
+    _fig.suptitle(f"Harris County block groups, {event['name']}: each layer's share of flagged buildings vs damage")
     _fig.tight_layout(rect=(0, 0.09, 1, 1))
     _fig.savefig(results / "scores.png", dpi=130)
     _fig
@@ -866,7 +907,7 @@ def _(KEYS, flags, pd, results, spearmanr):
 
 
 @app.cell
-def _(KEYS, bg, block_groups, plt, results):
+def _(KEYS, LAYERS, bg, block_groups, plt, results):
     _label, _rate, _keep = KEYS["ihp_per_unit"]
     _m = block_groups.set_index("bg").join(bg[["sfha", "hand_fim", "sink_30cm"]]).assign(key=_rate.where(_keep))
     _fig, _axes = plt.subplots(1, 4, figsize=(18, 4.2))
@@ -874,7 +915,7 @@ def _(KEYS, bg, block_groups, plt, results):
         _axes,
         [
             ("sfha", "FEMA SFHA: share of buildings"),
-            ("hand_fim", "OWP HAND-FIM, Harvey flows"),
+            ("hand_fim", LAYERS["hand_fim"]),
             ("sink_30cm", "3DEP depression ≥ 0.3 m"),
             ("key", "IHP flood registrations per housing unit"),
         ],
@@ -926,7 +967,7 @@ def _(KEYS, LAYERS, bg, block_groups, pd, results):
             _out.append(_d.loc[_idx, _cols].assign(layer=_layer_label, kind=_kind, gap=_gap[_idx].round(2)))
     worst = pd.concat(_out).rename_axis("block group").reset_index()
     worst.round(3).to_csv(results / "worst_block_groups.csv", index=False)
-    worst[worst.layer.isin(["FEMA SFHA", "OWP HAND-FIM, Harvey flows", "3DEP depression ≥ 0.3 m"])].round(2)
+    worst[worst.layer.isin([LAYERS["sfha"], LAYERS["hand_fim"], LAYERS["sink_30cm"]])].round(2)
     return (worst,)
 
 
@@ -978,7 +1019,7 @@ def _(bg, flags, json, matched, results, started, time):
     _summary = {
         "block_groups": int(len(bg)),
         "structures": int(len(flags)),
-        "share_after_harvey_panels": round(float(flags.panel_after_harvey.mean()), 4),
+        "share_after_event_panels": round(float(flags.panel_after_event.mean()), 4),
         "share_flagged": {
             c: round(float(flags[c].mean()), 4)
             for c in ["sfha", "sfha_02", "hand_low", "hand_fim", "sink_30cm", "hand_fim_or_sink"]
