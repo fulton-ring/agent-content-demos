@@ -976,10 +976,10 @@ def _(KEYS, LAYERS, bg, block_groups, pd, results):
 
 
 @app.cell
-def _(mo):
-    mo.md(r"""
-    ## 10. What this shows, and what didn't work
-
+def _(EVENT, mo):
+    # Written after reading each event's scores, gauge table and worst block groups above.
+    FINDINGS = {
+        "harvey": r"""
     **No open layer beats the SFHA here.** Read the scores table by its "minus SFHA" columns:
     an interval entirely below zero means the layer ranks block groups worse than FEMA's map.
 
@@ -999,7 +999,41 @@ def _(mo):
     - **The SFHA's own misses are places no 1% riverine map would catch:** neighbourhoods in
       the Addicks reservoir pool, east Houston and the Clear Creek corridor. That is where an
       open layer would have to earn its place.
+    """,
+        "taxday": r"""
+    **An open event map beats the SFHA here; static open layers still don't.** Read the scores
+    table by its "minus SFHA" columns: an interval entirely above zero means the layer ranks block
+    groups better than FEMA's map.
 
+    - **Static open layers still carry almost no signal.** Low HAND and depressions lose to the
+      SFHA on every key, as they did in Harvey.
+    - **HAND-FIM driven by Tax Day's flows beats the SFHA on ρ for four of five keys:** claims
+      per policy, river claims, rainfall claims and IHP registrations, each by 0.07–0.08 with the
+      interval above zero. It ties on claims per building. Its AUC gains are smaller and clear zero
+      only on rainfall claims.
+    - **Mostly, that is knowing where it rained.** The SFHA ranks Tax Day damage much worse than
+      Harvey's (ρ 0.15–0.23 against 0.33–0.45). The storm put 12–17 in on north-west Harris County
+      and under 6 in east of US 59. A static map can't know that: most of its worst false alarms
+      are SFHA block groups in east Houston and near Clear Lake with no registrations or claims. HAND-FIM gets
+      the footprint from the flows. It is still an event map drawn with hindsight flows.
+    - **Its errors still trace to the flows.** NWM's median Tax Day peak is 1.47× the gauged one,
+      and only 49% are within a factor of 2. It ran Langham Creek below Addicks at 9×, Halls Bayou
+      at 9× and White Oak Bayou at 5× their gauged peaks, and HAND-FIM's false alarms are mostly
+      inner-city bayou block groups it marks almost entirely wet but which had no claims.
+    - **Both maps miss the same places:** the worst-hit block groups between Cypress Creek and
+      the Addicks reservoir (29.84–29.95, −95.60 to −95.64), with neither SFHA nor HAND-FIM
+      cover. That is again where an open layer would have to earn its place.
+    - **The NFHL is further from 2016 than from 2017:** 45% of today's buildings sit on panels
+      revised after April 2016.
+    """,
+    }
+    mo.md("\n    ## 10. What this shows, and what didn't work\n" + FINDINGS[EVENT])
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
     **Refresh speed.** Harris County's FIRMs date from 2007, and 26% of today's buildings sit
     on panels revised after Harvey (2019). The county-wide remap (MAAPnext) issued preliminary
     data in February 2026, with appeals scheduled for 2027 and effective maps not expected
@@ -1009,12 +1043,12 @@ def _(mo):
     |---|---|---|
     | FEMA NFHL | Countywide restudy every 10–20 years; LOMRs in between | Engineering study, years |
     | OWP HAND | New HAND-FIM releases each year (4.9.9.0, April 2026) | OWP's open pipeline, per HUC8 |
-    | NWM flows | Operational run every hour; here, the 1979–2023 retrospective | Seconds to read Harvey's peaks |
+    | NWM flows | Operational run every hour; here, the 1979–2023 retrospective | Seconds to read an event's peaks |
     | 3DEP depressions | When new lidar reaches 3DEP (Harris tiles republished 2026) | About a minute on 4 CPUs |
     | Atlas 14 | Texas volume 11, 2018; Atlas 15 in progress | None; a lookup |
 
-    Faster refresh doesn't help a layer that ranks damage worse, though. On this evidence an
-    open layer is a complement to the SFHA, mainly as an event map once flows are known.
+    Faster refresh doesn't help a static layer that ranks damage worse, though. On this evidence
+    an open layer is a complement to the SFHA, as an event map once flows are known.
     """)
 
 
