@@ -10,7 +10,7 @@ Can the 10 m AlphaEarth satellite embeddings of known heavy-industry sites find 
 ./run.sh
 ```
 
-It needs [uv](https://docs.astral.sh/uv/), about 12 GB of disk and about 35 GB of downloads. The first run builds the EJScreen and CEJST GeoParquet files by running `../ej-datasets-hifld-next/run.sh` unchanged, with its folders pointed into `data/ej/` (1.4 GB, about 12 minutes). It then runs the notebook `facility_finder.py` as a script. To read the notebook with its outputs, run `uv run marimo edit facility_finder.py`.
+It needs [uv](https://docs.astral.sh/uv/), about 8 GB of free memory (the EJ build peaks there), about 12 GB of disk and about 35 GB of downloads. The first run builds the EJScreen and CEJST GeoParquet files by running `../ej-datasets-hifld-next/run.sh` unchanged, with its folders pointed into `data/ej/` (about 1.8 GB on current `main`, about 12 minutes). It then runs the notebook `facility_finder.py` as a script. To read the notebook with its outputs, run `uv run marimo edit facility_finder.py`.
 
 ## Where the data comes from
 
@@ -64,7 +64,7 @@ All numbers come from `outputs/summary.json` and `outputs/candidates.csv`, writt
 
 ![Sites and candidates](outputs/sites_map.png)
 
-**Cost and time.** Zero dollars, and no account or key is needed. The 431 blocks hold 17 GB of compressed 10 m embeddings, but GDAL fetched 32.9 GB to read them, about 2.2 times the block bytes, whatever chunk-size setting we tried. With the HIFLD Next layers (including 440 MB of FRS), the notebook downloaded 33.3 GB, plus 1.4 GB for the EJ build. On 4 CPUs a clean checkout took 16 minutes: 8 for the EJ build and 7.8 for the notebook. Of that, 4 minutes went to the block reads with 32 parallel readers and about 1.5 to the scan. Earlier runs on the same machine took 9 minutes for the reads. A rerun reuses the cached blocks (7 GB in `data/aef/`) and takes about 4 minutes.
+**Cost and time.** Zero dollars, and no account or key is needed. The 431 blocks hold 17 GB of compressed 10 m embeddings, but GDAL fetched 32.9 GB to read them, about 2.2 times the block bytes, whatever chunk-size setting we tried. With the HIFLD Next layers (including 440 MB of FRS), the notebook downloaded 33.3 GB, plus 1.4 GB for the EJ build (about 1.8 GB since `ej-datasets-hifld-next/` added EJAM percentiles). On 4 CPUs a clean checkout took 16 minutes: 8 for the EJ build and 7.8 for the notebook. Of that, 4 minutes went to the block reads with 32 parallel readers and about 1.5 to the scan. Earlier runs on the same machine took 9 minutes for the reads. A rerun reuses the cached blocks (7 GB in `data/aef/`) and takes about 4 minutes.
 
 ## What didn't work
 
@@ -79,6 +79,7 @@ All numbers come from `outputs/summary.json` and `outputs/candidates.csv`, writt
 - Facility points are often at an office or gate, not on the tanks. A 30 m training radius picks up some roads and parking, and a 500 m match radius forgives some of that.
 - The hand check is 30 sites judged by the worker agent from photos, not a field visit. "Heavy" is what the classifier was trained to find, not measured exposure. The site names come from FRS records near each site.
 - Population counts spread each block group's people evenly over its area.
+- Sites are joined within each AlphaEarth tile, so a site that crosses a tile edge is split in two.
 
 ## What we looked at first
 

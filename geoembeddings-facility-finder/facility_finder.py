@@ -1141,7 +1141,7 @@ def _(candidate_registry, hand_result, mo, pixel_auc, registry_scores, site_coun
       EPA has never heard of. The
       tank farm in the sample belongs to a pipeline company that shows up in FRS only as
       a hazardous-waste and water-permit site. The one candidate with nothing in FRS
-      within 1 km is part of a registered LNG terminal whose point sits 2 km away.
+      within 1 km is part of a registered LNG terminal whose point sits 2.3 km away.
 
     ## What didn't work
 
