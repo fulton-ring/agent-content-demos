@@ -455,7 +455,9 @@ def _(
     for _label, _layer in enumerate([*US_TRAIN_LAYERS.values(), *US_OTHER_LAYERS], start=1):
         _f = gpd.read_parquet(hifld_layer(_layer)).to_crs("EPSG:5070")
         _f = _f[_f.geometry.notna() & ~_f.geometry.is_empty]
-        _frames.append(gpd.GeoDataFrame({"label": _label}, geometry=_f.geometry.centroid.values))
+        _frames.append(
+            gpd.GeoDataFrame({"label": [_label] * len(_f)}, geometry=_f.geometry.centroid.values)
+        )
     _us_fac = gpd.GeoDataFrame(pd.concat(_frames, ignore_index=True), crs="EPSG:5070")
     _us_fac = gpd.sjoin(_us_fac.to_crs("EPSG:4326"), us_counties[["geometry"]], predicate="within")
     _us_train = _us_fac[_us_fac["label"] <= len(US_TRAIN_LAYERS)]
@@ -537,14 +539,15 @@ def _(
 
     _gdb = fetch(EEA_SITEMAP_URL, "eea_sitemap_v16.gdb.zip", auth=EEA_SHARE)
     _cols = ["siteName", "InspireSiteId", "Site_reporting_year", "eprtr_sectors"]
-    _cols += ["eea_activities", "x_4258", "y_4258"]
+    # The filter columns must be read too, or OGR ignores them and matches nothing.
+    _cols += ["eea_activities", "x_4258", "y_4258", "countryCode"]
     _sites = pyogrio.read_dataframe(
         f"/vsizip/{_gdb}",
         columns=_cols,
         where="countryCode = 'NL' AND Site_reporting_year IN (2021, 2022, 2023)",
         read_geometry=False,
     )
-    _sites = _sites.sort_values("Site_reporting_year").drop_duplicates("InspireSiteId", "last")
+    _sites = _sites.sort_values("Site_reporting_year").drop_duplicates("InspireSiteId", keep="last")
     _sectors = _sites["eprtr_sectors"].fillna("")
     _sites["heavy"] = _sectors.apply(lambda s: any(h in s.split(",") for h in HEAVY_SECTORS))
     _sites = _sites[_sectors.ne("") & ~_sectors.str.fullmatch(r"(INTENSIVE LIVESTOCK,?)+")]
@@ -911,7 +914,7 @@ def _(mo):
 
 
 @app.cell
-def _(MIN_HA, OUT_DIR, PDOK_WMS, found, heavy_rd, httpx, np, pd, plt, register_rd):
+def _(MIN_HA, OUT_DIR, PDOK_WMS, found, heavy_rd, httpx, np, pd, plt, register_rd, time):
     from io import BytesIO
 
     from PIL import Image
@@ -934,22 +937,27 @@ def _(MIN_HA, OUT_DIR, PDOK_WMS, found, heavy_rd, httpx, np, pd, plt, register_r
         _half += 400
         _cx, _cy = (_px["x"].min() + _px["x"].max()) / 2, (_px["y"].min() + _px["y"].max()) / 2
         _ext = (_cx - _half, _cy - _half, _cx + _half, _cy + _half)
-        _resp = httpx.get(
-            PDOK_WMS,
-            params={
-                "service": "WMS",
-                "request": "GetMap",
-                "version": "1.3.0",
-                "layers": "2022_ortho25",
-                "styles": "",
-                "crs": "EPSG:28992",
-                "bbox": ",".join(f"{v:.1f}" for v in _ext),
-                "width": 900,
-                "height": 900,
-                "format": "image/jpeg",
-            },
-            timeout=120,
-        )
+        # PDOK now and then answers 500 under load; retry a few times with backoff.
+        for _attempt in range(4):
+            _resp = httpx.get(
+                PDOK_WMS,
+                params={
+                    "service": "WMS",
+                    "request": "GetMap",
+                    "version": "1.3.0",
+                    "layers": "2022_ortho25",
+                    "styles": "",
+                    "crs": "EPSG:28992",
+                    "bbox": ",".join(f"{v:.1f}" for v in _ext),
+                    "width": 900,
+                    "height": 900,
+                    "format": "image/jpeg",
+                },
+                timeout=120,
+            )
+            if _resp.status_code < 500:
+                break
+            time.sleep(5 * 2**_attempt)
         _resp.raise_for_status()
         assert _resp.headers["content-type"].startswith("image/"), _resp.text[:200]
         _img = np.asarray(Image.open(BytesIO(_resp.content)))
@@ -1132,6 +1140,52 @@ def _(MIN_HA, OUT_DIR, RD, found, gpd, heavy_rd, pd, plt, provinces):
         _out.append(_k.drop(columns=["x", "y"]))
     pd.concat(_out).round(1).to_csv(OUT_DIR / "sites.csv", index_label="site")
     _fig
+    return
+
+
+@app.cell
+def _(
+    OUT_DIR,
+    exposure,
+    hand_result,
+    json,
+    nl_read,
+    pixel_scores,
+    population_total,
+    province_scores,
+    rx_bytes,
+    rx_start,
+    scan_seconds,
+    score_table,
+    sector_recall,
+    t_start,
+    time,
+    us_read,
+):
+    summary = {
+        "us_read": us_read,
+        "nl_read": nl_read,
+        "scan_seconds": scan_seconds,
+        "pixel_scores": pixel_scores.to_dict(orient="index"),
+        "score_table": [
+            {"model": m, "threshold": t, "min_ha": h, **v}
+            for (m, t, h), v in score_table.to_dict(orient="index").items()
+        ],
+        "province_scores": [
+            {"model": m, "province": p, **v}
+            for (m, p), v in province_scores.to_dict(orient="index").items()
+        ],
+        "sector_recall": sector_recall.reset_index(names="sector").to_dict("records"),
+        "hand_check": hand_result,
+        "exposure": [
+            {"model": m, "sites": s, **v} for (m, s), v in exposure.to_dict(orient="index").items()
+        ],
+        "population_in_grid_window": population_total,
+        "total_seconds": round(time.perf_counter() - t_start),
+        "total_downloaded_gb": round((rx_bytes() - rx_start) / 1e9, 2),
+    }
+    (OUT_DIR / "summary.json").write_text(json.dumps(summary, indent=2, default=str))
+    summary["total_seconds"]
     return
 
 
