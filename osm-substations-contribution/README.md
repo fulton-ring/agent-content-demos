@@ -127,7 +127,9 @@ its source would add a few minutes; at that rate all 2,652 unconfirmed derived s
 ## What didn't work or was changed
 
 - **Overpass:** overpass-api.de and three mirrors were unreachable; ohsome's data stops in July 2026. maps.mail.ru
-  timed out (504) on one query for all 180 points; one query per point with retries works, at ~30 s each.
+  timed out (504) on one query for all 180 points; one query per point with retries works, at ~30 s each. During
+  the clean-checkout check the mirror degraded to ~2.5 min a point, so that run reused the first run's Overpass
+  answers; given them, it reproduced every output file byte for byte.
 - **Names:**
   - The first rule (the name all lines share) lost Anderson, because a line passing within 200 m names other places.
   - A plain majority then picked the far end's name ("Harmony Village", "Doubs").
