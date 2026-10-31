@@ -1179,7 +1179,8 @@ def _(
     - **Pixels carry over.** On Dutch pixels the US model separates heavy register
       sites from background with an AUC of {_px["AUC, US model"]:.2f}, against
       {_px["AUC, local model (held out)"]:.2f} for the local model on held-out provinces
-      (the US model scored 0.97 to 1.00 at home). But at the 0.9 threshold it calls
+      (the facility finder reported 0.97 to 1.00 on the Gulf Coast).
+      But at the 0.9 threshold it calls
       {_pct(_px["background over 0.9, US"])} of Dutch background pixels industrial,
       against {_pct(_px["background over 0.9, local"])} for the local model.
     - **Sites: the US model finds more and is wrong more often.** At the operating point
