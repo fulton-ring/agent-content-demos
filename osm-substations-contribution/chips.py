@@ -100,15 +100,20 @@ def osm_features() -> gpd.GeoDataFrame:
     ).to_crs(3857)
 
 
-def draw(row: dict[str, object], lines: gpd.GeoDataFrame, osm: gpd.GeoDataFrame, path: Path) -> None:
-    lon, lat = float(row["lon"]), float(row["lat"])  # type: ignore[arg-type]
+def draw(row: dict[str, str | float], lines: gpd.GeoDataFrame, osm: gpd.GeoDataFrame, path: Path) -> None:
+    lon, lat = float(row["lon"]), float(row["lat"])
     point = gpd.GeoSeries.from_xy([lon], [lat], crs=4326).to_crs(3857).iloc[0]
     ground = math.cos(math.radians(lat))  # Web Mercator metres to ground metres
     fig, axes = plt.subplots(1, 2, figsize=(18, 9))
     for ax, (zoom, radius) in zip(axes, [(15, 1), (17, 2)], strict=True):
         image, ext = mosaic(lon, lat, zoom, radius)
         # Axes in ground metres east and north of the point.
-        to_m = [(ext[0] - point.x) * ground, (ext[1] - point.x) * ground, (ext[2] - point.y) * ground, (ext[3] - point.y) * ground]
+        to_m = [
+            (ext[0] - point.x) * ground,
+            (ext[1] - point.x) * ground,
+            (ext[2] - point.y) * ground,
+            (ext[3] - point.y) * ground,
+        ]
         ax.imshow(image, extent=to_m)
         window = point.buffer(ext[1] - ext[0])
         for geom in lines[lines.intersects(window)].geometry:
@@ -119,7 +124,14 @@ def draw(row: dict[str, object], lines: gpd.GeoDataFrame, osm: gpd.GeoDataFrame,
         near = osm[osm.intersects(window)]
         for kind, colour in [("substation", "magenta"), ("plant", "cyan")]:
             pts = near[near["power"] == kind]
-            ax.scatter((pts.geometry.x - point.x) * ground, (pts.geometry.y - point.y) * ground, marker="x", s=200, c=colour, lw=3)
+            ax.scatter(
+                (pts.geometry.x - point.x) * ground,
+                (pts.geometry.y - point.y) * ground,
+                marker="x",
+                s=200,
+                c=colour,
+                lw=3,
+            )
         ax.scatter([0], [0], s=400, facecolors="none", edgecolors="red", linewidths=2)
         if zoom == 17:
             ax.set_xticks(np.arange(-600, 601, 100))

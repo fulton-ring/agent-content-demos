@@ -18,8 +18,9 @@ The points are **hints, not data to copy**. Please trace only what you can see o
 skip the task if you see no substation. HIFLD is often out of date, and about half of its line ends are not
 substations at all.
 
-This challenge was prepared by Fulton Ring, a small company that writes about public data. Fulton Ring also built
-the HIFLD Next website that republishes the federal data. How the points were found, and every source, is in
+The imagery check and the records search behind the hints were done by AI agents (Claude) and reviewed by
+[founder: who]; nothing here is edited into OSM automatically. This challenge was prepared by Fulton Ring, a small
+company that writes about public data. Fulton Ring also built the HIFLD Next website that republishes the federal data. How the points were found, and every source, is in
 [the project folder](https://github.com/fulton-ring/agent-content-demos/tree/main/osm-substations-contribution)
 and the forum thread "Integration of Substations in HIFLD into OSM".
 
@@ -40,7 +41,8 @@ and the forum thread "Integration of Substations in HIFLD into OSM".
    - tag `power=substation` and `substation={{proposed_substation}}`;
    - add `voltage={{proposed_voltage}}` if you're comfortable, highest first, in volts;
    - add `name={{proposed_name}}` and `operator={{proposed_operator}}` **only if these fields aren't empty**.
-     They come from HIFLD or EIA, both US federal and public domain. Don't overwrite a name already in OSM.
+     They come from US federal sources (HIFLD, EIA, TVA, BLM), which are public domain. Don't overwrite a name
+     already in OSM.
 4. If the yard is part of a power plant, use `substation=generation` and draw only the switchyard.
 5. If the lines end inside the yard, you may connect them, but don't redraw lines.
 6. Don't map anything inside the fence except the outline. Don't map gates, cameras, control buildings or other
