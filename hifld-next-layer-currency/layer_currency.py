@@ -83,7 +83,7 @@ def _():
 @app.cell
 def _(requests, time):
     HEADERS = {
-        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
+        "User-Agent": "hifld-next-layer-currency/0.1 (+https://github.com/fulton-ring/agent-content-demos)",
         "Accept": "text/html,application/json,text/csv,*/*",
     }
     MAX_TRIES = 3
