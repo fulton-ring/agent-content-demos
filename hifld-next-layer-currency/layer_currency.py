@@ -407,6 +407,8 @@ def _(AS_OF, date_reads, files, pd):
         )
     layers = pd.DataFrame(_rows)
     layers["age_years"] = ((pd.Timestamp(AS_OF) - pd.to_datetime(layers["best_date"])).dt.days / 365.25).round(2)
+    _shutdown = pd.Timestamp("2025-08-26")
+    layers["age_at_shutdown_years"] = ((_shutdown - pd.to_datetime(layers["best_date"])).dt.days / 365.25).round(2)
     layers["how_dated"].str.split(" column").str[0].value_counts()
     return (layers,)
 
@@ -419,6 +421,10 @@ def _(mo):
     The share of layers whose best date is more than one, three and five years before the run date, overall
     and by category. The second table repeats it for the layers dated from their own records only, since a
     metadata `modified` date can move when an item is re-published without new data.
+
+    Every rescued copy stopped at HIFLD Open's shutdown on 26 August 2025, so by now every layer is over a year
+    old by construction. The `_at_shutdown` columns ask the sharper question: how old was the data already on
+    the day HIFLD Open went dark?
     """)
     return
 
@@ -435,6 +441,8 @@ def _(layers, pd):
                 "over_3y": round((dated > 3).mean(), 3),
                 "over_5y": round((dated > 5).mean(), 3),
                 "median_age_y": round(dated.median(), 1),
+                "over_1y_at_shutdown": round((frame["age_at_shutdown_years"].dropna() > 1).mean(), 3),
+                "over_3y_at_shutdown": round((frame["age_at_shutdown_years"].dropna() > 3).mean(), 3),
             }
         )
 
