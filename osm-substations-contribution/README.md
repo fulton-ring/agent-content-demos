@@ -21,8 +21,7 @@ no OSM edits, no forum post, no MapRoulette challenge, no contact with any utili
 ./run.sh --chips    # also redraws the Esri imagery chips and imagery dates (data/chips/, not committed)
 ```
 
-To read the notebook with each step's output: `uv run marimo edit contribution.py`. Later runs reuse `data/` and
-take about a minute. Delete `data/overpass/` to re-check OSM.
+Read the notebook with its output: `uv run marimo edit contribution.py`. Later runs reuse `data/` (about a minute); delete `data/overpass/` to re-check OSM.
 
 ## What's here
 
