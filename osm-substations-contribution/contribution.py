@@ -54,7 +54,10 @@ def _(Path, os, requests):
         "EARLIER_LABELS_CSV",
         "https://raw.githubusercontent.com/fulton-ring/agent-content-demos/main/us-substations-verified/hand_check.csv",
     )
-    OVERPASS_URL = os.environ.get("OVERPASS_URL", "https://maps.mail.ru/osm/tools/overpass/api/interpreter")
+    OVERPASS_URLS = os.environ.get(
+        "OVERPASS_URLS",
+        "https://overpass-api.de/api/interpreter,https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+    ).split(",")
     DATA_DIR.mkdir(exist_ok=True)
     OUTPUT_DIR.mkdir(exist_ok=True)
     HIFLD_LINES_URL = "https://storage.googleapis.com/hifld-next-datasets-prod/hifld/transmission-lines-1/transmission-lines-1/v1.0.0/geoparquet/transmission-lines-1.parquet"
@@ -73,7 +76,7 @@ def _(Path, os, requests):
         print(f"downloaded {url} ({len(response.content) / 1e6:.1f} MB)")
         return path
 
-    return DATA_DIR, EARLIER_LABELS_CSV, EIA860M_URL, HIFLD_LINES_URL, OUTPUT_DIR, OVERPASS_URL, POINTS_CSV, download
+    return DATA_DIR, EARLIER_LABELS_CSV, EIA860M_URL, HIFLD_LINES_URL, OUTPUT_DIR, OVERPASS_URLS, POINTS_CSV, download
 
 
 @app.cell
@@ -111,16 +114,16 @@ def _(mo):
     mo.md(r"""
     ## 2. Re-check against current OpenStreetMap
 
-    An Overpass query per point asks for every `power=substation` and `power=plant` within 1 km. The main
-    `overpass-api.de` instance isn't reachable from where this ran, so the default is the public mirror at
-    maps.mail.ru (any Overpass endpoint works: set `OVERPASS_URL`). Answers are saved in `data/overpass/` with
-    their `timestamp_osm_base`, the time of the OSM data they reflect; delete the folder to re-check.
+    An Overpass query per point asks for every `power=substation` and `power=plant` within 1 km. Each try goes to
+    the next endpoint in `OVERPASS_URLS`: the main `overpass-api.de`, then the maps.mail.ru mirror (the main one
+    wasn't reachable from where this ran). Answers are saved in `data/overpass/` with their `timestamp_osm_base`,
+    the time of the OSM data they reflect; delete the folder to re-check.
     """)
     return
 
 
 @app.cell
-def _(DATA_DIR, OVERPASS_URL, control, json, pd, points, requests, time):
+def _(DATA_DIR, OVERPASS_URLS, control, json, pd, points, requests, time):
     # One query per point: the mirror times out on a union of many `around` clauses. Each answer is cached.
     # A control point, a derived substation that OSM does have, checks the query finds substations at all.
     _cache = DATA_DIR / "overpass"
@@ -134,19 +137,20 @@ def _(DATA_DIR, OVERPASS_URL, control, json, pd, points, requests, time):
             f'[out:json][timeout:90];(nwr["power"="substation"](around:1000,{_r.lat},{_r.lon});'
             f'nwr["power"="plant"](around:1000,{_r.lat},{_r.lon}););out tags center;'
         )
-        for _attempt in range(5):
+        for _attempt in range(8):
+            _url = OVERPASS_URLS[_attempt % len(OVERPASS_URLS)]
             try:
-                _resp = requests.post(OVERPASS_URL, data={"data": _query}, timeout=120)
+                _resp = requests.post(_url, data={"data": _query}, timeout=120)
             except requests.RequestException as _err:
-                print(f"{_r.id}: {_err}; retrying")
-                time.sleep(5 * 2**_attempt)
+                print(f"{_r.id}: {_url} failed ({type(_err).__name__}); retrying")
+                time.sleep(min(60, 5 * 2**_attempt))
                 continue
             if _resp.status_code == 200 and _resp.text.lstrip().startswith("{"):
                 _path.write_text(_resp.text)
                 break
-            print(f"{_r.id}: Overpass HTTP {_resp.status_code}; retrying")
-            time.sleep(5 * 2**_attempt)
-        assert _path.exists(), f"Overpass gave no answer for {_r.id} after 5 tries"
+            print(f"{_r.id}: {_url} returned HTTP {_resp.status_code}; retrying")
+            time.sleep(min(60, 5 * 2**_attempt))
+        assert _path.exists(), f"Overpass gave no answer for {_r.id} after 8 tries"
     _control = json.loads((_cache / f"control-{control['id']}.json").read_text())["elements"]
     assert any(e["tags"].get("power") == "substation" for e in _control), "control query found no OSM substation"
     print(

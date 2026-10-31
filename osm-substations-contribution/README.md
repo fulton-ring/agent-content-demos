@@ -42,7 +42,7 @@ Read the notebook with its output: `uv run marimo edit contribution.py`. Later r
 | Input | Source |
 |---|---|
 | The 180 points and the earlier 50 labels | `us-substations-verified/dataset/us_substations.csv` and `hand_check.csv`, read from `main` |
-| Current OSM | Overpass API ([maps.mail.ru mirror](https://maps.mail.ru/osm/tools/overpass/); overpass-api.de was unreachable from here), data as of 2026-10-31 17:38–18:53 UTC |
+| Current OSM | Overpass API: overpass-api.de, falling back to the [maps.mail.ru mirror](https://maps.mail.ru/osm/tools/overpass/) (the only one reachable from here); data as of 2026-10-31 17:38–18:53 UTC |
 | Line names, owners, voltages | [HIFLD Next](https://hifld.publicenvirodata.org/) Transmission Lines v1.0.0 (US federal, public domain) |
 | Power plants | [EIA-860M](https://www.eia.gov/electricity/data/eia860m/), September 2026 |
 | Imagery | Esri World Imagery, which OSM allows for tracing. No Google. |
