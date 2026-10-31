@@ -543,7 +543,7 @@ def _(HERE, ThreadPoolExecutor, dt, get, html, pd, re):
 @app.cell
 def _(CLIMATE_RISK, layers, pd, sample, source_checks, source_live):
     checked = layers[layers["layer"].isin(CLIMATE_RISK + sample)].merge(
-        source_checks[["layer", "current_source", "check_url", "status", "date_meaning", "notes"]],
+        source_checks[["layer", "current_source", "check_url", "source_date", "status", "date_meaning", "notes"]],
         on="layer",
         how="left",
     )
@@ -552,42 +552,60 @@ def _(CLIMATE_RISK, layers, pd, sample, source_checks, source_live):
     checked["group"] = checked["layer"].map(lambda x: "climate risk" if x in CLIMATE_RISK else "sample")
     _gap = (pd.to_datetime(checked["source_date_live"]) - pd.to_datetime(checked["best_date"])).dt.days / 365.25
     checked["gap_years"] = _gap.round(2)
-
-    def verdict(row: pd.Series) -> str:
-        if pd.notna(row["source_date_live"]):
-            return "newer" if row["gap_years"] > 30 / 365.25 else "not newer"
-        return {"newer": "newer (by hand)", "same": "not newer (by hand)"}.get(row["status"], row["status"])
-
-    checked["source_verdict"] = checked.apply(verdict, axis=1)
-    checked.groupby("group")["source_verdict"].value_counts().unstack(fill_value=0)
+    _live = checked["source_date_live"].notna()
+    checked["by_date"] = "no current source"
+    checked.loc[_live, "by_date"] = (checked.loc[_live, "gap_years"] > 30 / 365.25).map(
+        {True: "newer", False: "not newer"}
+    )
+    checked["by_vintage"] = checked["status"].map({"newer": "newer", "same": "not newer"}).fillna("no current source")
+    # A source whose date moved since the vintage call was made has published again: re-check that row by hand.
+    _recorded = pd.to_datetime(checked["source_date"], errors="coerce")
+    checked["moved_since_recorded"] = _live & (pd.to_datetime(checked["source_date_live"]) > _recorded)
+    checked["source_verdict"] = checked["by_vintage"]
+    pd.crosstab(checked["by_vintage"], checked["by_date"], margins=True)
     return (checked,)
 
 
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    **Two ways to call "newer".** *By date* is the rule above, run on the dates read this run. *By vintage* is
+    the call we made by hand when we found each source, comparing what the source now publishes with what the
+    copy holds (`status` in `source_checks.csv`; the script never changes it). They disagree where a date means
+    something other than a release: NCES labels its school files by school year, so a 2024-25 release reads as
+    "2024" against a copy whose records were sourced in March 2024; a BTS layer re-edited in 2024 still holds
+    data collected through 2020. We report the vintage call as the verdict and the date rule beside it, and flag
+    any row whose source date has moved since we recorded it, which means the source has published again.
+    """)
+    return
+
+
 @app.cell
-def _(checked):
-    _found = checked[checked["source_verdict"].str.startswith(("newer", "not newer"))]
-    _newer = _found["source_verdict"].str.startswith("newer")
-    _gaps = checked.loc[checked["source_verdict"] == "newer", "gap_years"]
+def _(checked, pd):
+    def tally(frame: pd.DataFrame, column: str) -> dict:
+        found = frame[frame[column] != "no current source"]
+        newer = found[column] == "newer"
+        gaps = frame.loc[(frame[column] == "newer") & (frame["gap_years"] > 0), "gap_years"]
+        return {
+            "with_current_source": len(found),
+            "newer": int(newer.sum()),
+            "share_newer": round(newer.mean(), 3),
+            "median_gap_years_where_newer": round(gaps.median(), 2),
+        }
+
     source_stats = {
         "checked": len(checked),
-        "current_source_dated": len(_found),
-        "newer": int(_newer.sum()),
-        "share_newer_of_dated": round(_newer.mean(), 3),
-        "median_gap_years_where_newer": round(_gaps.median(), 2),
+        "by_vintage": tally(checked, "by_vintage"),
+        "by_date": tally(checked, "by_date"),
         "by_group": {
-            g: {
-                "checked": len(f),
-                "dated": int(f["source_verdict"].str.startswith(("newer", "not newer")).sum()),
-                "newer": int(f["source_verdict"].str.startswith("newer").sum()),
-                "median_gap_years_where_newer": round(f.loc[f["source_verdict"] == "newer", "gap_years"].median(), 2),
-            }
+            g: {"checked": len(f), "by_vintage": tally(f, "by_vintage"), "by_date": tally(f, "by_date")}
             for g, f in checked.groupby("group")
         },
-        "no_current_source": checked.loc[
-            ~checked["source_verdict"].str.startswith(("newer", "not newer")), "source_verdict"
-        ]
+        "no_current_source": checked.loc[checked["by_vintage"] == "no current source", "status"]
         .value_counts()
         .to_dict(),
+        "disagreements": checked.loc[checked["by_vintage"] != checked["by_date"], "layer"].tolist(),
+        "moved_since_recorded": checked.loc[checked["moved_since_recorded"], "layer"].tolist(),
     }
     source_stats
     return (source_stats,)
@@ -652,8 +670,8 @@ def _(
     time,
 ):
     _out = layers.merge(
-        checked[["layer", "group", "current_source", "check_url", "source_date_live", "gap_years", "source_verdict",
-                 "how_checked"]], on="layer", how="left",
+        checked[["layer", "group", "current_source", "check_url", "source_date_live", "gap_years", "by_vintage",
+                 "by_date", "moved_since_recorded", "how_checked"]], on="layer", how="left",
     )  # fmt: skip
     _out.to_csv(OUT / "layer_currency.csv", index=False)
     _bytes = sum(r.get("bytes") or 0 for r in date_reads)
