@@ -500,6 +500,25 @@ def _(SAMPLE_SIZE, SEED, layers, random):
     return CLIMATE_RISK, sample
 
 
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    Are the climate-risk layers older than the rest of the catalog? Same measures, split in two.
+    """)
+    return
+
+
+@app.cell
+def _(CLIMATE_RISK, age_shares, layers):
+    climate_vs_rest = (
+        layers.assign(group=layers["layer"].isin(CLIMATE_RISK).map({True: "climate risk", False: "rest"}))
+        .groupby("group")
+        .apply(age_shares, include_groups=False)
+    )
+    climate_vs_rest
+    return (climate_vs_rest,)
+
+
 @app.cell
 def _(HERE, ThreadPoolExecutor, dt, get, html, pd, re):
     MONTHS = {m: i for i, m in enumerate(
@@ -657,12 +676,14 @@ def _(
     STARTED,
     by_category,
     checked,
+    climate_vs_rest,
     date_reads,
     files,
     json,
     layers,
     no_record_date,
     overall,
+    pd,
     read_seconds,
     record_only,
     source_stats,
@@ -687,9 +708,13 @@ def _(
         "cost_usd": 0,
         "all_layers": overall.to_dict(),
         "layers_dated_from_records": record_only.to_dict(),
+        "record_median_over_5y_at_shutdown": int(
+            (pd.to_datetime(layers["record_median"]) < pd.Timestamp("2020-08-26")).sum()
+        ),
         "how_dated": layers["how_dated"].str.split(" column").str[0].value_counts().to_dict(),
         "no_record_date_reasons": no_record_date["flag"].value_counts().to_dict(),
         "by_category": by_category.reset_index().to_dict("records"),
+        "climate_risk_vs_rest": climate_vs_rest.to_dict("index"),
         "source_check": source_stats,
         "stalest_climate_risk": stalest[["layer", "best_date", "age_years", "source_verdict"]]
         .astype(str)
