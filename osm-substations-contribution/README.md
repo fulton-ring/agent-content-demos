@@ -11,8 +11,7 @@ no OSM edits, no forum post, no MapRoulette challenge, no contact with any utili
 - Imagery shows a real yard at **10 distinct places** (12 points). 29 points are unclear and 139 have no yard.
 - That gives **36 MapRoulette tasks** once duplicates and two points the records rule out are dropped.
 - Names come out sparse on purpose: 3 of the 10 yards get a proposed name, 8 an operator, 9 a voltage.
-- A near-identical attempt in March 2026 was reverted by the OSM community, so the package is built to go through
-  forum review first. See [`rules.md`](rules.md).
+- The OSM community reverted a near-identical attempt in March 2026, so this goes to forum review first ([`rules.md`](rules.md)).
 
 ## Run it
 
@@ -140,9 +139,8 @@ its source would add a few minutes; at that rate all 2,652 unconfirmed derived s
 
 - **Labels:** made by Claude subagents looking at one Esri chip per point, not by a person on the ground. The 48 of 50
   agreement is with the earlier spike's labels, not with ground truth. Imagery is up to 8 years old.
-- **Outlines:** rough boxes read off a 100 m grid. Mappers draw the real fence, so these are for review only.
+- **Outlines:** rough boxes read off a 100 m grid, for review only. No screenshots: the chips are Esri imagery.
 - **Time per point:** agent time, not person time, over only the 17 likeliest points, not all 180.
-- **Screenshots:** none. The chips are Esri imagery and stay in `data/chips/`, as in `us-substations-verified/`.
 
 ## What we looked at first
 
