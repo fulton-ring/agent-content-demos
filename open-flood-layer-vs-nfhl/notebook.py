@@ -1010,7 +1010,7 @@ def _(EVENT, mo):
     - **HAND-FIM driven by Tax Day's flows beats the SFHA on ρ for four of five keys:** claims
       per policy, river claims, rainfall claims and IHP registrations, each by 0.07–0.08 with the
       interval above zero. It ties on claims per building. Its AUC gains are smaller and clear zero
-      only on rainfall claims.
+      only on claims per policy and rainfall claims.
     - **Mostly, that is knowing where it rained.** The SFHA ranks Tax Day damage much worse than
       Harvey's (ρ 0.15–0.23 against 0.33–0.45). The storm put 12–17 in on north-west Harris County
       and under 6 in east of US 59. A static map can't know that: most of its worst false alarms
