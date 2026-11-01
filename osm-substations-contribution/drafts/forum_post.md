@@ -1,6 +1,6 @@
 # DRAFT: not posted. For a founder to review, edit and post as a reply in the OSM Community Forum thread
 # "Integration of Substations in HIFLD into OSM" (https://community.openstreetmap.org/t/integration-of-substations-in-hifld-into-osm/141961).
-# Numbers are from outputs/run_log.txt (OSM checked 2026-10-31); re-run ./run.sh and update them before posting.
+# Numbers are from outputs/run_log.txt (OSM checked 2026-11-01); re-run ./run.sh and update them before posting.
 
 Hi all. I'm [founder name] from Fulton Ring, a small company that writes about public data. We also built
 HIFLD Next (hifld.publicenvirodata.org), the site that republishes the retired federal HIFLD layers, so we have a

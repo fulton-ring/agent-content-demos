@@ -1,5 +1,5 @@
 # DRAFT: not sent. For a founder to review and send to team@openstreetmap.us, or to post in OSM US Slack
-# #maproulette (with a pointer from #utilities). Numbers are from outputs/run_log.txt (2026-10-31).
+# #maproulette (with a pointer from #utilities). Numbers are from outputs/run_log.txt (2026-11-01).
 
 Subject: Proposed MapRoulette challenge: 36 candidate sites for unmapped 230 kV+ substations, 10 confirmed on imagery (asking before creating it)
 
