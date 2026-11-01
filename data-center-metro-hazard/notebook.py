@@ -259,7 +259,9 @@ def _(mo):
     **Flood zone.** We ask FEMA's live National Flood Hazard Layer service (layer 28, Flood Hazard
     Zones) which zone polygon contains the site, and the same for four points 250 m north, east,
     south and west of it. Zones are grouped by hazard: **SFHA** (zones A and V, the 1%-a-year
-    floodplain), **0.2%** (shaded X, the 500-year floodplain), **minimal** (unshaded X), **D**
+    floodplain), **shaded X** (moderate hazard: mostly the 0.2%-a-year floodplain, plus areas behind
+    levees and 1% areas under a foot deep or draining under a square mile), **minimal** (unshaded
+    X), **D**
     (undetermined), **open water**, and **not mapped** where the NFHL has no digital map. Where a
     point touches two polygons, the higher hazard wins.
 
@@ -277,7 +279,7 @@ def _(ThreadPoolExecutor, cache, get_json, log, math, pd, sites_metro, time):
         "National_Risk_Index_Census_Tracts/FeatureServer/0/query"
     )
     nri_tract_fields = "TRACTFIPS,STCOFIPS,RISK_RATNG,RISK_SCORE,NRI_VER"
-    hazard_order = ["SFHA", "0.2%", "minimal", "D", "open water", "not mapped"]
+    hazard_order = ["SFHA", "shaded X", "minimal", "D", "open water", "not mapped"]
     offsets = {"here": (0, 0), "N": (250, 0), "E": (0, 250), "S": (-250, 0), "W": (0, -250)}
 
     def flood_class(features: list[dict]) -> tuple[str, str]:
@@ -288,8 +290,8 @@ def _(ThreadPoolExecutor, cache, get_json, log, math, pd, sites_metro, time):
             subtype = feature["attributes"]["ZONE_SUBTY"] or ""
             if feature["attributes"]["SFHA_TF"] == "T":
                 found.append(("SFHA", zone))
-            elif "0.2" in subtype:
-                found.append(("0.2%", zone))
+            elif zone == "X" and subtype != "AREA OF MINIMAL FLOOD HAZARD":
+                found.append(("shaded X", zone))
             elif zone == "X":
                 found.append(("minimal", zone))
             elif zone == "D":
@@ -493,26 +495,26 @@ def _(np, pd, site_scores):
 
     _metro = clustered.cbsa.to_numpy()
     _shuffles = [_rng.permutation(_metro) for _ in range(200)]
+    _all = np.ones(len(clustered), bool)
+    _county_key = ["flood_class", "nri_county_rating"]
+    _tract_key = ["flood_class", "nri_tract_rating"]
+    _floodplain = clustered.flood_class.isin(["SFHA", "shaded X"]).to_numpy()
+    _not_dc = (clustered.cbsa != "47900").to_numpy()  # Washington, DC metro (Ashburn)
     _tests = {
-        "flood class + NRI county rating": (["flood_class", "nri_county_rating"], 0.0),
-        "flood class + NRI tract rating": (["flood_class", "nri_tract_rating"], 0.0),
-        "flood class + NRI county rating, partner 1 km+ away": (
-            ["flood_class", "nri_county_rating"],
-            1.0,
+        "flood class + NRI county rating": (_county_key, 0.0, _all),
+        "flood class + NRI tract rating": (_tract_key, 0.0, _all),
+        "flood class + NRI county rating, partner 1 km+ away": (_county_key, 1.0, _all),
+        "flood class + NRI tract rating, partner 1 km+ away": (_tract_key, 1.0, _all),
+        "flood class + NRI tract rating, without the DC metro": (_tract_key, 0.0, _not_dc),
+        "SFHA or shaded X sites, partner in the same class": (["flood_class"], 0.0, _floodplain),
+        "SFHA sites, partner also SFHA": (
+            ["flood_class"],
+            0.0,
+            (clustered.flood_class == "SFHA").to_numpy(),
         ),
-        "flood class + NRI tract rating, partner 1 km+ away": (
-            ["flood_class", "nri_tract_rating"],
-            1.0,
-        ),
-        "SFHA sites with another SFHA site in the metro": (["flood_class"], 0.0),
     }
     _rows = []
-    for _label, (_keys, _min_km) in _tests.items():
-        _mask = (
-            (clustered.flood_class == "SFHA").to_numpy()
-            if _label.startswith("SFHA")
-            else np.ones(len(clustered), bool)
-        )
+    for _label, (_keys, _min_km, _mask) in _tests.items():
         _real = shares_with_metro_mate(_metro, _keys, _min_km)[_mask].mean()
         _null = [shares_with_metro_mate(m, _keys, _min_km)[_mask].mean() for m in _shuffles]
         _rows.append(
@@ -611,7 +613,7 @@ def _(mo):
     mo.md(r"""
     ## 5. Which metros carry the most hazard?
 
-    Per metro: how many sites, in how many counties, how many sit in the SFHA or 0.2% floodplain,
+    Per metro: how many sites, in how many counties, how many sit in the SFHA or shaded X,
     and how many are in a tract the NRI rates Very High or Relatively High. Written to
     `results/metros.csv`.
     """)
@@ -629,7 +631,7 @@ def _(pd, results, site_scores):
             counties=("county_fips", "nunique"),
             flood_classes=("flood_class", "nunique"),
             sfha=("flood_class", lambda s: int((s == "SFHA").sum())),
-            sfha_or_02=("flood_class", lambda s: int(s.isin(["SFHA", "0.2%"]).sum())),
+            sfha_or_shaded=("flood_class", lambda s: int(s.isin(["SFHA", "shaded X"]).sum())),
             nri_tract_high=("nri_tract_rating", lambda s: int(s.isin(_high).sum())),
             nri_tract_ratings=("nri_tract_rating", "nunique"),
             nri_county_high=("nri_county_rating", lambda s: int(s.isin(_high).sum())),
@@ -640,19 +642,24 @@ def _(pd, results, site_scores):
         .sort_values("sites", ascending=False)
     )
     metros.to_csv(results / "metros.csv", index=False)
-    top_flood = metros.sort_values(["sfha_or_02", "sites"], ascending=False).head(10)
+    top_flood = metros.sort_values(["sfha_or_shaded", "sites"], ascending=False).head(10)
     top_nri = metros.sort_values(["nri_tract_high", "sites"], ascending=False).head(10)
-    pd.concat({"by sites in SFHA or 0.2%": top_flood, "by sites in high-NRI tracts": top_nri})
+    pd.concat({"by sites in SFHA or shaded X": top_flood, "by sites in high-NRI tracts": top_nri})
     return (metros,)
 
 
 @app.cell
 def _(metros, plt, results):
-    _top = metros.head(20).iloc[::-1]
-    _fig, _ax = plt.subplots(figsize=(8, 7))
-    _ax.barh(_top.metro, _top.sites, color="#cfd8e3", label="sites")
-    _ax.barh(_top.metro, _top.nri_tract_high, color="#d9822b", label="in a high-NRI tract")
-    _ax.barh(_top.metro, _top.sfha_or_02, color="#2b6cb0", label="in SFHA or 0.2% floodplain")
+    _top = metros.head(20).iloc[::-1].reset_index(drop=True)
+    _fig, _ax = plt.subplots(figsize=(8, 9))
+    _bars = [
+        ("sites", "#cfd8e3", "all sites"),
+        ("nri_tract_high", "#d9822b", "in a Very or Relatively High NRI tract"),
+        ("sfha_or_shaded", "#2b6cb0", "in SFHA or shaded X"),
+    ]
+    for _i, (_col, _color, _label) in enumerate(_bars):
+        _ax.barh(_top.index + (_i - 1) * 0.27, _top[_col], height=0.27, color=_color, label=_label)
+    _ax.set_yticks(_top.index, _top.metro)
     _ax.set_xlabel("OSM data-center sites")
     _ax.set_title("The 20 metros with the most reported data-center sites")
     _ax.legend(loc="lower right")
@@ -695,7 +702,7 @@ def _(pd, point_scores, results):
     ).any(axis=1)
     _rows.append(
         {
-            "measure": "SFHA status (in at the point or within 250 m)",
+            "measure": "not SFHA at the point, SFHA at 1+ moves",
             "sites changing at 1+ of 4 moves": int((_sfha_here != _sfha_any).sum()),
             "share": round(float((_sfha_here != _sfha_any).mean()), 3),
         }
@@ -728,7 +735,9 @@ def _(
         "clustered_cbsas": int(clustered.cbsa.nunique()),
         "sharing": sharing.to_dict("records"),
         "within_between": within_between.to_dict("records"),
-        "top_metros_by_sites": metros.head(10)[["metro", "sites", "sfha_or_02"]].to_dict("records"),
+        "top_metros_by_sites": metros.head(10)[["metro", "sites", "sfha_or_shaded"]].to_dict(
+            "records"
+        ),
         "location_sensitivity": sensitivity.to_dict("records"),
         "run_seconds": round(time.time() - started),
         "cost_usd": 0,
