@@ -35,7 +35,9 @@ MODELS = {
     "Claude Haiku 5.5": "openrouter:anthropic/claude-haiku-5.5",
 }
 ATTEMPTS = 4
-SETTINGS = OpenRouterModelSettings(temperature=0, max_tokens=16000, openrouter_usage={"include": True})
+# The K-1 spike's settings: temperature 0, low thinking. Without "low", Gemini spent all 16,000 tokens thinking on
+# some pages before answering.
+SETTINGS = OpenRouterModelSettings(temperature=0, max_tokens=16000, thinking="low", openrouter_usage={"include": True})
 
 # FEMA Flood Insurance Studies: every FIS report the Map Service Center listed on 2026-11-01 for 12 counties drawn
 # with random.Random(175) from the Census 2024 county gazetteer (1_ocr_share.py shows the draw). A county's search

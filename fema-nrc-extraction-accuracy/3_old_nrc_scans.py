@@ -72,8 +72,8 @@ def _():
     ## Scan quality
 
     We measure scan quality as Tesseract's mean word confidence (0 to 100) on the page: it needs no answer key, and
-    it drops with faint type, dot-matrix print, skew and noise. For each report we take 20 pages (all 13 of the shortest) drawn with
-    `random.Random(175)`, to describe the report, plus the keyed page.
+    it drops with faint type, dot-matrix print, skew and noise. For each report we take 20 pages drawn with
+    `random.Random(175)` (all 13 of the shortest), to describe the report, plus the keyed page.
     """)
     return
 
@@ -191,7 +191,7 @@ async def _(KEY, PDFS):
             "usd": 0.0,
             "seconds": 0.0,
         }
-    print(f"{len(_jobs)} model reads, ${sum(r['usd'] for r in reads.values()):.2f}")
+    print(f"{len(_jobs)} model reads, ${sum(float(r['usd']) for r in reads.values()):.2f}")
     return (reads,)
 
 

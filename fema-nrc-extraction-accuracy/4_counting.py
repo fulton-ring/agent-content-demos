@@ -29,7 +29,7 @@ def _():
     it in Notion: it is a list of notes on parsers, chunking and BM25-first retrieval, with no counting test, so it
     doesn't make this argument. We cite it for the BM25 baseline and keep this part small.
 
-    **The document set** is the eight keyed Summary of Discharges pages from notebook 2: 87 locations in eight
+    **The document set** is the eight keyed Summary of Discharges pages from notebook 2: 88 locations in eight
     studies. Questions are about these pages only, so the answer key covers them fully.
     """)
     return
