@@ -19,7 +19,7 @@ Read the four notebooks, each top to bottom (`uv run marimo edit 1_ocr_share.py`
 ./run.sh
 ```
 
-You need [uv](https://docs.astral.sh/uv/) and `tesseract` (`apt install tesseract-ocr` or `brew install tesseract`). Every model answer is committed in `answers/`, so a run rescores without calling a model and needs no key. Delete a file in `answers/` and set `OPENROUTER_API_KEY` to call the model again. The documents (about 400 MB) are downloaded from FEMA and OSTI and hash-checked at run time, into `output/` (set `FEMA_NRC_OUTPUT_DIR` to change that). Results go to `results/`.
+You need [uv](https://docs.astral.sh/uv/) and `tesseract` (`apt install tesseract-ocr` or `brew install tesseract`). Every model answer is committed in `answers/`, so a run rescores without calling a model and needs no key. Delete a file in `answers/` and set `OPENROUTER_API_KEY` to call the model again. The documents (about 400 MB) are downloaded from FEMA and OSTI and hash-checked at run time, into `output/` (set `FEMA_NRC_OUTPUT_DIR` to change that). Results go to `results/`. A run from a fresh clone with no API key took 13 minutes on 4 CPU cores, most of it downloading and Tesseract, and reproduced every file in `results/`.
 
 **Data.** 70 FIS PDFs: every FIS report FEMA's Map Service Center listed on 2026-11-01 for 12 counties drawn with `random.Random(175)` from the Census county list. 10 NRC reports: drawn with the same seed from the 68 NUREG reports dated 1975-1984 that OSTI lists as NRC-sponsored with full text. **We couldn't reach ADAMS** from the machine this ran on (`adams.nrc.gov` was refused by the network, `www.nrc.gov/docs/` answered 403), so the NRC scans are OSTI's copies of the same NUREG reports.
 
