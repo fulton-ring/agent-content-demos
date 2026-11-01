@@ -16,7 +16,7 @@ the source checks, the stalest climate-risk layers, and what it can't show.
 ```
 
 It needs [uv](https://docs.astral.sh/uv/) and internet access, and no key or account. It runs the notebook as
-a script (about a minute) and writes:
+a script (about one to two minutes) and writes:
 
 - `outputs/layer_currency.csv`: one row per layer (330): category, agency, metadata date, the record-date
   column used with its 10th percentile, median and newest value, the best date and how it was found, a flag
@@ -37,7 +37,7 @@ All public, read at run time:
   source's `issued`/`modified` dates from the old HIFLD inventory, and its column schema. Categories come from
   `/api/collections/hifld/datasets`. The catalog has 330 layers, not the "400+" the issue expected.
 - **The GeoParquet files**: [DuckDB](https://duckdb.org) reads only the date columns over HTTPS: 291 columns,
-  111 MB of the catalog's 118.5 GB, in about 40 seconds.
+  111 MB of the catalog's 118.5 GB, in under a minute.
 - **Source agencies' current publications**, in [`source_checks.csv`](source_checks.csv): for each checked
   layer, a URL and a regular expression for its date, found starting only from the layer's own metadata
   (agency, office, title, URLs in its description). The notebook re-reads every URL each run; all 59 read in
@@ -64,7 +64,7 @@ than five years old at shutdown: transmission lines' typical `SOURCEDATE` is 201
 `BASE_DATE` 2007, power plants' 2019.
 
 By category, the oldest are Energy (41% over 3 years at shutdown), Borders (39%) and the USACE inland charts
-under Transportation Water (28%). Natural Hazards (6%) and Boundaries (12%) are the freshest. Full table in
+under Transportation Water (28%). Among the large categories, Natural Hazards (6%) and Boundaries (12%) are the freshest; several small ones (Chemicals, Communications, Transportation Air, Government) have none over 3 years. Full table in
 the notebook and `summary.json`.
 
 **Has the source published something newer?** Of the 73 checked layers, 59 still have a current public
