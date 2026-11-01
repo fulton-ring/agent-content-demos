@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# One command: download the public inputs into data/, re-check current OSM, join the hand labels and records,
+# One command: download the public inputs into data/, read the committed OSM answers, join the labels and records,
 # and write outputs/. Every number in README.md comes from this run.
-#   ./run.sh          runs contribution.py (first run: ~30 min, most of it one Overpass query per point)
+#   ./run.sh          runs contribution.py on the committed Overpass answers (a few minutes, most of it downloads)
+#   OSM_RECHECK=1 ./run.sh   re-queries Overpass live first (about 1-2 hours on the public mirror)
 #   ./run.sh --chips  also draws the Esri imagery chips we labelled from (data/chips/, not committed)
 set -euo pipefail
 cd "$(dirname "$0")"

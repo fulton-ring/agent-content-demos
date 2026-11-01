@@ -114,29 +114,34 @@ def _(mo):
     mo.md(r"""
     ## 2. Re-check against current OpenStreetMap
 
-    An Overpass query per point asks for every `power=substation` and `power=plant` within 1 km. Each try goes to
-    the next endpoint in `OVERPASS_URLS`: the main `overpass-api.de`, then the maps.mail.ru mirror (the main one
-    wasn't reachable from where this ran). Answers are saved in `data/overpass/` with their `timestamp_osm_base`,
-    the time of the OSM data they reflect; delete the folder to re-check.
+    An Overpass query per point asks for every `power=substation` and `power=plant` within 1 km. The answers are
+    committed in `overpass_cache/` (OSM data © OpenStreetMap contributors, ODbL), each with the endpoint that
+    answered and when, so a default run reads them and needs no network for this step. Set `OSM_RECHECK=1` to
+    query live again: each point whose answer wasn't fetched today (UTC) is re-queried, trying the endpoints in
+    `OVERPASS_URLS` in turn with bounded retries, so an interrupted re-check resumes where it stopped.
     """)
     return
 
 
 @app.cell
-def _(DATA_DIR, OVERPASS_URLS, control, json, pd, points, requests, time):
-    # One query per point: the mirror times out on a union of many `around` clauses. Each answer is cached.
+def _(OVERPASS_URLS, Path, control, json, os, pd, points, requests, time):
+    # One query per point: the mirror times out on a union of many `around` clauses.
     # A control point, a derived substation that OSM does have, checks the query finds substations at all.
-    _cache = DATA_DIR / "overpass"
+    _cache = Path(os.environ.get("OVERPASS_CACHE", "overpass_cache"))
     _cache.mkdir(exist_ok=True)
+    _recheck = os.environ.get("OSM_RECHECK") == "1"
+    _today = time.strftime("%Y-%m-%d", time.gmtime())
     _ctrl = pd.DataFrame([{"id": f"control-{control['id']}", "lon": control["lon"], "lat": control["lat"]}])
     for _r in pd.concat([_ctrl, points[["id", "lon", "lat"]]]).itertuples():
         _path = _cache / f"{_r.id}.json"
-        if _path.exists():
+        if _path.exists() and not (_recheck and json.loads(_path.read_text())["fetched"]["at"][:10] != _today):
             continue
+        assert _recheck, f"no committed Overpass answer for {_r.id}; run with OSM_RECHECK=1 to query it"
         _query = (
             f'[out:json][timeout:90];(nwr["power"="substation"](around:1000,{_r.lat},{_r.lon});'
             f'nwr["power"="plant"](around:1000,{_r.lat},{_r.lon}););out tags center;'
         )
+        _answered = False
         for _attempt in range(8):
             _url = OVERPASS_URLS[_attempt % len(OVERPASS_URLS)]
             try:
@@ -146,11 +151,14 @@ def _(DATA_DIR, OVERPASS_URLS, control, json, pd, points, requests, time):
                 time.sleep(min(60, 5 * 2**_attempt))
                 continue
             if _resp.status_code == 200 and _resp.text.lstrip().startswith("{"):
-                _path.write_text(_resp.text)
+                _answer = _resp.json()
+                _answer["fetched"] = {"endpoint": _url, "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+                _path.write_text(json.dumps(_answer, indent=1, sort_keys=True))
+                _answered = True
                 break
             print(f"{_r.id}: {_url} returned HTTP {_resp.status_code}; retrying")
             time.sleep(min(60, 5 * 2**_attempt))
-        assert _path.exists(), f"Overpass gave no answer for {_r.id} after 8 tries"
+        assert _answered, f"Overpass gave no answer for {_r.id} after 8 tries"
     _control = json.loads((_cache / f"control-{control['id']}.json").read_text())["elements"]
     assert any(e["tags"].get("power") == "substation" for e in _control), "control query found no OSM substation"
     print(
@@ -161,6 +169,9 @@ def _(DATA_DIR, OVERPASS_URLS, control, json, pd, points, requests, time):
     overpass = {"elements": [e for a in _answers for e in a["elements"]]}
     _stamps = sorted(a["osm3s"]["timestamp_osm_base"] for a in _answers)
     osm_checked_at = _stamps[0]
+    _fetched = sorted(a["fetched"]["at"] for a in _answers)
+    _endpoints = pd.Series([a["fetched"]["endpoint"] for a in _answers]).value_counts()
+    print(f"Queried {_fetched[0]} to {_fetched[-1]}; answers by endpoint: {_endpoints.to_dict()}")
     print(
         f"OSM data as of {_stamps[0]} to {_stamps[-1]}: {len(overpass['elements'])} power=substation/plant"
         f" features near the points"
