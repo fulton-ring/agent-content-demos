@@ -7,7 +7,8 @@ set -euo pipefail
 cd "$(dirname "$0")"
 command -v uv >/dev/null || { echo "uv is needed: https://docs.astral.sh/uv/getting-started/installation/"; exit 1; }
 mkdir -p outputs
-uv run contribution.py | tee outputs/run_log.txt
+uv run contribution.py > outputs/run_log.tmp && mv outputs/run_log.tmp outputs/run_log.txt
+cat outputs/run_log.txt
 if [ "${1:-}" = "--chips" ]; then
   uv run chips.py
 fi

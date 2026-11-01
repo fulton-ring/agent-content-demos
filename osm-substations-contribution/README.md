@@ -9,7 +9,8 @@ no OSM edits, no forum post, no MapRoulette challenge, no contact with any utili
 
 - None of the 180 has been mapped since September.
 - Imagery shows a real yard at **10 distinct places** (12 points). 29 points are unclear and 139 have no yard.
-- That gives **36 MapRoulette tasks** once duplicates and two points the records rule out are dropped.
+- That gives **36 MapRoulette tasks** (10 confirmed yards plus 26 unclear points for a mapper to decide) once
+  duplicates and two points the records rule out are dropped.
 - Names come out sparse on purpose: 3 of the 10 yards get a proposed name, 8 an operator, 9 a voltage.
 - The OSM community reverted a near-identical attempt in March 2026, so this goes to forum review first ([`rules.md`](rules.md)).
 
@@ -83,10 +84,10 @@ Real grid nodes (substation or plant) are 57 of 180 (32%), against 40% in the ea
 |---|---:|---:|---|
 | name | 3 (Anderson, Lowmoor, Pleasant Hill) | 2 | plant yards (HIFLD/EIA give the plant's name); HIFLD placeholders |
 | operator | 8 | 5 | records contradict HIFLD at Desert View and Birds Landing (unclear points) |
-| voltage | 9 | 5 | Carvers Creek: PJM study says 115 kV, HIFLD 230 kV |
+| voltage | 9 | 4 | Carvers Creek: PJM study says 115 kV, HIFLD 230 kV |
 
 - **HIFLD (public domain):** a usable name for 27 of 180 points, an owner for 153, a voltage for all 180.
-- **Other records search:** 17 points, one search each, found values for 11. The 35 values come from:
+- **Other records search:** 17 points, one search each, found something for 11 and kept values for 10 (Enterprise was the wrong county). The 35 values come from:
   - federal pages (TVA, BLM, FERC Federal Register): 9;
   - EIA: 3;
   - ISO queue studies: 10;
@@ -102,7 +103,7 @@ its source would add a few minutes; at that rate all 2,652 unconfirmed derived s
 
 ## What becomes newly public
 
-`outputs/newly_public.csv` lists the 36 yards, by state and voltage:
+`outputs/newly_public.csv` lists the 36 candidate sites (10 confirmed on imagery, 26 unclear), by state and voltage:
 
 - **Voltage:** 5 at 500 kV, 1 at 345 kV, 30 at 230 kV.
 - **States:** 19, led by CA (7) and VA (4).
@@ -110,8 +111,8 @@ its source would add a few minutes; at that rate all 2,652 unconfirmed derived s
   - that a yard really is there;
   - its fence outline;
   - its voltage;
-  - for 3 yards, a name. Nothing inside the fence: the instructions forbid it.
-- **Decision for the founders:** whether that is acceptable. The five 500 kV yards are Anderson (TN), Pleasant Hill (MS), Bath County (VA, a pumped-storage plant), Plum Point (AR) and a plant in AZ.
+  - a name for 5 sites (3 confirmed yards, 2 unclear points). Nothing inside the fence: the instructions forbid it.
+- **Decision for the founders:** whether that is acceptable. The five 500 kV yards are Anderson (TN), Pleasant Hill (MS), Bath County (VA, a pumped-storage plant), Plum Point (AR) and a plant in AZ; the last two are unclear on imagery.
 
 ## The rules, in short (details in `rules.md`)
 

@@ -637,7 +637,6 @@ def _(OUTPUT_DIR, json, pkg):
         "drop_reason",
         "records_notes",
         "outline_wkt",
-        "duplicate_of",
         "hifld_lines",
         "hifld_owners_all",
         "hifld_quote",
