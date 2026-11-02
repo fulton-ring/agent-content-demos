@@ -73,7 +73,9 @@ def _(KEY, re):
         if q["kind"] == "names":
             got = {norm(n) for n in out["names"]}
             return any(got == {norm(n) for n in s} for s in q["accepted_sets"])
-        number = out["count"] if out["count"] is not None else out["value"]
+        # A percentage or a length belongs in `value`; some runs also give the count behind it.
+        first, second = ("count", "value") if q["kind"] == "count" else ("value", "count")
+        number = out[first] if out[first] is not None else out[second]
         if number is None:
             return False
         if "tolerance_pct" in q:
@@ -187,7 +189,7 @@ def _(mo):
 
 @app.cell
 def _(LABELS, RUNS, json, pd, scored):
-    _text = {r["file"]: json.dumps(r["messages"]) + json.dumps(r["tool_log"]) for r in RUNS}
+    _text = {r["file"]: json.dumps(r["messages"]) + json.dumps(r["tool_log"]) + json.dumps(r["output"]) for r in RUNS}
     _needs_label = set(scored[scored.verdict != "right"].file)
     _missing = sorted(_needs_label - set(LABELS))
     assert not _missing, f"wrong or refused runs with no label: {_missing}"
@@ -198,12 +200,18 @@ def _(LABELS, RUNS, json, pd, scored):
             assert json.dumps(_quote)[1:-1] in _text[_file], f"{_file}: quote not in transcript: {_quote[:80]}"
     error_log = pd.DataFrame(
         [
-            {"file": f, "type": lab["type"], "what happened": lab["note"], "evidence": " / ".join(lab["quotes"])}
+            {
+                "file": f,
+                "type": lab["type"],
+                "defensible": lab["defensible"],
+                "what happened": lab["note"],
+                "evidence": " / ".join(lab["quotes"]),
+            }
             for f, lab in LABELS.items()
         ]
     ).merge(scored[["file", "model", "question", "verdict", "answer"]], on="file")
     error_log = error_log[
-        ["model", "question", "file", "verdict", "type", "answer", "what happened", "evidence"]
+        ["model", "question", "file", "verdict", "type", "defensible", "answer", "what happened", "evidence"]
     ].sort_values(["question", "model", "file"])
     error_log
     return (error_log,)
@@ -213,6 +221,7 @@ def _(LABELS, RUNS, json, pd, scored):
 def _(error_log, mo):
     by_type = error_log.groupby(["type", "model"]).size().unstack(fill_value=0)
     by_type["total"] = by_type.sum(axis=1)
+    by_type["of which defensible"] = error_log.groupby("type").defensible.sum()
     by_type = by_type.sort_values("total", ascending=False)
     examples = error_log.drop_duplicates("type")[["type", "file", "what happened", "evidence"]]
     mo.vstack([mo.md("## Errors by type"), by_type, mo.md("One example of each:"), examples])
@@ -254,10 +263,14 @@ def _(OUT, by_question, by_type, cost_time, error_log, json, overall, overall_le
         "runs": int(len(scored)),
         "overall": overall.to_dict(orient="index"),
         "overall_lenient": overall_lenient.to_dict(orient="index"),
-        "by_question": {"|".join(map(str, k)): v for k, v in by_question.to_dict(orient="index").items()},
+        "by_question": json.loads(
+            by_question.set_axis(["|".join(c) for c in by_question.columns], axis=1)
+            .reset_index()
+            .to_json(orient="records")
+        ),
         "errors_by_type": by_type.to_dict(orient="index"),
         "totals": totals.to_dict(orient="index"),
-        "cost_time_by_question": {"|".join(k): v for k, v in cost_time.to_dict(orient="index").items()},
+        "cost_time_by_question": json.loads(cost_time.reset_index().to_json(orient="records")),
     }
     (OUT / "summary.json").write_text(json.dumps(summary, indent=1, default=str))
     print(json.dumps(summary["overall"], indent=1), json.dumps(summary["totals"], indent=1))
