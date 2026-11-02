@@ -82,7 +82,10 @@ def _(CACHE, httpx):
         "hospitals": "hospitals-3/hospitals-3/v1.1.0/geoparquet/hospitals-3.parquet",
         "nursing": "nursing-homes/nursing-homes/v1.0.0/geoparquet/nursing-homes.parquet",
         "schools": "public-schools/public-schools/v1.0.0/geoparquet/public-schools.parquet",
-        "fire": "fire-and-emergency-medical-service-ems-stations/fire-and-emergency-medical-service-ems-stations/v1.0.0/geoparquet/fire-and-emergency-medical-service-ems-stations.parquet",
+        "fire": (
+            "fire-and-emergency-medical-service-ems-stations/fire-and-emergency-medical-service-ems-stations"
+            "/v1.0.0/geoparquet/fire-and-emergency-medical-service-ems-stations.parquet"
+        ),
         "plants": "power-plants-1/power-plants-1/v1.0.0/geoparquet/power-plants-1.parquet",
         "lines": "transmission-lines-1/transmission-lines-1/v1.0.0/geoparquet/transmission-lines-1.parquet",
         "dialysis": "dialysis-centers/dialysis-centers/v1.0.0/geoparquet/dialysis-centers.parquet",
@@ -151,7 +154,7 @@ def _(CACHE, COUNTIES, gpd):
         zones[_fips] = gpd.read_file(
             CACHE / "nfhl" / f"{_fips}C" / "S_FLD_HAZ_AR.shp", columns=["FLD_ZONE", "ZONE_SUBTY", "SFHA_TF"]
         ).to_crs(_c["utm"])
-        county_shape[_fips] = counties[counties.GEOID == _fips].to_crs(_c["utm"]).geometry.iloc[0]
+        county_shape[_fips] = counties[counties.GEOID.eq(_fips)].to_crs(_c["utm"]).geometry.iloc[0]
     {k: f"{len(v):,} zones" for k, v in zones.items()}
     return county_shape, facilities, lines, zones
 
