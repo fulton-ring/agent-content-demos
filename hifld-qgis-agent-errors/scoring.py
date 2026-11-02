@@ -113,7 +113,8 @@ def _(KEY, re):
         failed = [
             p
             for p in parts
-            if p.get("part_kind") == "tool-return" and str(p.get("content", "")).startswith(("failed", "error"))
+            if p.get("part_kind") == "tool-return"
+            and str(p.get("content", "")).startswith(("failed", "error", '{"error"'))
         ]
         retried = [p for p in parts if p.get("part_kind") == "retry-prompt" and p.get("tool_name")]
         return len(failed) + len(retried)
@@ -142,19 +143,16 @@ def _(KEY, RUNS, answer_text, failed_calls, pd, score):
         ]
     )
     scored["level"] = scored.question.map(lambda q: KEY[q]["level"])
+    scored["question"] = pd.Categorical(scored.question, categories=list(KEY), ordered=True)
     scored
     return (scored,)
 
 
 @app.cell
 def _(mo, pd, scored):
-    by_question = (
-        scored.pivot_table(
-            index=["question", "level"], columns=["model", "verdict"], values="repeat", aggfunc="count", fill_value=0
-        )
-        .astype(int)
-        .sort_index(key=lambda s: s.str.extract(r"(\d+)", expand=False).astype(float) if s.name == "question" else s)
-    )
+    by_question = scored.pivot_table(
+        index=["question", "level"], columns=["model", "verdict"], values="repeat", aggfunc="count", fill_value=0
+    ).astype(int)
     overall = scored.groupby(["model", "verdict"]).size().unstack(fill_value=0)
     overall_lenient = scored.groupby(["model", "verdict_lenient"]).size().unstack(fill_value=0)
     mo.vstack(
@@ -229,9 +227,40 @@ def _(error_log, mo):
 
 
 @app.cell
+def _(mo):
+    mo.md(r"""
+    ## Right for the wrong reason
+
+    A right answer can hide the same mistake. Q5 (fire stations) and Q7 (transmission lines) use
+    layers with no county field, so the county filter has to be spatial. Here we look for any sign
+    of one in each run's tool calls: the county boundaries layer, a `COUNTYFIPS`, `GEOID` or
+    `COUNTY` filter, or the NFHL's own political areas file (`S_POL_AR`). A run with none of them
+    took FEMA's county extract to be the county.
+    """)
+
+
+@app.cell
+def _(RUNS, json, mo, pd, scored):
+    _signs = ("county-boundaries", "COUNTYFIPS", "GEOID", "COUNTY", "S_POL_AR")
+    no_county_filter = pd.DataFrame(
+        [
+            {
+                "file": r["file"],
+                "county filter seen": any(sign in json.dumps(c["args"]) for c in r["tool_log"] for sign in _signs),
+            }
+            for r in RUNS
+            if r["question_id"] in ("Q5", "Q7", "Q10")
+        ]
+    ).merge(scored[["file", "question", "verdict"]], on="file")
+    no_county_filter = no_county_filter.groupby(["question", "county filter seen", "verdict"], observed=True).size()
+    mo.vstack([mo.md("Runs of Q5, Q7 and Q10, by whether any county filter appears:"), no_county_filter])
+    return (no_county_filter,)
+
+
+@app.cell
 def _(mo, scored):
     cost_time = (
-        scored.groupby(["model", "question"])
+        scored.groupby(["model", "question"], observed=True)
         .agg(
             runs=("repeat", "count"),
             usd_per_run=("cost_usd", "mean"),
@@ -256,7 +285,9 @@ def _(mo, scored):
 
 
 @app.cell
-def _(OUT, by_question, by_type, cost_time, error_log, json, overall, overall_lenient, scored, totals):
+def _(
+    OUT, by_question, by_type, cost_time, error_log, json, no_county_filter, overall, overall_lenient, scored, totals
+):
     scored.to_csv(OUT / "scored_runs.csv", index=False)
     error_log.to_csv(OUT / "error_log.csv", index=False)
     summary = {
@@ -269,6 +300,7 @@ def _(OUT, by_question, by_type, cost_time, error_log, json, overall, overall_le
             .to_json(orient="records")
         ),
         "errors_by_type": by_type.to_dict(orient="index"),
+        "no_county_filter": {"|".join(map(str, k)): int(v) for k, v in no_county_filter.items()},
         "totals": totals.to_dict(orient="index"),
         "cost_time_by_question": json.loads(cost_time.reset_index().to_json(orient="records")),
     }
