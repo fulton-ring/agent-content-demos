@@ -10,6 +10,7 @@ def _():
     import os
     import subprocess
     import tempfile
+    import time
     import zipfile
     from pathlib import Path
 
@@ -18,7 +19,7 @@ def _():
     import marimo as mo
     import pandas as pd
 
-    return Path, gpd, httpx, json, mo, os, pd, subprocess, tempfile, zipfile
+    return Path, gpd, httpx, json, mo, os, pd, subprocess, tempfile, time, zipfile
 
 
 @app.cell
@@ -102,16 +103,19 @@ def _(CACHE, httpx):
 
 
 @app.cell
-def _(CACHE, COUNTIES, httpx, zipfile):
+def _(CACHE, COUNTIES, httpx, time, zipfile):
     # The Map Service Center redirects to the county's latest NFHL extract (<FIPS>C_<date>.zip).
-    # FEMA's server drops connections now and then, so each download gets up to four tries.
+    # FEMA's server drops connections often, so each download gets six tries with backoff
+    # (2, 4, 8, 16, 32 s), and a file only counts once it has downloaded in full.
     # We record the date stamped on the zone file inside each extract.
     nfhl_files = {}
     for _fips in COUNTIES:
         _zip = CACHE / f"nfhl_{_fips}C.zip"
-        for _attempt in range(4):
+        for _attempt in range(6):
             if _zip.exists():
                 break
+            if _attempt:
+                time.sleep(2**_attempt)
             try:
                 with httpx.stream(
                     "GET",
@@ -125,7 +129,9 @@ def _(CACHE, COUNTIES, httpx, zipfile):
                     follow_redirects=True,
                 ) as _r:
                     _r.raise_for_status()
-                    _zip.write_bytes(_r.read())
+                    _part = _zip.with_suffix(".part")
+                    _part.write_bytes(_r.read())
+                    _part.rename(_zip)
             except httpx.HTTPError as _e:
                 print(f"NFHL {_fips}: attempt {_attempt + 1} failed: {_e}")
         assert _zip.exists(), f"could not download the NFHL extract for {_fips}"
