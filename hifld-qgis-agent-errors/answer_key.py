@@ -239,7 +239,35 @@ def _(flood_join, in_county, variants):
         _j, _r = sfha_rows("dialysis", "48201", *_v)
         _pcts.add(round(100 * len(_r) / len(_j), 2))
     answers["Q10"] = {"accepted": sorted(_pcts), "tolerance": 0.5, "unit": "%"}
-    return (answers,)
+    return answers, sfha_rows
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    ## Added after the agent runs: a second reading of "nursing homes"
+
+    HIFLD's *Nursing Homes* layer is really "Nursing Home / Assisted Care": in Charleston County 60
+    of its 74 records have `TYPE = 'ASSISTED LIVING'`. In the runs, the agent often kept only
+    `TYPE = 'NURSING HOME'`. That's a fair reading of our question, which we didn't foresee. The
+    key above is unchanged (it is what we committed before the runs); this cell adds the narrower
+    reading as `after_runs_alternative`, and `scoring.py` reports scores both with and without it.
+    """)
+
+
+@app.cell
+def _(answers, sfha_rows, variants):
+    def nursing_only(rows):
+        return rows[rows.TYPE == "NURSING HOME"]
+
+    _rows = {v: nursing_only(sfha_rows("nursing", "22071", *v)[1]) for v in variants("nursing", "22071")}
+    answers["Q2"]["after_runs_alternative"] = {"accepted_sets": sorted({tuple(sorted(r.NAME)) for r in _rows.values()})}
+    _counts = set()
+    for _v in variants("nursing", "45019"):
+        _j = nursing_only(sfha_rows("nursing", "45019", *_v)[0])
+        _counts.add(int(((_j.SFHA_TF != "T") & _j.ZONE_SUBTY.fillna("").str.startswith("0.2 PCT")).sum()))
+    answers["Q4"]["after_runs_alternative"] = {"accepted": sorted(_counts)}
+    {q: answers[q]["after_runs_alternative"] for q in ["Q2", "Q4"]}
 
 
 @app.cell

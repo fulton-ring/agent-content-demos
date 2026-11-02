@@ -32,7 +32,10 @@ def _(mo):
 def _(Path, json):
     HERE = Path(__file__).parent
     KEY = json.loads((HERE / "answer_key.json").read_text())["questions"]
-    RUNS = [json.loads(f.read_text()) | {"file": f"{f.parent.name}/{f.name}"} for f in sorted((HERE / "runs").glob("*/Q*_*.json"))]
+    RUNS = [
+        json.loads(f.read_text()) | {"file": f"{f.parent.name}/{f.name}"}
+        for f in sorted((HERE / "runs").glob("*/Q*_*.json"))
+    ]
     LABELS = json.loads((HERE / "error_labels.json").read_text())
     OUT = HERE / "results"
     OUT.mkdir(exist_ok=True)
@@ -54,6 +57,9 @@ def _(mo):
     - Counts must be one the key accepts. Names must match an accepted set exactly, after
       upper-casing and dropping punctuation; a list with one name missing or extra is wrong. A
       length must be within 3%, a percentage within 0.5 points, a bed total exact.
+    - The strict score uses only the key committed before the runs. The lenient score also accepts
+      the narrower reading of "nursing homes" that `answer_key.py` added after the runs (see there).
+      Error labels are for strict misses.
     """)
     return
 
@@ -63,7 +69,21 @@ def _(KEY, re):
     def norm(name: str) -> str:
         return re.sub(r"[^A-Z0-9 ]", "", name.upper()).strip()
 
-    def score(run: dict) -> str:
+    def matches(q: dict, out: dict) -> bool:
+        if q["kind"] == "names":
+            got = {norm(n) for n in out["names"]}
+            return any(got == {norm(n) for n in s} for s in q["accepted_sets"])
+        number = out["count"] if out["count"] is not None else out["value"]
+        if number is None:
+            return False
+        if "tolerance_pct" in q:
+            return any(abs(number - a) <= a * q["tolerance_pct"] / 100 for a in q["accepted"])
+        if "tolerance" in q:
+            return any(abs(number - a) <= q["tolerance"] for a in q["accepted"])
+        return any(abs(number - a) < 0.5 for a in q["accepted"])
+
+    def score(run: dict, lenient: bool = False) -> str:
+        """right, wrong or refused/unsure. `lenient` also accepts the reading added after the runs."""
         q, out = KEY[run["question_id"]], run["output"]
         if out is None or out["status"] == "unsure":
             return "refused/unsure"
@@ -71,17 +91,10 @@ def _(KEY, re):
             return "right" if out["status"] == "unavailable" else "wrong"
         if out["status"] == "unavailable":
             return "refused/unsure"
-        if q["kind"] == "names":
-            got = {norm(n) for n in out["names"]}
-            return "right" if any(got == {norm(n) for n in s} for s in q["accepted_sets"]) else "wrong"
-        number = out["count"] if out["count"] is not None else out["value"]
-        if number is None:
-            return "wrong"
-        if q["kind"] == "count" or q.get("unit") == "beds":
-            return "right" if any(abs(number - a) < 0.5 for a in q["accepted"]) else "wrong"
-        if "tolerance_pct" in q:
-            return "right" if any(abs(number - a) <= a * q["tolerance_pct"] / 100 for a in q["accepted"]) else "wrong"
-        return "right" if any(abs(number - a) <= q["tolerance"] for a in q["accepted"]) else "wrong"
+        if matches(q, out):
+            return "right"
+        alt = q.get("after_runs_alternative")
+        return "right" if lenient and alt and matches(q | alt, out) else "wrong"
 
     def answer_text(run: dict) -> str:
         out = run["output"]
@@ -95,7 +108,11 @@ def _(KEY, re):
     def failed_calls(run: dict) -> int:
         """Tool calls whose result was an error: QGIS's 'failed', or an MCP error the model was asked to retry."""
         parts = [p for m in run["messages"] for p in m.get("parts", [])]
-        failed = [p for p in parts if p.get("part_kind") == "tool-return" and str(p.get("content", "")).startswith(("failed", "error"))]
+        failed = [
+            p
+            for p in parts
+            if p.get("part_kind") == "tool-return" and str(p.get("content", "")).startswith(("failed", "error"))
+        ]
         retried = [p for p in parts if p.get("part_kind") == "retry-prompt" and p.get("tool_name")]
         return len(failed) + len(retried)
 
@@ -111,6 +128,7 @@ def _(KEY, RUNS, answer_text, failed_calls, pd, score):
                 "question": r["question_id"],
                 "repeat": r["repeat"],
                 "verdict": score(r),
+                "verdict_lenient": score(r, lenient=True),
                 "answer": answer_text(r),
                 "seconds": r["seconds"],
                 "cost_usd": r["cost_usd"],
@@ -129,13 +147,25 @@ def _(KEY, RUNS, answer_text, failed_calls, pd, score):
 @app.cell
 def _(mo, pd, scored):
     by_question = (
-        scored.pivot_table(index=["question", "level"], columns=["model", "verdict"], values="repeat", aggfunc="count", fill_value=0)
+        scored.pivot_table(
+            index=["question", "level"], columns=["model", "verdict"], values="repeat", aggfunc="count", fill_value=0
+        )
         .astype(int)
         .sort_index(key=lambda s: s.str.extract(r"(\d+)", expand=False).astype(float) if s.name == "question" else s)
     )
     overall = scored.groupby(["model", "verdict"]).size().unstack(fill_value=0)
-    mo.vstack([mo.md("## Accuracy\n\nRuns per verdict, by model."), overall, mo.md("By question:"), by_question])
-    return by_question, overall
+    overall_lenient = scored.groupby(["model", "verdict_lenient"]).size().unstack(fill_value=0)
+    mo.vstack(
+        [
+            mo.md("## Accuracy\n\nRuns per verdict, by model, against the key committed before the runs."),
+            overall,
+            mo.md("Also accepting the narrower reading of 'nursing homes' (Q2, Q4) added after the runs:"),
+            overall_lenient,
+            mo.md("By question (strict):"),
+            by_question,
+        ]
+    )
+    return by_question, overall, overall_lenient
 
 
 @app.cell
@@ -167,9 +197,14 @@ def _(LABELS, RUNS, json, pd, scored):
         for _quote in _label["quotes"]:
             assert json.dumps(_quote)[1:-1] in _text[_file], f"{_file}: quote not in transcript: {_quote[:80]}"
     error_log = pd.DataFrame(
-        [{"file": f, "type": lab["type"], "what happened": lab["note"], "evidence": " / ".join(lab["quotes"])} for f, lab in LABELS.items()]
+        [
+            {"file": f, "type": lab["type"], "what happened": lab["note"], "evidence": " / ".join(lab["quotes"])}
+            for f, lab in LABELS.items()
+        ]
     ).merge(scored[["file", "model", "question", "verdict", "answer"]], on="file")
-    error_log = error_log[["model", "question", "file", "verdict", "type", "answer", "what happened", "evidence"]].sort_values(["question", "model", "file"])
+    error_log = error_log[
+        ["model", "question", "file", "verdict", "type", "answer", "what happened", "evidence"]
+    ].sort_values(["question", "model", "file"])
     error_log
     return (error_log,)
 
@@ -186,27 +221,39 @@ def _(error_log, mo):
 
 @app.cell
 def _(mo, scored):
-    cost_time = scored.groupby(["model", "question"]).agg(
-        runs=("repeat", "count"),
-        usd_per_run=("cost_usd", "mean"),
-        seconds_per_run=("seconds", "mean"),
-        tool_calls_per_run=("tool_calls", "mean"),
-        failed_tool_calls_per_run=("failed_tool_calls", "mean"),
-    ).round(3)
-    totals = scored.groupby("model").agg(
-        runs=("repeat", "count"), total_usd=("cost_usd", "sum"), total_seconds=("seconds", "sum"), median_seconds=("seconds", "median")
-    ).round(2)
+    cost_time = (
+        scored.groupby(["model", "question"])
+        .agg(
+            runs=("repeat", "count"),
+            usd_per_run=("cost_usd", "mean"),
+            seconds_per_run=("seconds", "mean"),
+            tool_calls_per_run=("tool_calls", "mean"),
+            failed_tool_calls_per_run=("failed_tool_calls", "mean"),
+        )
+        .round(3)
+    )
+    totals = (
+        scored.groupby("model")
+        .agg(
+            runs=("repeat", "count"),
+            total_usd=("cost_usd", "sum"),
+            total_seconds=("seconds", "sum"),
+            median_seconds=("seconds", "median"),
+        )
+        .round(2)
+    )
     mo.vstack([mo.md("## Cost and time"), totals, cost_time])
     return cost_time, totals
 
 
 @app.cell
-def _(OUT, by_question, by_type, cost_time, error_log, json, overall, scored, totals):
+def _(OUT, by_question, by_type, cost_time, error_log, json, overall, overall_lenient, scored, totals):
     scored.to_csv(OUT / "scored_runs.csv", index=False)
     error_log.to_csv(OUT / "error_log.csv", index=False)
     summary = {
         "runs": int(len(scored)),
         "overall": overall.to_dict(orient="index"),
+        "overall_lenient": overall_lenient.to_dict(orient="index"),
         "by_question": {"|".join(map(str, k)): v for k, v in by_question.to_dict(orient="index").items()},
         "errors_by_type": by_type.to_dict(orient="index"),
         "totals": totals.to_dict(orient="index"),
