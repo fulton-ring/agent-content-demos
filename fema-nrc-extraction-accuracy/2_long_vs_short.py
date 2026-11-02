@@ -306,7 +306,7 @@ def _():
 
     - One keyed page per study, eight studies, 404 values. The short scans carry only 17 values between them, so
       their percentages move a lot with one error.
-    - Length and scanning go together in FEMA's history: the long studies here are 75 to 127 pages, not the
+    - Length and scanning go together in FEMA's history: the long studies here are 81 to 127 pages, not the
       300-page volumes some benchmarks call long.
     - Each pipeline ran once. The model's answers change from run to run (see `messy-document-parsing/`).
     """)
