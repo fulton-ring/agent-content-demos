@@ -36,7 +36,7 @@ def _():
         _d.mkdir(parents=True, exist_ok=True)
     started = time.time()
 
-    def get_json(url: str, params: dict, cache_file: Path, attempts: int = 5) -> dict:
+    def get_json(url: str, params: dict, cache_file: Path, attempts: int = 8) -> dict:
         """GET a JSON response, cached on disk, with a bounded number of retries."""
         if cache_file.exists():
             return json.loads(cache_file.read_text())
@@ -703,8 +703,8 @@ def _(pd, point_scores, results):
     _rows.append(
         {
             "measure": "not SFHA at the point, SFHA at 1+ moves",
-            "sites changing at 1+ of 4 moves": int((_sfha_here != _sfha_any).sum()),
-            "share": round(float((_sfha_here != _sfha_any).mean()), 3),
+            "sites changing at 1+ of 4 moves": int((~_sfha_here & _sfha_any).sum()),
+            "share": round(float((~_sfha_here & _sfha_any).mean()), 3),
         }
     )
     sensitivity = pd.DataFrame(_rows)

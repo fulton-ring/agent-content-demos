@@ -27,7 +27,7 @@ flood or storm could hit them together. Issue
 
 Needs [uv](https://docs.astral.sh/uv/) and a full checkout of this repo (it reads the FRI files
 in `../fri-datasets-map/data/`). It runs `notebook.py` as a script and writes everything to
-`results/`. From an empty cache it takes about 11 minutes, most of it about 13,000 point queries
+`results/`. From an empty cache it takes 11–18 minutes (FEMA's NFHL service sometimes returns 504s; if the run stops with "failed 8 times", run `./run.sh` again: finished queries are cached), most of it about 13,000 point queries
 to FEMA's services. Downloads are cached in `~/.cache/data-center-metro-hazard` (or set
 `DCH_CACHE`). To read the notebook with its outputs: `uv run marimo edit notebook.py`.
 
@@ -89,6 +89,8 @@ D 18.
 | FRI hurricane, mean gap | 0.009 | 0.018 | 0.093 | 0.96 (0.10) |
 | FRI extreme heat, mean gap | 0.34 | 0.67 | 1.93 | 0.96 (0.07) |
 
+FRI coastal flood has values only for coastal counties (340 sites); its row covers those sites.
+
 No shuffle reached the real η² for any score. Pairs are dominated by the DC metro (237 of 1,176
 clustered sites). The county NRI rating matches within a metro only when the two sites share a
 county: across counties in one metro it matches less often (12%) than across metros (22%).
@@ -101,10 +103,10 @@ Worth 23, San Antonio 19, Phoenix 15, Moses Lake 14. Full table: `results/metros
 
 **Location sensitivity.** Moving a site 250 m changes its flood class for 19.5% of sites (at one
 or more of four moves; 7.5% of single moves), its tract for 30.7% and its NRI tract rating for
-19.5%. 163 sites (12.8%) not in the SFHA have SFHA 250 m away.
+19.5%. 160 sites (12.5% of all sites) not in the SFHA have SFHA 250 m away.
 
-**Run time and cost.** 11 minutes from an empty cache (10 min 49 s on 2026-11-01: 8 minutes of
-FEMA point queries, 2 minutes of shuffles); about 2.5 minutes cached. $0: every source is free.
+**Run time and cost.** 11–18 minutes from an empty cache (10 min 49 s on 2026-11-01: 8 minutes of
+FEMA point queries, 2 minutes of shuffles; about 18 minutes on 2026-11-02 with one re-run after FEMA 504s); about 2.5 minutes cached. $0: every source is free.
 
 ## What it doesn't show
 
