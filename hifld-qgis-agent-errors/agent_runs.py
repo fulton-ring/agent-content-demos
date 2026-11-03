@@ -76,7 +76,7 @@ def _(mo):
     where. Everything else it has to find.
 
     Running this costs money, so it's off by default: `run.sh` scores the transcripts saved in
-    `runs/`. Set `RUN_AGENT=1` to run the agent again: 60 runs, two models, about $2 and an hour.
+    `runs/`. Set `RUN_AGENT=1` to run the agent again: 60 runs, two models, about $1.20 and 31 minutes.
     """)
     return
 

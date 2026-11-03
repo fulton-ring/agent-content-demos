@@ -10,7 +10,7 @@ key we committed before any run, 48 of 60 answers are right (Claude Haiku 5.5 22
 26 of 30). The traps we set mostly didn't catch them: Web Mercator layers, a 500 m distance near a
 threshold, and substations HIFLD Next doesn't have. The mistake that did repeat was a filter. The
 agents took FEMA's *county* flood map extract to be the county, but it isn't clipped to the county
-line. All 6 runs of the transmission-line question over-counted by 4% that way. All 6 runs of the
+line. All 6 runs of the transmission-line question over-counted by about 4% that way, just past the ±3% the key allows. All 6 runs of the
 fire-station question made the same assumption and were right only because, in Miami-Dade, it
 happens not to matter.
 
