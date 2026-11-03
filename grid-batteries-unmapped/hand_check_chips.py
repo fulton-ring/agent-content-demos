@@ -83,7 +83,9 @@ def naip(box: tuple[float, float, float, float], lat: float, lon: float) -> tupl
         }
     )
     image = np.asarray(Image.open(io.BytesIO(get(f"{NAIP}/exportImage?{params}"))).convert("RGB"))
-    date = pd.to_datetime(newest["acquisition_date"], unit="ms").strftime("%Y-%m-%d") if newest["acquisition_date"] else ""
+    date = (
+        pd.to_datetime(newest["acquisition_date"], unit="ms").strftime("%Y-%m-%d") if newest["acquisition_date"] else ""
+    )
     return f"NAIP {newest['Year']} {date}".strip(), image
 
 

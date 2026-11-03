@@ -66,10 +66,10 @@ def _():
     | HIFLD Next | Power Plants, Generating Units | layer v1.0.0 (the layers' records are dated 2023-09 and earlier) |
     | EIA-860M | Operating and Planned generators, prime mover `BA` (battery), with coordinates | September 2026 |
     | EIA-860 | Energy Storage schedule, Operable and Proposed | 2025 annual, used only to reconcile with EIA-860M |
-    | LBNL *Queued Up* | Complete Queue Data, active requests with battery capacity | data through 2025, May 2026 file, CC BY 4.0 |
+    | LBNL *Queued Up* | Complete Queue Data, active requests with a battery | through 2025, May 2026 file, CC BY 4.0 |
     | FEMA National Risk Index | county hurricane and heat-wave risk ratings | December 2025, FEMA's ArcGIS service |
-    | Our FRI rebuild | county hurricane and extreme-heat multipliers (`fri-datasets-map/data/`) | this repo at commit `4757ebc` |
-    | US Census | county shapes, 2024 (for NRI, which uses Connecticut's planning regions) and 2020 (for the FRI) | 1:500k |
+    | Our FRI rebuild | county hurricane and heat multipliers (`fri-datasets-map/data/`) | this repo, commit `4757ebc` |
+    | US Census | county shapes: 2024 for NRI (Connecticut's planning regions), 2020 for the FRI | 1:500k |
     """)
     return
 
@@ -288,8 +288,9 @@ def _(batteries, paths):
     reconciliation = _annual.pivot_table(
         index="eia860_2025", columns="in EIA-860M Sep 2026", values="mw", aggfunc=["size", "sum"], fill_value=0
     ).round(0)
+    reconciliation.columns = [f"{'generators' if a == 'size' else 'MW'}, {b}" for a, b in reconciliation.columns]
     reconciliation.to_csv(OUT / "reconciliation_eia860_2025.csv")
-    reconciliation
+    mo.ui.table(reconciliation.reset_index(), selection=None)
     return (reconciliation,)
 
 
@@ -334,7 +335,9 @@ def _(batteries, paths):
         default="4 missing from HIFLD Next",
     )
     matched["in_hifld_next"] = matched["match"] != "4 missing from HIFLD Next"
-    _hifld_dates = f"{units['SOURCEDATE'].astype(str).str[:10].max()} / {plants['SOURCEDATE'].astype(str).str[:10].max()}"
+    _hifld_dates = (
+        f"{units['SOURCEDATE'].astype(str).str[:10].max()} / {plants['SOURCEDATE'].astype(str).str[:10].max()}"
+    )
     mo.md(f"Newest record date, Generating Units / Power Plants: **{_hifld_dates}**.")
     return (matched,)
 
@@ -393,7 +396,14 @@ def _(matched, share_missing):
     by_year = share_missing(matched, ["stage", "year_online"])
     by_state.to_csv(OUT / "batteries_by_state.csv")
     by_year.to_csv(OUT / "batteries_by_year_online.csv")
-    mo.vstack([mo.md("**By state** (top 15 by operating MW missing)"), by_state.head(15), mo.md("**By year online**"), by_year])
+    mo.vstack(
+        [
+            mo.md("**By state** (top 15 by operating MW missing)"),
+            by_state.head(15),
+            mo.md("**By year online**"),
+            by_year,
+        ]
+    )
     return by_state, by_year
 
 
@@ -632,9 +642,10 @@ def _(paths, published):
     _counties = _counties[_counties["STUSPS"].isin(set(_lower48["STUSPS"]))].to_crs(ALBERS)
     _rated = published.drop_duplicates("county_fips_2024").set_index("county_fips_2024")
     _nri = pd.read_csv(DATA / "nri_counties.csv", dtype={"STCOFIPS": str}).set_index("STCOFIPS")
-    _exposure = _nri["HRCN_RISKR"].isin({"Very High", "Relatively High"}).astype(int) + _nri["HWAV_RISKR"].isin(
-        {"Very High", "Relatively High"}
-    ).astype(int) * 2
+    _exposure = (
+        _nri["HRCN_RISKR"].isin({"Very High", "Relatively High"}).astype(int)
+        + _nri["HWAV_RISKR"].isin({"Very High", "Relatively High"}).astype(int) * 2
+    )
     _counties["exposure"] = _counties["GEOID"].map(_exposure).fillna(0).astype(int)
     _pts = gpd.GeoDataFrame(
         published, geometry=gpd.points_from_xy(published["longitude"], published["latitude"]), crs=4326
@@ -644,7 +655,10 @@ def _(paths, published):
     _palette = {0: "#f4f4f4", 1: "#bcd4e6", 2: "#f6d3a8", 3: "#e6a6a6"}
     _counties.plot(ax=_ax, color=_counties["exposure"].map(_palette), edgecolor="none")
     _lower48.boundary.plot(ax=_ax, color="#999999", linewidth=0.4)
-    for _mapped, _color, _label in [(True, "#7a8691", "operating, in HIFLD Next"), (False, "#b5172e", "operating, missing")]:
+    for _mapped, _color, _label in [
+        (True, "#7a8691", "operating, in HIFLD Next"),
+        (False, "#b5172e", "operating, missing"),
+    ]:
         _sel = _pts[_pts["in_hifld_next"] == _mapped]
         _sel.plot(ax=_ax, markersize=_sel["mw"].clip(2, 500) / 3, color=_color, alpha=0.65, label=_label)
     for _code, _name in [(1, "NRI hurricane high"), (2, "NRI heat wave high"), (3, "both")]:
@@ -702,32 +716,39 @@ def _(published):
 
 @app.cell
 def _(hand_sample):
+    def wilson(k: int, n: int) -> tuple[float, float]:
+        """95% Wilson score interval for k successes in n."""
+        z, p = 1.96, k / n
+        centre = (p + z**2 / (2 * n)) / (1 + z**2 / n)
+        half = z * np.sqrt(p * (1 - p) / n + z**2 / (4 * n**2)) / (1 + z**2 / n)
+        return centre - half, centre + half
+
     _labels_path = HERE / "hand_check.csv"
+    hand_result = None
     if not _labels_path.exists():
-        hand_result = None
         _out = mo.md("`hand_check.csv` isn't there yet: run `hand_check_chips.py` and label the images.")
     else:
-        _labels = pd.read_csv(_labels_path)
-        assert set(_labels["eia_plant_id"]) == set(hand_sample["eia_plant_id"]), "labels must match the sample"
-        _n = len(_labels)
-        _k = int(_labels["confirmed"].sum())
-        # Wilson score interval, 95%.
-        _z, _p = 1.96, _k / _n
-        _centre = (_p + _z**2 / (2 * _n)) / (1 + _z**2 / _n)
-        _half = _z * np.sqrt(_p * (1 - _p) / _n + _z**2 / (4 * _n**2)) / (1 + _z**2 / _n)
-        hand_result = {"n": _n, "confirmed": _k, "share": _p, "low": _centre - _half, "high": _centre + _half}
-        _by = _labels.groupby("label").size().rename("plants").to_frame()
+        _labels = pd.read_csv(_labels_path).merge(hand_sample, on="eia_plant_id", validate="one_to_one")
+        assert len(_labels) == len(hand_sample), "labels must match the sample"
+        _rows = []
+        for _name, _sel in [("all 30", _labels), ("20 MW or more", _labels[_labels["mw"] >= 20])]:
+            _k, _n = int(_sel["confirmed"].sum()), len(_sel)
+            _low, _high = wilson(_k, _n)
+            _rows.append({"sample": _name, "plants": _n, "confirmed": _k, "share": _k / _n, "low": _low, "high": _high})
+        hand_result = pd.DataFrame(_rows).set_index("sample").round(3)
+        hand_result.to_csv(OUT / "hand_check_result.csv")
+        _naip_old = (_labels["year_online"] > 2023).sum()
         _out = mo.vstack(
             [
+                hand_result,
+                _labels.groupby("label").agg(plants=("mw", "size"), MW=("mw", "sum")).round(0),
                 mo.md(
-                    f"**{_k} of {_n} confirmed ({_p:.0%}, 95% Wilson interval {_centre - _half:.0%} to "
-                    f"{_centre + _half:.0%}).**"
+                    f"{_naip_old} of the 30 plants came online after 2023, later than any public NAIP photo of them; "
+                    "those were checked on Sentinel-2 alone."
                 ),
-                _by,
             ]
         )
-        pd.DataFrame([hand_result]).round(3).to_csv(OUT / "hand_check_result.csv", index=False)
-    _out
+    mo.output.replace(_out)
     return (hand_result,)
 
 
@@ -739,10 +760,11 @@ def _(by_state, queue_by_state):
     ## What we found, and what didn't work
 
     - The states with the most operating battery MW missing from HIFLD Next are **{", ".join(_top)}**; the largest
-      queues are in **{", ".join(_qtop)}**. Tables: `output/batteries_by_state.csv`, `output/queue_battery_by_state.csv`.
+      queues are in **{", ".join(_qtop)}**. See `output/batteries_by_state.csv` and
+      `output/queue_battery_by_state.csv`.
     - **NAIP is too old for this question.** The public NAIP services we could reach (USGS's NAIP Plus and Planetary
-      Computer) end in 2022-2023, before most of the missing plants were built. Esri's NAIP service, which has
-      newer years, was not reachable from our run. We fell back on Sentinel-2 for recent builds.
+      Computer) end in 2022-2023, before most of the missing plants were built. Esri's NAIP image service was
+      not reachable from our run. We fell back on 10 m Sentinel-2, which can't resolve plants of a few MW.
     - **FEMA's NRI table download moved**; the old `hazards.fema.gov` link redirects to a landing page. FEMA's ArcGIS
       service still serves the December 2025 data.
     - **LBNL's `emp.lbl.gov` blocks scripted downloads** (HTTP 403); the same file on `eta-publications.lbl.gov`
