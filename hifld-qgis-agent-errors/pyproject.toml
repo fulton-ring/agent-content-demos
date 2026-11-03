@@ -1,0 +1,30 @@
+[project]
+name = "hifld-qgis-agent-errors"
+version = "0.1.0"
+description = "Give an agent HIFLD Next and QGIS and see what it gets wrong"
+requires-python = ">=3.12"
+dependencies = [
+    "geopandas>=1.1",
+    "pyogrio>=0.11",
+    "pyarrow>=21",
+    "httpx>=0.28",
+    "marimo>=0.17",
+    "pandas>=2.3",
+    "pydantic-ai-slim[openai,mcp]>=1.0",
+]
+
+[dependency-groups]
+dev = ["ruff>=0.14", "ty>=0.0.1a20"]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+# A bare expression at the end of a marimo cell is what the cell displays.
+"*.py" = ["B018"]
