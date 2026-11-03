@@ -77,7 +77,7 @@ visible, 7 with a new pad at EIA's coordinates that wasn't on NAIP. Of the 15 pl
 confirmed (73%, 48% to 89%)**; 4 showed no yard within 500 m (one, Route 66 Energy Storage, is probably a coordinate
 error). The other 15 are under 20 MW, and 13 of them were too small to see or unclear at 10 m.
 
-**Run time:** 57 s for the notebook from a clean checkout, downloads included (64 s for `./run.sh` with `uv` setup); about 30 s with data cached. Drawing the 30 hand-check images takes about 3 minutes more.
+**Run time:** 57 s for the notebook from a clean checkout, downloads included (64 s for `./run.sh` with `uv` setup); about 30 s with data cached.
 
 ## What the spike shows
 

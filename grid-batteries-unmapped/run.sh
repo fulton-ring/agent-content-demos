@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # One command: run the notebook as a script, so every number comes from the code the reader sees.
 #   ./run.sh          downloads the data into data/ (first run only) and writes output/
-#   ./run.sh --chips  also redraws the hand-check images in screenshots/hand_check/ (about 3 minutes)
+#   ./run.sh --chips  also redraws the hand-check images in screenshots/hand_check/
 set -euo pipefail
 cd "$(dirname "$0")"
 
