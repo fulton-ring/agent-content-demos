@@ -46,7 +46,7 @@ All public and downloaded at run time; `output/provenance.csv` lists each URL an
 | Operating | 1,156 | 56,121 | 14,976 | **27%** | 50% |
 | Planned | 484 | 64,235 | 42,212 | **66%** | 15% |
 
-Adding EIA-860M raised the missing share of operating MW from #50's 19% to 27%, because 2026's builds are in it.
+EIA-860M agrees with the annual file: 1,002 of EIA-860 2025's 1,003 operable batteries are operating in it, and 144 of its 607 proposed ones have come online (`reconciliation_eia860_2025.csv`). Adding EIA-860M raised the missing share of operating MW from #50's 19% to 27%, because 2026's builds are in it.
 By year online (`batteries_by_year_online.csv`), operating MW missing is under 1% for batteries from 2022 or earlier,
 5% for 2023, 10% for 2024, 41% for 2025 and 55% for 2026. The gap is the layers' age, and it grows every month.
 Of the 698 operating batteries matched as units, 274 are still listed in Generating Units as planned.
@@ -77,7 +77,7 @@ visible, 7 with a new pad at EIA's coordinates that wasn't on NAIP. Of the 15 pl
 confirmed (73%, 48% to 89%)**; 4 showed no yard within 500 m (one, Route 66 Energy Storage, is probably a coordinate
 error). The other 15 are under 20 MW, and 13 of them were too small to see or unclear at 10 m.
 
-**Run time:** about 30 s with data cached; the first run adds the downloads (`output/run_time.csv`).
+**Run time:** 57 s for the notebook from a clean checkout, downloads included (64 s for `./run.sh` with `uv` setup); about 30 s with data cached. Drawing the 30 hand-check images takes about 3 minutes more.
 
 ## What the spike shows
 
