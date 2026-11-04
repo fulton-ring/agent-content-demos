@@ -344,18 +344,20 @@ def _(all_facilities, fri, gpd, nri, pd, tract_shapes):
 @app.cell
 def _(county_agreement, facilities, mo):
     _outside = facilities[facilities.join_status == "outside every 2020 tract"]
-    _no_fri = facilities[facilities.join_status == "county has no FRI value"]
+    _no_nri = facilities[facilities.join_status == "tract not in NRI"]
+    _joined = facilities[facilities.join_status == "joined"]
+    _mismatch = _joined[
+        _joined.county_fips_hifld.astype("string").str.zfill(5) != _joined.county_fips
+    ]
     mo.md(f"""
     **Where the misses are.** Outside every tract, by state: {
         _outside.state.value_counts().head(8).to_dict()
-    }. No FRI value, by state: {_no_fri.state.value_counts().head(8).to_dict()} (the FRI
-    rebuild covers the contiguous US; FEMA's values reach Alaska and Hawaii for some hazards).
+    }. In a tract NRI doesn't score, by state: {_no_nri.state.value_counts().head(8).to_dict()}.
 
     **Is our county the layer's county?** Share of joined facilities whose tract county matches
     the county FIPS the HIFLD layer carries: {
         ", ".join(f"{k} {v:.1%}" for k, v in county_agreement.items())
-    }. Mismatches are mostly Connecticut (NRI keeps the eight old counties; some layers use the
-    2022 planning regions) and points near county lines.
+    }. The mismatches by state: {_mismatch.state.value_counts().head(6).to_dict()}.
     """)
     return
 
