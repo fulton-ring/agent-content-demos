@@ -589,8 +589,10 @@ def _(mo):
 
     A tract score is not a building's risk. For every ranked hospital we ask FEMA's National
     Flood Hazard Layer which flood zone the point sits in (code copied from
-    `data-center-metro-hazard/`): **SFHA** (zones A and V, the 1%-a-year floodplain), **shaded
-    X** (moderate), **minimal**, **D** (undetermined) or **not mapped**. Then we compare with the
+    `data-center-metro-hazard/`; a point FEMA's service fails to answer 8 times in a row is
+    kept as "query failed" and counted): **SFHA** (zones A and V, the 1%-a-year floodplain),
+    **shaded X** (moderate), **minimal**, **D** (undetermined) or **not mapped**. Then we compare
+    with the
     tract's flood rating, taking the higher of its inland and coastal flood ratings.
     """)
     return
@@ -623,26 +625,29 @@ def _(ThreadPoolExecutor, cache, get_json, log, pd, ranked, time):
 
     def query_point(job: tuple[str, float, float]) -> dict:
         facility_id, lat, lon = job
-        payload = get_json(
-            _nfhl_url,
-            {
-                "geometry": f"{lon:.6f},{lat:.6f}",
-                "geometryType": "esriGeometryPoint",
-                "inSR": "4326",
-                "spatialRel": "esriSpatialRelIntersects",
-                "returnGeometry": "false",
-                "outFields": "FLD_ZONE,ZONE_SUBTY,SFHA_TF",
-                "f": "json",
-            },
-            cache / "nfhl" / f"{lat:.6f}_{lon:.6f}.json",
-        )
+        try:
+            payload = get_json(
+                _nfhl_url,
+                {
+                    "geometry": f"{lon:.6f},{lat:.6f}",
+                    "geometryType": "esriGeometryPoint",
+                    "inSR": "4326",
+                    "spatialRel": "esriSpatialRelIntersects",
+                    "returnGeometry": "false",
+                    "outFields": "FLD_ZONE,ZONE_SUBTY,SFHA_TF",
+                    "f": "json",
+                },
+                cache / "nfhl" / f"{lat:.6f}_{lon:.6f}.json",
+            )
+        except RuntimeError:
+            return {"facility_id": facility_id, "nfhl_flood_class": "query failed", "nfhl_zone": ""}
         flood, zone = flood_class(payload["features"])
         return {"facility_id": facility_id, "nfhl_flood_class": flood, "nfhl_zone": zone}
 
     _hosp = ranked[ranked.layer == "hospitals"]
     _jobs = list(zip(_hosp.facility_id, _hosp.geometry.y, _hosp.geometry.x, strict=True))
     _t0 = time.time()
-    with ThreadPoolExecutor(max_workers=12) as _pool:
+    with ThreadPoolExecutor(max_workers=6) as _pool:
         nfhl = pd.DataFrame(list(_pool.map(query_point, _jobs)))
     log.info("%d hospital points queried in NFHL in %.0f s", len(nfhl), time.time() - _t0)
     nfhl.nfhl_flood_class.value_counts()
