@@ -21,6 +21,8 @@ and FRI hurricane and heat exposure. Columns are in [`DATA_DICTIONARY.md`](DATA_
 ./run.sh --chips    # also redraws the hand-check images in screenshots/hand_check/
 ```
 
+The run reads EIA-860M September 2026. If EIA revises that file in place, the seeded hand-check sample can change and the label check stops the run; re-run `./run.sh --chips` and relabel `hand_check.csv`.
+
 To read it with outputs: `uv run marimo edit batteries.py`.
 
 ## The data
@@ -49,14 +51,14 @@ All public and downloaded at run time; `output/provenance.csv` lists each URL an
 EIA-860M agrees with the annual file: 1,002 of EIA-860 2025's 1,003 operable batteries are operating in it, and 144 of its 607 proposed ones have come online (`reconciliation_eia860_2025.csv`). Adding EIA-860M raised the missing share of operating MW from #50's 19% to 27%, because 2026's builds are in it.
 By year online (`batteries_by_year_online.csv`), operating MW missing is under 1% for batteries from 2022 or earlier,
 5% for 2023, 10% for 2024, 41% for 2025 and 55% for 2026. The gap is the layers' age, and it grows every month.
-Of the 698 operating batteries matched as units, 274 are still listed in Generating Units as planned.
+Of the 698 operating batteries matched as units, 274 are still listed in Generating Units as planned (HIFLD status P, L, T, U, V or TS; counted from `batteries.csv`, not printed by the notebook).
 
 **By state** (`batteries_by_state.csv`): operating MW missing is concentrated in **Texas (7,353 MW, 38% of its
 operating battery MW)**, **Arizona (2,337, 34%)** and **California (1,179, 7%)**, then Nevada and Utah. Planned MW
 missing: Texas 15,511, Arizona 5,558, California 4,533.
 
 **Queued** (`queue_battery_by_state.csv`): 3,969 active requests include a battery, **544,128 MW** of battery capacity,
-led by Texas (169,752 MW), California (98,526) and Oregon (43,718). None of it is built, so none is on any map;
+led by Texas (169,752 MW), California (98,526) and Oregon (43,718). 180 MW in 29 requests has no state, so the state table sums to 543,948 MW. None of it is built, so none is on any map;
 most queued capacity is historically withdrawn. 1,266 hybrid requests list a battery with no MW and count as zero; 914 MW has no county and is left out of the exposure table.
 
 **Exposure, missing vs. mapped** (`exposure_mapped_vs_missing.csv`): share of MW in high-exposure counties.
