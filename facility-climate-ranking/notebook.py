@@ -15,6 +15,10 @@ def _():
 
     import geopandas as gpd
     import marimo as mo
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
     import pandas as pd
     import requests
 
@@ -72,6 +76,7 @@ def _():
         log,
         mo,
         pd,
+        plt,
         results,
         started,
         time,
@@ -687,6 +692,32 @@ def _(nfhl, pd, ranked):
     }
     sfha_table
     return disagreement, hospitals_sfha, sfha_table
+
+
+@app.cell
+def _(hospitals_sfha, plt, results):
+    _levels = ["Very Low", "Relatively Low", "Relatively Moderate", "Relatively High", "Very High"]
+    _mapped = hospitals_sfha[
+        hospitals_sfha.nfhl_flood_class.isin(["SFHA", "shaded X", "minimal"])
+        & hospitals_sfha.tract_flood_rating.isin(_levels)
+    ]
+    _share = (
+        _mapped.assign(in_sfha=_mapped.nfhl_flood_class == "SFHA")
+        .groupby("tract_flood_rating")
+        .in_sfha.mean()
+        .reindex(_levels)
+    )
+    _fig, _ax = plt.subplots(figsize=(7, 3.2))
+    _ax.barh(_share.index, _share.to_numpy() * 100, color="#3b6ea5")
+    for _y, _v in enumerate(_share.to_numpy()):
+        _ax.text(_v * 100 + 0.1, _y, f"{_v:.1%}", va="center", fontsize=9)
+    _ax.set_xlabel("Hospitals inside FEMA's 1% floodplain (SFHA), %")
+    _ax.set_title("Tract flood rating vs. the flood zone under the hospital", fontsize=10)
+    _ax.spines[["top", "right"]].set_visible(False)
+    _fig.tight_layout()
+    _fig.savefig(results / "hospitals_sfha_by_rating.png", dpi=150)
+    _fig
+    return
 
 
 @app.cell
