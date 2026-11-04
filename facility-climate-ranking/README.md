@@ -39,10 +39,9 @@ for floods, and a tract's flood rating says little about the building.**
 Needs [uv](https://docs.astral.sh/uv/). It runs `notebook.py` as a script and writes everything
 to `results/`. The slow part is about 7,900 point queries to FEMA's NFHL service, which resets
 connections under load. Finished queries are cached, so rerun if it stops. A point that fails
-8 times is kept as "query failed" and counted. From an empty cache it took __CLEAN__ (first runs
-during development: 23 minutes with 12 threads before a fatal reset, then 10.5 minutes from a
-half-full cache). Cached, it takes about a minute. Downloads go to
-`~/.cache/facility-climate-ranking`, or set `FCR_CACHE`. To read the notebook with its outputs,
+8 times is kept as "query failed" and counted. **Run time:** 95 minutes from a clean checkout
+with an empty cache (2026-11-04), almost all NFHL queries; under a minute cached. Downloads go
+to `~/.cache/facility-climate-ranking`, or set `FCR_CACHE`. To read the notebook with its outputs,
 run `uv run marimo edit notebook.py`. Cost: $0.
 
 ## Data (all public, downloaded at run time, nothing downloaded is committed)
@@ -115,8 +114,8 @@ four scenarios in `results/top100_overlap.csv`):
 - Wildfire: Northeastern Nevada Regional (Elko, NV).
 
 **Hospitals, tract flood rating against NFHL class** (7,918 hospitals). 156 are in the SFHA,
-471 in shaded X, 6,573 in minimal hazard, 651 on no digital map, 66 in zone D, and 1 query
-failed. Full table: `results/hospitals_tract_vs_sfha.csv`.
+471 in shaded X, about 6,573 in minimal hazard, 651 on no digital map and 66 in zone D. NFHL
+failed to answer 0–2 points per run. Full table: `results/hospitals_tract_vs_sfha.csv`.
 
 ![Share of hospitals in the SFHA by tract flood rating](results/hospitals_sfha_by_rating.png)
 
@@ -143,7 +142,6 @@ failed. Full table: `results/hospitals_tract_vs_sfha.csv`.
 - Heat risk to hospitals beyond NRI's population loss rate, or any hospital list for heat.
 - Substations (no public HIFLD layer).
 - Inland flood futures (the FRI has none).
-
 ## Files
 
 `notebook.py` (the whole analysis, a [marimo](https://marimo.io) notebook), `known_hospitals.csv`,
