@@ -39,8 +39,8 @@ for floods, and a tract's flood rating says little about the building.**
 Needs [uv](https://docs.astral.sh/uv/). It runs `notebook.py` as a script and writes everything
 to `results/`. The slow part is about 7,900 point queries to FEMA's NFHL service, which resets
 connections under load. Finished queries are cached, so rerun if it stops. A point that fails
-8 times is kept as "query failed" and counted. **Run time:** 95 minutes from a clean checkout
-with an empty cache (2026-11-04), almost all NFHL queries; under a minute cached. Downloads go
+8 times is kept as "query failed" and counted. **Run time:** 81–95 minutes from a clean checkout
+with an empty cache (2026-11-04 and 2026-11-05), almost all NFHL queries; under a minute cached. Downloads go
 to `~/.cache/facility-climate-ranking`, or set `FCR_CACHE`. To read the notebook with its outputs,
 run `uv run marimo edit notebook.py`. Cost: $0.
 

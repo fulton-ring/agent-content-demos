@@ -475,8 +475,9 @@ def _(mo):
       with its county and block group. The 100 counties with the most are our known flood
       counties, and tracts with 25 or more are our known flood tracts.
     - **Hospitals named as flooded, damaged or evacuated in a named hurricane or wildfire**, from
-      HHS Office of Inspector General reports, state agencies and news reports, matched by hand
-      to HIFLD IDs in `known_hospitals.csv` (one source per row).
+      after-action reports (Urban Institute on Katrina, Toner et al. on Sandy, HHS ASPR TRACIE),
+      the Interior Department, and news and trade press, matched by hand to HIFLD IDs in
+      `known_hospitals.csv` (one source per row).
 
     The test: what share of facilities in known places rank in the top decile of their layer for
     the matching hazard? For flood we count a facility as top decile if it is in the top decile
