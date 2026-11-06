@@ -24,6 +24,8 @@ truncated input file. Model cost was **$0.35**. Compute was free.
 | Time | 39 min of pipeline time over 10 attempts (validation 15.0 min, one-sample runs 3 to 4.5 min each). 48 min from agent start to its final report, including the waits for a person |
 | Cost | $0.35 model (Claude Sonnet 5.5 via OpenRouter, 44 calls, 818k input tokens, 92% read from cache) + $0 compute = **$0.35** |
 
+![The scored run, from the notebook](score.png)
+
 **What a person did**, in the order it happened (all of it is in `log/events.jsonl`):
 
 1. **Environment.** Nextflow couldn't download the pipeline: this sandbox's GitHub proxy blocks
