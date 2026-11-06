@@ -1,0 +1,43 @@
+[project]
+name = "reducto-bigger-corpus"
+version = "0.1.0"
+description = "Does Reducto beat an open VLM pipeline on FinTabNet tables, scanned 990-EZs and #136's hard documents?"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "docling==2.138.0",
+    "jiwer==4.0.0",
+    "marimo==0.25.1",
+    "numpy==2.4.6",
+    "pillow==12.3.0",
+    "pyarrow==22.0.0",
+    "pydantic-ai-slim[openrouter]==2.55.0",
+    "pypdfium2==5.14.0",
+    "rapidfuzz==3.14.3",
+    "reductoai==0.25.0",
+    "reportlab==5.0.1",
+    "torch==2.14.1",
+    "torchvision==0.29.1",
+]
+
+[dependency-groups]
+dev = ["ruff==0.17.1", "ty==0.0.89"]
+
+[tool.uv]
+package = false
+
+# Docling's layout model needs PyTorch; the CPU build keeps the environment small (the default pulls in CUDA).
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+torchvision = { index = "pytorch-cpu" }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
