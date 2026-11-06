@@ -23,6 +23,7 @@ import gzip
 import hashlib
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -46,6 +47,52 @@ PIPELINE, RELEASE = "nf-core/rnaseq", "3.27.0"
 FREE_ARGS = {"-profile", "test,docker", "-resume"}  # plus --input/--outdir/-name/-w values
 MAX_TAIL = 4000
 APPROVAL_WAIT_S = 3600
+# The agent's shell runs only these programs, only inside its workspace, without secrets.
+ALLOWED = {
+    "ls",
+    "cat",
+    "head",
+    "tail",
+    "grep",
+    "zcat",
+    "gzip",
+    "gunzip",
+    "wc",
+    "find",
+    "file",
+    "md5sum",
+    "sort",
+    "uniq",
+    "cut",
+    "awk",
+    "sed",
+    "echo",
+    "printf",
+    "mkdir",
+    "cp",
+    "mv",
+    "rm",
+    "chmod",
+    "curl",
+    "wget",
+    "java",
+    "nextflow",
+    "./nextflow",
+    "docker",
+    "test",
+    "du",
+    "df",
+    "stat",
+    "tar",
+    "which",
+    "date",
+    "pwd",
+    "tr",
+    "column",
+    "diff",
+}
+DOCKER_READ_ONLY = {"ps", "images", "info", "version", "logs", "inspect"}
+OPERATORS = {"|", "||", "&&", ";", "&", ">", ">>", "<", "(", ")"}
 COLLAB_SOURCE = "https://raw.githubusercontent.com/nf-core/test-datasets/rnaseq/testdata/GSE110004/SRR6357073_1.fastq.gz"
 
 
@@ -111,14 +158,53 @@ def find_nextflow() -> str | None:
     return str(local) if local.exists() else shutil.which("nextflow")
 
 
-def shell(command: str, timeout_s: int = 600) -> str:
-    """Run a bash command in the workspace and return its exit code and output (tail).
+def clean_env() -> dict[str, str]:
+    """The environment for agent commands and runs, with API keys and tokens removed."""
+    secret = ("KEY", "TOKEN", "SECRET", "PASSWORD")
+    env = {k: v for k, v in os.environ.items() if not any(w in k.upper() for w in secret)}
+    return env | {"PATH": f"{WORKSPACE}:{os.environ['PATH']}", "NXF_ANSI_LOG": "false"}
 
-    Use it to install tools, inspect files and read logs. Do not start pipeline runs with it;
-    use launch_run. Timeout is capped at 900 seconds.
+
+def shell_refusal(command: str) -> str:
+    """Why a shell command is refused, or an empty string if it is allowed."""
+    if "`" in command or "$(" in command or "<(" in command:
+        return "no command substitution"
+    try:
+        lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+        lexer.whitespace_split = True
+        tokens = list(lexer)
+    except ValueError as err:
+        return f"could not parse: {err}"
+    head = True
+    for i, token in enumerate(tokens):
+        if token in OPERATORS:
+            head = token not in {">", ">>", "<"}
+            continue
+        if ".." in token or token.startswith("~"):
+            return "no '..' or '~' paths"
+        if token.startswith("/") and not token.startswith((str(WORKSPACE), "/dev/null")):
+            return f"path {token} is outside the workspace"
+        if head and token not in ALLOWED:
+            return f"{token} is not an allowed program"
+        if head and token in {"nextflow", "./nextflow"} and tokens[i + 1 : i + 2] == ["run"]:
+            return "start pipeline runs with launch_run so they are logged and approved"
+        if head and token == "docker" and not set(tokens[i + 1 : i + 2]) <= DOCKER_READ_ONLY:
+            return "docker is read-only here (ps, images, info, version, logs, inspect)"
+        head = False
+    return ""
+
+
+def shell(command: str, timeout_s: int = 600) -> str:
+    """Run a shell command in the workspace and return its exit code and output (tail).
+
+    Use it to install tools, inspect files and read logs. Only common file, download and
+    inspection programs are allowed, only on paths inside the workspace; no sudo, no scripts.
+    Do not start pipeline runs with it; use launch_run. Timeout is capped at 900 seconds.
     """
-    if "nextflow run" in command or "nextflow -bg" in command:
-        return "Refused: start pipeline runs with launch_run so they are logged and approved."
+    refusal = shell_refusal(command)
+    if refusal:
+        log_event("shell_refused", command=command, reason=refusal)
+        return f"Refused: {refusal}."
     started = time.monotonic()
     try:
         proc = subprocess.run(
@@ -127,7 +213,7 @@ def shell(command: str, timeout_s: int = 600) -> str:
             capture_output=True,
             text=True,
             timeout=min(max(timeout_s, 1), 900),
-            env=os.environ | {"PATH": f"{WORKSPACE}:{os.environ['PATH']}"},
+            env=clean_env(),
         )
     except subprocess.TimeoutExpired as err:
         log_event("shell", command=command, exit="timeout", seconds=time.monotonic() - started)
@@ -191,7 +277,7 @@ def launch_run(
         cwd=folder,
         stdout=out,
         stderr=subprocess.STDOUT,
-        env=os.environ | {"NXF_ANSI_LOG": "false"},
+        env=clean_env(),
     )
     run = state["runs"].setdefault(run_name, {"attempts": 0})
     run.update(
