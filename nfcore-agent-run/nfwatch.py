@@ -36,7 +36,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent, Tool
-from pydantic_ai.messages import ModelMessagesTypeAdapter
+from pydantic_ai.messages import ModelMessagesTypeAdapter, ModelResponse
 from pydantic_ai.models.openrouter import OpenRouterModel, OpenRouterModelSettings
 from pydantic_ai.usage import UsageLimits
 
@@ -351,7 +351,7 @@ def request_approval(change: ChangeRequest) -> str:
     pending.mkdir(exist_ok=True)
     approval_id = f"a{len(list(pending.glob('*.request.json'))) + 1}"
     (pending / f"{approval_id}.request.json").write_text(change.model_dump_json(indent=1))
-    log_event("approval_requested", id=approval_id, **change.model_dump())
+    log_event("approval_requested", id=approval_id, change=change.model_dump())
     answer_path = pending / f"{approval_id}.answer.json"
     deadline = time.monotonic() + APPROVAL_WAIT_S
     while not answer_path.exists() and time.monotonic() < deadline:
@@ -390,11 +390,17 @@ def prepare() -> None:
 
 
 def session_costs() -> list[float]:
-    """Model cost of each earlier agent session, from the log."""
+    """Model cost of each earlier agent session (its last reported running total), from the log."""
     if not LOG.exists():
         return []
-    events = [json.loads(line) for line in LOG.read_text().splitlines()]
-    return [e["cost_usd"] for e in events if e["kind"] in {"report", "budget_stop"}]
+    costs: list[float] = []
+    for line in LOG.read_text().splitlines():
+        event = json.loads(line)
+        if event["kind"] == "agent_started":
+            costs.append(0.0)
+        elif "cost_usd" in event and costs:
+            costs[-1] = max(costs[-1], event["cost_usd"])
+    return costs
 
 
 async def run_agent(note: str) -> None:
@@ -429,6 +435,8 @@ async def run_agent(note: str) -> None:
     prompt = "Start the job in the brief."
     if note:
         history = ModelMessagesTypeAdapter.validate_json(messages_path.read_bytes())
+        if isinstance(history[-1], ModelResponse):  # a tool call the last session never answered
+            history = history[:-1]
         prompt = f"A person replied to your report: {note}\nCarry on with the job in the brief."
         log_event("agent_resumed", note=note)
     budget_left = BUDGET_USD - sum(session_costs())
