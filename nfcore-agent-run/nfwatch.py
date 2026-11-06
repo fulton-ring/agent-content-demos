@@ -20,6 +20,7 @@ NFWATCH_LOG (default log/events.jsonl).
 """
 
 import asyncio
+import contextlib
 import gzip
 import hashlib
 import json
@@ -479,6 +480,23 @@ async def run_agent(note: str) -> None:
     )
 
 
+# The machine has 4 CPUs; nf-test's CI config gives each process 2. Two tools write the thread
+# count into an output file, so we also checksum those files with the count set back to 2.
+THREAD_RECORDS = ((b'"threads": 4', b'"threads": 2'), (b'"-T" "4"', b'"-T" "2"'))
+
+
+def content_md5s(path: Path) -> tuple[str, str]:
+    """md5 the way nf-test takes it (gzip files decompressed), and again with threads set to 2."""
+    data = path.read_bytes()
+    if path.suffix == ".gz":
+        with contextlib.suppress(EOFError, gzip.BadGzipFile, OSError):  # damaged: as it is
+            data = gzip.decompress(data)
+    normalised = data
+    for old, new in THREAD_RECORDS:
+        normalised = normalised.replace(old, new)
+    return hashlib.md5(data).hexdigest(), hashlib.md5(normalised).hexdigest()
+
+
 def manifest() -> None:
     """Write each run's output checksums and Nextflow traces into results/ for scoring."""
     out = HERE / "results"
@@ -489,13 +507,12 @@ def manifest() -> None:
         for trace in folder.glob("trace_*.txt"):
             shutil.copy(trace, target / trace.name)
         results = folder / "results"
-        rows = ["path\tmd5"]
-        for path in sorted(p for p in results.rglob("*") if results.exists()):
-            rel = path.relative_to(results)
-            digest = hashlib.md5(path.read_bytes()).hexdigest() if path.is_file() else ""
-            rows.append(f"{rel}\t{digest}")
+        rows = ["path\tmd5\tmd5_threads2"]
+        for path in sorted(results.rglob("*")) if results.exists() else []:
+            digests = content_md5s(path) if path.is_file() else ("", "")
+            rows.append("\t".join([str(path.relative_to(results)), *digests]))
         (target / "outputs.tsv").write_text("\n".join(rows) + "\n")
-    log_event("manifest", runs=[p.name for p in out.iterdir() if p.is_dir()])
+    log_event("manifest", runs=sorted(p.name for p in out.iterdir() if p.is_dir()))
 
 
 def main() -> None:

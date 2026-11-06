@@ -7,15 +7,15 @@ app = marimo.App(width="medium")
 @app.cell
 def _():
     import json
-    import re
     import urllib.request
+    from collections import Counter
     from pathlib import Path
 
     import marimo as mo
     import pandas as pd
 
     here = Path(__file__).parent
-    return Path, here, json, mo, pd, re, urllib
+    return Counter, here, json, mo, pd, urllib
 
 
 @app.cell
@@ -108,9 +108,13 @@ def _(mo):
 
     nf-core/rnaseq ships nf-test snapshots. `tests/default.nf.test.snap` at the 3.27.0 tag
     records, for `-profile test`: the number of tasks that succeed, every output path, and md5
-    checksums of the 143 output files whose content is stable from run to run. We download it
-    and compare it with the validation run's outputs (`results/validation/outputs.tsv`, written by
-    `nfwatch.py manifest` from the run's output folder) and trace.
+    checksums of the 143 output files whose content is stable from run to run (nf-test hashes a
+    `.gz` file by its decompressed content). We download it and compare it with the validation
+    run's last attempt: its trace, and `results/validation/outputs.tsv`, which
+    `nfwatch.py manifest` wrote from the run's output folder.
+
+    Files are listed in the snapshot by name only, and five samples share names such as
+    `cmd_info.json`, so we compare the multiset of checksums for each file name.
     """)
     return
 
@@ -121,39 +125,41 @@ def _(json, urllib):
     with urllib.request.urlopen(snap_url, timeout=60) as resp:
         assert resp.status == 200
         snapshot = json.loads(resp.read())["Params: default"]["content"]
-    expected_tasks, _versions, expected_paths, expected_md5 = snapshot
-    expected_md5 = dict(item.rsplit(":md5,", 1) for item in expected_md5)
+    expected_tasks, _versions, expected_paths, expected_files = snapshot
+    expected_md5 = [item.rsplit(":md5,", 1) for item in expected_files]
     len(expected_paths), len(expected_md5), expected_tasks
     return expected_md5, expected_paths, expected_tasks
 
 
 @app.cell
-def _(expected_md5, expected_paths, expected_tasks, here, pd):
+def _(Counter, expected_md5, expected_paths, expected_tasks, here, pd):
     val_dir = here / "results" / "validation"
     outputs = pd.read_csv(val_dir / "outputs.tsv", sep="\t", dtype=str).fillna("")
-    trace = pd.concat(pd.read_csv(t, sep="\t") for t in sorted(val_dir.glob("trace_*.txt")))
-    succeeded_tasks = int(trace["status"].isin(["COMPLETED", "CACHED"]).sum())
+    last_trace = pd.read_csv(sorted(val_dir.glob("trace_*.txt"))[-1], sep="\t")
+    task_status = last_trace["status"].value_counts().to_dict()
 
     stable = [p for p in expected_paths if not p.startswith("pipeline_info/")]
-    got_paths = set(outputs["path"])
-    missing_paths = sorted(set(stable) - got_paths)
+    missing_paths = sorted(set(stable) - set(outputs["path"]))
 
-    by_name = outputs.assign(name=outputs["path"].str.rsplit("/", n=1).str[-1])
+    names = outputs["path"].str.rsplit("/", n=1).str[-1]
     md5_rows = []
-    for name, want in expected_md5.items():
-        got = set(by_name.loc[by_name["name"] == name, "md5"])
-        md5_rows.append({"file": name, "match": want in got, "found": bool(got)})
+    for name, wanted in Counter(n for n, _ in expected_md5).items():
+        want = Counter(m for n, m in expected_md5 if n == name)
+        got = outputs[names == name]
+        exact = sum((want & Counter(got["md5"])).values())
+        threads2 = sum((want & Counter(got["md5_threads2"])).values())
+        md5_rows.append({"file": name, "expected": wanted, "exact": exact, "threads2": threads2})
     md5_check = pd.DataFrame(md5_rows)
     answer_key = pd.Series(
         {
             "tasks succeeded (expected)": expected_tasks,
-            "tasks succeeded (run)": succeeded_tasks,
+            "tasks succeeded, last attempt (run + cached)": task_status.get("COMPLETED", 0)
+            + task_status.get("CACHED", 0),
             "expected output paths": len(stable),
             "expected paths missing": len(missing_paths),
-            "stable files checked": len(md5_check),
-            "md5 matches": int(md5_check["match"].sum()),
-            "md5 mismatches": int((md5_check["found"] & ~md5_check["match"]).sum()),
-            "files not found": int((~md5_check["found"]).sum()),
+            "stable files checked": int(md5_check["expected"].sum()),
+            "md5 exact matches": int(md5_check["exact"].sum()),
+            "md5 matches with thread count set to 2": int(md5_check["threads2"].sum()),
         }
     )
     answer_key
@@ -161,9 +167,19 @@ def _(expected_md5, expected_paths, expected_tasks, here, pd):
 
 
 @app.cell
+def _(mo):
+    mo.md(r"""
+    The files that don't match exactly are salmon's `cmd_info.json` and featureCounts'
+    `*.featureCounts.tsv`. Both write the number of threads into the file (`"threads": 4`,
+    `"-T" "4"`). This machine has 4 CPUs; nf-test's CI config gives each process 2. With that one
+    number set back to 2 (`THREAD_RECORDS` in `nfwatch.py`), the checksums match.
+    """)
+    return
+
+
+@app.cell
 def _(md5_check, missing_paths):
-    mismatched = md5_check[~md5_check["match"]]
-    mismatched, missing_paths[:20]
+    md5_check[md5_check["exact"] < md5_check["expected"]], missing_paths[:20]
     return
 
 
