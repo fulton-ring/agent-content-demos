@@ -16,7 +16,8 @@ Usage:
 
 Config (environment): OPENROUTER_API_KEY, NFWATCH_WORKSPACE (default .nfrun),
 NFWATCH_MODEL (default anthropic/claude-sonnet-5.5), NFWATCH_BUDGET_USD (default 2.0),
-NFWATCH_LOG (default log/events.jsonl).
+NFWATCH_LOG (default log/events.jsonl), NFWATCH_PIPELINE / NFWATCH_RELEASE / NFWATCH_PROFILE
+(default nf-core/rnaseq, 3.27.0, test,docker; change brief.md to match).
 """
 
 import asyncio
@@ -46,8 +47,10 @@ WORKSPACE = Path(os.environ.get("NFWATCH_WORKSPACE", HERE / ".nfrun")).resolve()
 LOG = Path(os.environ.get("NFWATCH_LOG", HERE / "log" / "events.jsonl"))
 MODEL = os.environ.get("NFWATCH_MODEL", "anthropic/claude-sonnet-5.5")
 BUDGET_USD = float(os.environ.get("NFWATCH_BUDGET_USD", "2.0"))
-PIPELINE, RELEASE = "nf-core/rnaseq", "3.27.0"
-FREE_ARGS = {"-profile", "test,docker", "-resume"}  # plus --input/--outdir/-name/-w values
+PIPELINE = os.environ.get("NFWATCH_PIPELINE", "nf-core/rnaseq")
+RELEASE = os.environ.get("NFWATCH_RELEASE", "3.27.0")
+PROFILE = os.environ.get("NFWATCH_PROFILE", "test,docker")
+FREE_ARGS = {"-profile", PROFILE, "-resume"}  # plus --input/--outdir/-name/-w values
 MAX_TAIL = 4000
 APPROVAL_WAIT_S = 3600
 # The agent's shell runs only these programs, only inside its workspace, without secrets.
@@ -240,7 +243,7 @@ def unapproved(extra_args: list[str], approved: list[str]) -> list[str]:
 def launch_run(
     run_name: str, samplesheet: str = "", resume: bool = False, extra_args: list[str] | None = None
 ) -> str:
-    """Start one nf-core/rnaseq 3.27.0 run in the background with -profile test,docker.
+    """Start one pipeline run in the background (nf-core/rnaseq 3.27.0, -profile test,docker).
 
     run_name: e.g. validation or sample_WT_REP1. samplesheet: path or URL for --input, empty for
     the test profile's own. resume: add -resume (use for retries, same run_name). extra_args:
@@ -268,7 +271,7 @@ def launch_run(
         "-r",
         RELEASE,
         "-profile",
-        "test,docker",
+        PROFILE,
         "--outdir",
         str(folder / "results"),
         "-w",

@@ -186,6 +186,45 @@ def _(md5_check, missing_paths):
 @app.cell
 def _(mo):
     mo.md(r"""
+    ### Do the one-sample batch runs agree with the validation run?
+
+    The answer key only covers the validation run. For the batch, we compare each one-sample
+    run's files with the validation run's files at the same path, for the file names nf-test
+    treats as stable. MultiQC's tables are left out: they pool every sample in a run, so a
+    one-sample run's tables are supposed to differ.
+    """)
+    return
+
+
+@app.cell
+def _(expected_md5, here, pd):
+    stable_names = {name for name, _ in expected_md5}
+
+    def stable_files(run: str) -> pd.Series:
+        table = pd.read_csv(here / "results" / run / "outputs.tsv", sep="\t", dtype=str)
+        table = table.dropna(subset=["md5_threads2"])
+        keep = table["path"].str.rsplit("/", n=1).str[-1].isin(stable_names) & ~table[
+            "path"
+        ].str.startswith("multiqc/")
+        return table[keep].set_index("path")["md5_threads2"]
+
+    validation_files = stable_files("validation")
+    batch_rows = []
+    for sample_dir in sorted((here / "results").glob("sample_*")):
+        files = stable_files(sample_dir.name)
+        shared = files.index.intersection(validation_files.index)
+        same = int((files[shared] == validation_files[shared]).sum())
+        batch_rows.append(
+            {"run": sample_dir.name, "files compared": len(shared), "identical": same}
+        )
+    batch_check = pd.DataFrame(batch_rows)
+    batch_check
+    return (batch_check,)
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
     ## 4. Human interventions
 
     Everything a person did: answering an approval request, or stepping in by hand (logged with
@@ -273,11 +312,12 @@ def _(events, pd):
 
 
 @app.cell
-def _(answer_key, cost, here, interventions, json, totals):
+def _(answer_key, batch_check, cost, here, interventions, json, totals):
     # The headline numbers the README quotes, printed when run as a script and saved to disk.
     score = {
         "runs": totals.to_dict(),
         "answer_key": answer_key.to_dict(),
+        "batch_vs_validation": batch_check.to_dict(orient="records"),
         "interventions": int((interventions["kind"] == "intervention").sum()),
         "approvals_answered": int((interventions["kind"] == "approval_answered").sum()),
         "cost": cost.to_dict(),
