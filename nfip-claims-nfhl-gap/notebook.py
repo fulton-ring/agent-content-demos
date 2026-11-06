@@ -103,27 +103,25 @@ def _():
 
 @app.cell
 def _(mo):
-    mo.md(
-        """
-        ## The data
+    mo.md("""
+    ## The data
 
-        Four public sources, all downloaded at run time into `data/` (not committed). A
-        file already pulled today is reused, so a second run the same day is quick.
+    Four public sources, all downloaded at run time into `data/` (not committed). A
+    file already pulled today is reused, so a second run the same day is quick.
 
-        1. **NFIP Redacted Claims v3** from the OpenFEMA API: one row per claim since 1978.
-           We only need three columns: `nfipRatedCommunityNumber` (the CID), `countyCode`
-           and `state`. The bulk file refuses scripted downloads, so we page the API,
-           10,000 rows a call.
-        2. **The NFIP Community Layer** from HIFLD Next's preserved copy, in two of FEMA's
-           three versions: *Comprehensive* (every CID, overlaps allowed) and *No Overlaps
-           Whole* (the version FEMA also publishes on ArcGIS Online). This is the copy that
-           survives November 9.
-        3. **NFHL Political Jurisdictions** (MapServer layer 22): attributes only, every
-           polygon's CID, county and map ID.
-        4. **FEMA's Community Status Book** from OpenFEMA: every NFIP community, whether it
-           participates, and its current effective map date.
-        """
-    )
+    1. **NFIP Redacted Claims v3** from the OpenFEMA API: one row per claim since 1978.
+       We only need three columns: `nfipRatedCommunityNumber` (the CID), `countyCode`
+       and `state`. The bulk file refuses scripted downloads, so we page the API,
+       10,000 rows a call.
+    2. **The NFIP Community Layer** from HIFLD Next's preserved copy, in two of FEMA's
+       three versions: *Comprehensive* (every CID, overlaps allowed) and *No Overlaps
+       Whole* (the version FEMA also publishes on ArcGIS Online). This is the copy that
+       survives November 9.
+    3. **NFHL Political Jurisdictions** (MapServer layer 22): attributes only, every
+       polygon's CID, county and map ID.
+    4. **FEMA's Community Status Book** from OpenFEMA: every NFIP community, whether it
+       participates, and its current effective map date.
+    """)
     return
 
 
@@ -241,15 +239,13 @@ def _(claims, community_layer_cids, mo, nfhl, nfhl_cids, pd, status_book):
 
 @app.cell
 def _(mo):
-    mo.md(
-        """
-        ## The match
+    mo.md("""
+    ## The match
 
-        For each source, a claim is *placed* if its CID appears in that source. That's the
-        join anyone mapping claims by community does. 48 claims have no CID at all and count
-        as unplaced everywhere.
-        """
-    )
+    For each source, a claim is *placed* if its CID appears in that source. That's the
+    join anyone mapping claims by community does. 48 claims have no CID at all and count
+    as unplaced everywhere.
+    """)
     return
 
 
@@ -281,17 +277,15 @@ def _(PULL_DATE, RESULTS, claims, community_layer_cids, mo, nfhl_cids, pd):
 
 @app.cell
 def _(mo):
-    mo.md(
-        """
-        ## The communities the NFHL can't place
+    mo.md("""
+    ## The communities the NFHL can't place
 
-        Group the claims the NFHL misses by CID and look each CID up in the Community Status
-        Book and the Community Layer. Some CIDs are in neither: placeholder `999999`, and
-        old CIDs FEMA retired (for example `125098`, 6,524 claims in Miami-Dade County).
-        The Community Layer can't place those either, so we split them out and count only
-        real communities as the NFHL's gap.
-        """
-    )
+    Group the claims the NFHL misses by CID and look each CID up in the Community Status
+    Book and the Community Layer. Some CIDs are in neither: placeholder `999999`, and
+    old CIDs FEMA retired (for example `125098`, 6,524 claims in Miami-Dade County).
+    The Community Layer can't place those either, so we split them out and count only
+    real communities as the NFHL's gap.
+    """)
     return
 
 
@@ -355,26 +349,30 @@ def _(mo, real_gap):
 
 @app.cell
 def _(mo):
-    mo.md(
-        """
-        ## Why the NFHL lacks them
+    mo.md("""
+    ## Why the NFHL lacks them
 
-        A missing CID can mean two different things:
+    A missing CID can mean two different things:
 
-        - **No digital flood map there at all.** The community's current map is an old paper
-          FIRM that was never loaded into the NFHL, so there's no NFHL polygon of any kind on
-          its land. A claim there can't be placed on the NFHL by any crosswalk.
-        - **Mapped under another CID.** The land is in the NFHL, but inside a polygon filed
-          under a county, parish or neighboring community. Then the gap is bookkeeping: a
-          crosswalk from the missing CID to the one the NFHL uses would place the claims.
+    - **No digital flood map there at all.** The community's current map is an old paper
+      FIRM that was never loaded into the NFHL, so no FIRM panel in the NFHL covers its
+      land. A claim there can't be put on a digital flood map by any crosswalk.
+    - **Mapped under another CID.** The land is on a digital FIRM panel, inside a
+      polygon filed under a county, parish or neighboring community. Then the gap is
+      bookkeeping: a crosswalk from the missing CID to the one the NFHL uses would place
+      the claims.
 
-        To tell them apart, take a point inside each missing community's Community Layer
-        polygon (the largest part, for communities in several pieces) and ask the NFHL what
-        is there: which Political Jurisdiction polygon (layer 22), and whether any FIRM
-        panel (layer 3). Results are cached per pull date, since this is about 3,000 calls
-        to a server that drops connections.
-        """
-    )
+    To tell them apart, take a point inside each missing community's Community Layer
+    polygon (the largest part, for communities in several pieces) and ask the NFHL what
+    is there: which Political Jurisdiction polygon (layer 22), and whether any FIRM
+    panel (layer 3). Results are cached per pull date, since this is about 3,000 calls
+    to a server that drops connections.
+
+    The FIRM panel matters. Our hand check found Slidell's land inside a "Saint Tammany
+    Parish" polygon, but that polygon comes from the City of Mandeville's own map
+    (DFIRM `220202`), which draws the parish around Mandeville and has no panel over
+    Slidell. A political polygon with no panel under it is not a flood map.
+    """)
     return
 
 
@@ -430,16 +428,14 @@ def _(
 def _(point_checks, real_gap):
     _COUNTY_WORDS = "COUNTY|PARISH|BOROUGH|MUNICIPIO|CENSUS AREA"
     causes = real_gap.merge(point_checks, on="cid", how="left")
-    _names_at_point = causes["nfhl_name_at_point"].fillna("")
-    causes["cause"] = "no digital flood map at the point"
-    causes.loc[causes["nfhl_cid_at_point"].notna(), "cause"] = (
-        "mapped under another community's CID"
-    )
-    causes.loc[
-        causes["nfhl_cid_at_point"].notna()
-        & _names_at_point.str.upper().str.contains(_COUNTY_WORDS),
-        "cause",
-    ] = "mapped under the county's or parish's CID"
+    _polygon = causes["nfhl_cid_at_point"].notna()
+    _panel = causes["firm_panel_at_point"].fillna(False).astype(bool)
+    _county = causes["nfhl_name_at_point"].fillna("").str.upper().str.contains(_COUNTY_WORDS)
+    causes["cause"] = "no map: nothing in the NFHL at the point"
+    causes.loc[_polygon & ~_panel, "cause"] = "no map: a neighbor's polygon, but no FIRM panel"
+    causes.loc[_panel & ~_polygon, "cause"] = "mapped: FIRM panel, but no political polygon"
+    causes.loc[_panel & _polygon & ~_county, "cause"] = "mapped under another community's CID"
+    causes.loc[_panel & _polygon & _county, "cause"] = "mapped under the county's or parish's CID"
     causes.loc[~causes["in_community_layer"], "cause"] = "no Community Layer polygon to check"
     cause_table = (
         causes.groupby("cause")
@@ -457,15 +453,13 @@ def _(point_checks, real_gap):
 
 @app.cell
 def _(mo):
-    mo.md(
-        """
-        ### The four hand-checked communities
+    mo.md("""
+    ### The four hand-checked communities
 
-        The issue names Slidell, St. Charles Parish, Beaumont and Port Arthur. Their rows are
-        below; `handcheck.md` has what we found when we looked at each one in FEMA's map
-        viewer and Map Service Center.
-        """
-    )
+    The issue names Slidell, St. Charles Parish, Beaumont and Port Arthur. Their rows are
+    below; `handcheck.md` has what we found when we looked at each one in FEMA's map
+    viewer and Map Service Center.
+    """)
     return
 
 
@@ -491,22 +485,20 @@ def _(causes, mo):
 
 @app.cell
 def _(mo):
-    mo.md(
-        """
-        ## Could a county crosswalk place them instead?
+    mo.md("""
+    ## Could a county crosswalk place them instead?
 
-        Without the Community Layer, the obvious fallback is the claim's county. Every claim
-        with a `countyCode` can go to its county, and the NFHL does draw most counties' own
-        unincorporated areas. So the crosswalk is: claim county → the NFHL polygon(s) of that
-        county's own CID (a layer 22 polygon in that county whose name says county, parish or
-        borough).
+    Without the Community Layer, the obvious fallback is the claim's county. Every claim
+    with a `countyCode` can go to its county, and the NFHL does draw most counties' own
+    unincorporated areas. So the crosswalk is: claim county → the NFHL polygon(s) of that
+    county's own CID (a layer 22 polygon in that county whose name says county, parish or
+    borough).
 
-        Two counts matter. How many missing claims the crosswalk puts *somewhere* on the NFHL,
-        and how many it puts on the *right land*: the point check found the community inside
-        that same county polygon. The rest land on the county's unincorporated area, which
-        is not where the claim is.
-        """
-    )
+    Two counts matter. How many missing claims the crosswalk puts *somewhere* on the NFHL,
+    and how many it puts on the *right land*: the point check found the community inside
+    that same county polygon. The rest land on the county's unincorporated area, which
+    is not where the claim is.
+    """)
     return
 
 
@@ -548,15 +540,13 @@ def _(causes, claims, nfhl, nfhl_cids, pd):
 
 @app.cell
 def _(mo):
-    mo.md(
-        """
-        ## Participating communities with no NFHL polygon
+    mo.md("""
+    ## Participating communities with no NFHL polygon
 
-        The claims view weights big flood towns. The Status Book view counts every
-        community in the NFIP today, flooded or not: how many participating communities
-        have no polygon under their own CID in the NFHL, by state.
-        """
-    )
+    The claims view weights big flood towns. The Status Book view counts every
+    community in the NFIP today, flooded or not: how many participating communities
+    have no polygon under their own CID in the NFHL, by state.
+    """)
     return
 
 
@@ -583,15 +573,13 @@ def _(RESULTS, mo, nfhl_cids, status_book):
 
 @app.cell
 def _(mo):
-    mo.md(
-        """
-        ## Is FEMA's ArcGIS Online copy still up?
+    mo.md("""
+    ## Is FEMA's ArcGIS Online copy still up?
 
-        FEMA also publishes the Community Layer as an ArcGIS Online feature service,
-        *NFIP Community Layer (flattened) 2024v1*, with no stated end date. Each run checks
-        that the item still exists and its layer still answers a count query.
-        """
-    )
+    FEMA also publishes the Community Layer as an ArcGIS Online feature service,
+    *NFIP Community Layer (flattened) 2024v1*, with no stated end date. Each run checks
+    that the item still exists and its layer still answers a count query.
+    """)
     return
 
 
@@ -642,25 +630,23 @@ def _(RESULTS, STARTED, agol, causes, gap, json, time):
 
 @app.cell
 def _(mo):
-    mo.md(
-        """
-        ## What didn't work, and what this doesn't show
+    mo.md("""
+    ## What didn't work, and what this doesn't show
 
-        - **The bulk claims file refuses scripted downloads** (HTTP 403), so the notebook
-          pages the OpenFEMA API instead: about 275 calls, two to three minutes.
-        - **FEMA's NFHL server resets connections** on a good share of calls. Every call is
-          retried with backoff up to six times; a run that still fails stops rather than
-          reporting partial numbers.
-        - **One point per community.** The cause check asks the NFHL about one point inside
-          each community's largest piece. A community partly on a digital map and partly
-          not (Port Arthur is split this way) gets the answer for that one point.
-        - **The Community Layer is frozen at December 2024** and FEMA says it "should not be
-          considered authoritative." Its boundaries are what we test against, so its errors
-          carry into the cause check.
-        - **The NFHL changes as new maps go effective**, and claims update monthly. Every
-          number here is for the pull date printed above.
-        """
-    )
+    - **The bulk claims file refuses scripted downloads** (HTTP 403), so the notebook
+      pages the OpenFEMA API instead: about 275 calls, two to three minutes.
+    - **FEMA's NFHL server resets connections** on a good share of calls. Every call is
+      retried with backoff up to six times; a run that still fails stops rather than
+      reporting partial numbers.
+    - **One point per community.** The cause check asks the NFHL about one point inside
+      each community's largest piece. A community partly on a digital map and partly
+      not (Port Arthur is split this way) gets the answer for that one point.
+    - **The Community Layer is frozen at December 2024** and FEMA says it "should not be
+      considered authoritative." Its boundaries are what we test against, so its errors
+      carry into the cause check.
+    - **The NFHL changes as new maps go effective**, and claims update monthly. Every
+      number here is for the pull date printed above.
+    """)
     return
 
 
