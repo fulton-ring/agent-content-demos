@@ -5,12 +5,12 @@ Checked 2026-11-06 against FEMA's live NFHL MapServer
 Status Book on OpenFEMA. Each point is a spot inside the community's largest piece in the
 Community Layer (HIFLD Next copy, Comprehensive), the same point the notebook uses.
 
-| CID | Community | Claims | Effective map (Status Book) | NFHL polygons under its CID | NFHL polygon at the point | FIRM panel at the point |
-|---|---|---|---|---|---|---|
-| 220204 | Slidell, City of (LA) | 9,935 | 04/21/99 | 0 | "Saint Tammany Parish", CID 225205, from DFIRM `220202` | none |
-| 220160 | St. Charles Parish (LA) | 7,603 | 06/16/92 | 0 | none | none |
-| 485457 | Beaumont, City of (TX) | 7,312 | 08/06/02 | 0 | none | none |
-| 485499 | Port Arthur, City of (TX) | 6,998 | 05/04/92 | 0 | none | `22023C0575H` (Cameron Parish, LA) |
+| CID | Community | Claims | Effective map (Status Book) | NFHL polygons under its CID | NFHL polygon at the point | FIRM panel at the point | Flood zone at the point |
+|---|---|---|---|---|---|---|---|
+| 220204 | Slidell, City of (LA) | 9,935 | 04/21/99 | 0 | "Saint Tammany Parish", CID 225205, from DFIRM `220202` | none | none |
+| 220160 | St. Charles Parish (LA) | 7,603 | 06/16/92 | 0 | none | none | none |
+| 485457 | Beaumont, City of (TX) | 7,312 | 08/06/02 | 0 | none | none | none |
+| 485499 | Port Arthur, City of (TX) | 6,998 | 05/04/92 | 0 | none | `22023C0575H` (Cameron Parish, LA) | none |
 
 ## What each one shows
 
@@ -36,10 +36,10 @@ missing too. Panels that overlap Beaumont's bounding box belong to the neighbori
 **Port Arthur.** Also in Jefferson County, so the same absence. The point inside its
 largest piece lands on a Cameron Parish, Louisiana panel, because that panel extends over
 Sabine Lake, which the Community Layer includes in Port Arthur's boundary. The notebook
-therefore files Port Arthur as "mapped: FIRM panel, but no political polygon", which is
-technically what the point shows but misleading: Port Arthur's developed land has no
-digital map. We leave the automated call as it is and flag it here, as an example of the
-one-point method's limit.
+has no flood zone there, so the notebook files Port Arthur as no map. This case is why the
+notebook tests for a flood zone (layer 28) and not a FIRM panel (layer 3): panel
+rectangles run over county lines and water, and a first version that used panels wrongly
+counted 312 communities, Port Arthur among them, as mapped.
 
 ## Takeaway
 

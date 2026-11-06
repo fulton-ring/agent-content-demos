@@ -355,23 +355,28 @@ def _(mo):
     A missing CID can mean two different things:
 
     - **No digital flood map there at all.** The community's current map is an old paper
-      FIRM that was never loaded into the NFHL, so no FIRM panel in the NFHL covers its
-      land. A claim there can't be put on a digital flood map by any crosswalk.
-    - **Mapped under another CID.** The land is on a digital FIRM panel, inside a
-      polygon filed under a county, parish or neighboring community. Then the gap is
+      FIRM that was never loaded into the NFHL, so the NFHL has no flood zone on its land.
+      A claim there can't be put on a digital flood map by any crosswalk.
+    - **Mapped under another CID.** The NFHL has flood zones on the land, inside a
+      political polygon filed under a county, parish or neighboring community. Then the gap is
       bookkeeping: a crosswalk from the missing CID to the one the NFHL uses would place
       the claims.
 
     To tell them apart, take a point inside each missing community's Community Layer
     polygon (the largest part, for communities in several pieces) and ask the NFHL what
-    is there: which Political Jurisdiction polygon (layer 22), and whether any FIRM
-    panel (layer 3). Results are cached per pull date, since this is about 3,000 calls
-    to a server that drops connections.
+    is there: which Political Jurisdiction polygon (layer 22), and which flood zone, if
+    any (Flood Hazard Zones, layer 28). Every mapped area has a zone, including the
+    low-risk zone X, so no zone means no digital map at that spot. Results are cached
+    per pull date, since this is about 3,000 calls to a server that drops connections.
 
-    The FIRM panel matters. Our hand check found Slidell's land inside a "Saint Tammany
-    Parish" polygon, but that polygon comes from the City of Mandeville's own map
-    (DFIRM `220202`), which draws the parish around Mandeville and has no panel over
-    Slidell. A political polygon with no panel under it is not a flood map.
+    The flood zone is the test, not the political polygon. Our hand check found Slidell's
+    land inside a "Saint Tammany Parish" polygon, but that polygon comes from the City of
+    Mandeville's own map (DFIRM `220202`), which draws the parish around Mandeville and
+    has no flood zones over Slidell. We first tried FIRM panels (layer 3) as the test,
+    and dropped them: panel rectangles run over county lines, so 312 communities
+    "had a panel" that turned out to be a neighboring county's, with no flood zone under
+    it (Groves, Texas on an Orange County panel; Peoria, Illinois on a Tazewell County
+    one).
     """)
     return
 
@@ -408,7 +413,7 @@ def _(
         }
         try:
             _jur = arcgis_json(f"{NFHL}/22/query", {**_where, "outFields": "CID,POL_NAME1"})
-            _pan = arcgis_json(f"{NFHL}/3/query", {**_where, "outFields": "FIRM_PAN"})
+            _zon = arcgis_json(f"{NFHL}/28/query", {**_where, "outFields": "FLD_ZONE,DFIRM_ID"})
         except RuntimeError:
             return None  # left out of the cache, so the next run asks again
         _hits = [_f["attributes"] for _f in _jur["features"]]
@@ -418,7 +423,14 @@ def _(
             "lat": round(_pt.y, 5),
             "nfhl_cid_at_point": ";".join(str(_h["CID"]) for _h in _hits) or None,
             "nfhl_name_at_point": ";".join(str(_h["POL_NAME1"]) for _h in _hits) or None,
-            "firm_panel_at_point": len(_pan["features"]) > 0,
+            "flood_zone_at_point": ";".join(
+                str(_f["attributes"]["FLD_ZONE"]) for _f in _zon["features"]
+            )
+            or None,
+            "flood_map_at_point": ";".join(
+                str(_f["attributes"]["DFIRM_ID"]) for _f in _zon["features"]
+            )
+            or None,
         }
 
     # Ask in chunks and append each chunk to the cache, so a dropped run resumes.
@@ -427,7 +439,7 @@ def _(
             _rows = [r for r in _pool.map(_ask, _points[_start : _start + 120]) if r]
             if _rows:
                 pd.DataFrame(_rows).to_csv(_path, mode="a", header=not _path.exists(), index=False)
-    point_checks = pd.read_csv(_path, dtype={"cid": str, "nfhl_cid_at_point": str})
+    point_checks = pd.read_csv(_path, dtype=str)
     _unchecked = int(
         (real_gap["in_community_layer"] & ~real_gap["cid"].isin(point_checks["cid"])).sum()
     )
@@ -443,13 +455,13 @@ def _(point_checks, real_gap):
     _COUNTY_WORDS = "COUNTY|PARISH|BOROUGH|MUNICIPIO|CENSUS AREA"
     causes = real_gap.merge(point_checks, on="cid", how="left")
     _polygon = causes["nfhl_cid_at_point"].notna()
-    _panel = causes["firm_panel_at_point"].fillna(False).astype(bool)
+    _zone = causes["flood_zone_at_point"].notna()
     _county = causes["nfhl_name_at_point"].fillna("").str.upper().str.contains(_COUNTY_WORDS)
     causes["cause"] = "no map: nothing in the NFHL at the point"
-    causes.loc[_polygon & ~_panel, "cause"] = "no map: a neighbor's polygon, but no FIRM panel"
-    causes.loc[_panel & ~_polygon, "cause"] = "mapped: FIRM panel, but no political polygon"
-    causes.loc[_panel & _polygon & ~_county, "cause"] = "mapped under another community's CID"
-    causes.loc[_panel & _polygon & _county, "cause"] = "mapped under the county's or parish's CID"
+    causes.loc[_polygon & ~_zone, "cause"] = "no map: inside a political polygon, no flood zone"
+    causes.loc[_zone & ~_polygon, "cause"] = "mapped: flood zone, but no political polygon"
+    causes.loc[_zone & _polygon & ~_county, "cause"] = "mapped under another community's CID"
+    causes.loc[_zone & _polygon & _county, "cause"] = "mapped under the county's or parish's CID"
     causes.loc[causes["in_community_layer"] & causes["lon"].isna(), "cause"] = (
         "NFHL query failed (rerun)"
     )
@@ -491,7 +503,8 @@ def _(causes, mo):
                 "claims",
                 "effective_map_date",
                 "nfhl_name_at_point",
-                "firm_panel_at_point",
+                "flood_zone_at_point",
+                "flood_map_at_point",
                 "cause",
             ]
         ],
@@ -511,10 +524,11 @@ def _(mo):
     county's own CID (a layer 22 polygon in that county whose name says county, parish or
     borough).
 
-    Two counts matter. How many missing claims the crosswalk puts *somewhere* on the NFHL,
-    and how many it puts on the *right land*: the point check found the community inside
-    that same county polygon. The rest land on the county's unincorporated area, which
-    is not where the claim is.
+    Three counts matter. How many missing claims the crosswalk puts *somewhere* on the
+    NFHL; how many it puts on the *right land* (the point check found the community inside
+    that same county polygon); and how many of those land on an actual flood map (a flood
+    zone at the point). The rest land on the county's unincorporated area, which is not
+    where the claim is, or on a polygon with no map under it.
     """)
     return
 
@@ -526,7 +540,7 @@ def _(causes, claims, nfhl, nfhl_cids, pd):
     ]
     _county_cid = _county_polys.groupby("county_fips")["CID"].agg(lambda s: set(s.dropna()))
     _gap_claims = claims[claims["cid"].isin(causes["cid"])].merge(
-        causes[["cid", "nfhl_cid_at_point"]], on="cid"
+        causes[["cid", "nfhl_cid_at_point", "flood_zone_at_point"]], on="cid"
     )
     _targets = _gap_claims["countyCode"].map(_county_cid)
     _has_target = _targets.notna()
@@ -534,21 +548,26 @@ def _(causes, claims, nfhl, nfhl_cids, pd):
         bool(t) and isinstance(p, str) and bool(set(p.split(";")) & t)
         for t, p in zip(_targets.fillna(""), _gap_claims["nfhl_cid_at_point"], strict=True)
     ]
+    _zoned = [
+        r and isinstance(z, str)
+        for r, z in zip(_right_land, _gap_claims["flood_zone_at_point"], strict=True)
+    ]
     crosswalk = pd.DataFrame(
         [
             ("claims in real communities the NFHL lacks", len(_gap_claims)),
             ("  with a county code on the claim", int(_gap_claims["countyCode"].notna().sum())),
             ("  whose county has its own NFHL polygon", int(_has_target.sum())),
             ("  ...and the community lies inside that county polygon", int(sum(_right_land))),
+            ("  ...and the NFHL has a flood zone there", int(sum(_zoned))),
         ],
         columns=["county crosswalk", "claims"],
     )
     crosswalk["share (%)"] = (100 * crosswalk["claims"] / len(_gap_claims)).round(1)
-    _recovered = int(sum(_right_land))
+    _recovered = int(sum(_zoned))
     _with_crosswalk = int(claims["cid"].isin(nfhl_cids).sum()) + _recovered
     print(crosswalk.to_string(index=False))
     print(
-        f"NFHL plus a county crosswalk, right land only: {_with_crosswalk:,} claims "
+        f"NFHL plus a county crosswalk, right land with a flood zone: {_with_crosswalk:,} claims "
         f"({100 * _with_crosswalk / len(claims):.2f}%)"
     )
     crosswalk
@@ -583,7 +602,7 @@ def _(RESULTS, mo, nfhl_cids, status_book):
         f"Participating communities: {len(_participating):,}; "
         f"with no NFHL polygon: {len(_absent):,} ({100 * len(_absent) / len(_participating):.1f}%)"
     )
-    print("Top states:", ", ".join(f"{r.state} {r.iloc[1]}" for r in by_state.head(8).itertuples()))
+    print("Top states:", ", ".join(f"{s} {n}" for s, n in by_state.head(8).itertuples(index=False)))
     mo.ui.table(by_state, selection=None)
     return
 
@@ -633,7 +652,8 @@ def _(RESULTS, STARTED, agol, causes, gap, json, time):
                 "lat",
                 "nfhl_cid_at_point",
                 "nfhl_name_at_point",
-                "firm_panel_at_point",
+                "flood_zone_at_point",
+                "flood_map_at_point",
                 "cause",
             ]
         ],
