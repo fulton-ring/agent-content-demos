@@ -8,7 +8,8 @@ appended to a JSONL log with a timestamp, so the run can be scored afterwards.
 
 Usage:
   uv run nfwatch.py prepare                    make the workspace and the collaborator sample
-  uv run nfwatch.py run                        start the agent on brief.md
+  uv run nfwatch.py run [NOTE]                 start the agent on brief.md, or continue
+                                               its last session with a note from the person
   uv run nfwatch.py approve <id> yes|no NOTE   answer an approval request (the person)
   uv run nfwatch.py intervene WHAT WHY         log something a person did by hand
   uv run nfwatch.py manifest                   record output checksums and traces in results/
@@ -35,6 +36,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent, Tool
+from pydantic_ai.messages import ModelMessagesTypeAdapter
 from pydantic_ai.models.openrouter import OpenRouterModel, OpenRouterModelSettings
 from pydantic_ai.usage import UsageLimits
 
@@ -90,8 +92,13 @@ ALLOWED = {
     "tr",
     "column",
     "diff",
+    "cd",
+    "tee",
+    "for",
+    "done",
 }
-DOCKER_READ_ONLY = {"ps", "images", "info", "version", "logs", "inspect"}
+KEYWORDS_BEFORE_COMMAND = {"do"}
+DOCKER_READ_ONLY = {"ps", "images", "info", "version", "--version", "logs", "inspect"}
 OPERATORS = {"|", "||", "&&", ";", "&", ">", ">>", "<", "(", ")"}
 COLLAB_SOURCE = "https://raw.githubusercontent.com/nf-core/test-datasets/rnaseq/testdata/GSE110004/SRR6357073_1.fastq.gz"
 
@@ -184,6 +191,8 @@ def shell_refusal(command: str) -> str:
             return "no '..' or '~' paths"
         if token.startswith("/") and not token.startswith((str(WORKSPACE), "/dev/null")):
             return f"path {token} is outside the workspace"
+        if head and token in KEYWORDS_BEFORE_COMMAND:
+            continue
         if head and token not in ALLOWED:
             return f"{token} is not an allowed program"
         if head and token in {"nextflow", "./nextflow"} and tokens[i + 1 : i + 2] == ["run"]:
@@ -380,7 +389,15 @@ def prepare() -> None:
     )
 
 
-async def run_agent() -> None:
+def session_costs() -> list[float]:
+    """Model cost of each earlier agent session, from the log."""
+    if not LOG.exists():
+        return []
+    events = [json.loads(line) for line in LOG.read_text().splitlines()]
+    return [e["cost_usd"] for e in events if e["kind"] in {"report", "budget_stop"}]
+
+
+async def run_agent(note: str) -> None:
     brief = (HERE / "brief.md").read_text()
     settings = OpenRouterModelSettings(
         max_tokens=4000,
@@ -408,8 +425,16 @@ async def run_agent() -> None:
         brief_sha256=hashlib.sha256(brief.encode()).hexdigest(),
     )
     messages_path = LOG.parent / "messages.json"
+    history = []
+    prompt = "Start the job in the brief."
+    if note:
+        history = ModelMessagesTypeAdapter.validate_json(messages_path.read_bytes())
+        prompt = f"A person replied to your report: {note}\nCarry on with the job in the brief."
+        log_event("agent_resumed", note=note)
+    budget_left = BUDGET_USD - sum(session_costs())
+    assert budget_left > 0, "the model budget is spent"
     async with agent.iter(
-        "Start the job in the brief.", usage_limits=UsageLimits(request_limit=200)
+        prompt, message_history=history, usage_limits=UsageLimits(request_limit=200)
     ) as run:
         async for node in run:
             usage = run.usage
@@ -425,7 +450,7 @@ async def run_agent() -> None:
                     tool_calls=[{"tool": c.tool_name, "args": c.args} for c in calls],
                 )
             messages_path.write_bytes(run.all_messages_json())
-            if cost > BUDGET_USD:
+            if cost > budget_left:
                 log_event("budget_stop", cost_usd=cost)
                 return
     assert run.result is not None
@@ -464,7 +489,7 @@ def main() -> None:
         prepare()
     elif args[0] == "run":
         assert os.environ.get("OPENROUTER_API_KEY"), "set OPENROUTER_API_KEY"
-        asyncio.run(run_agent())
+        asyncio.run(run_agent(" ".join(args[1:])))
     elif args[0] == "approve" and len(args) == 4:
         answer = {"approved": args[2] == "yes", "note": args[3]}
         (WORKSPACE / "approvals" / f"{args[1]}.answer.json").write_text(json.dumps(answer))
