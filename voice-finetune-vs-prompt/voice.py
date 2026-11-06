@@ -10,6 +10,7 @@ with app.setup:
     import random
     import re
     import time
+    from concurrent.futures import ThreadPoolExecutor
     from datetime import date
     from pathlib import Path
     from typing import Any, Literal
@@ -108,7 +109,7 @@ def _(pieces):
     {pieces[0]["published"]} to {pieces[-1]["published"]}. Style fine-tuning guides cite a few hundred examples
     (we use {FEW_HUNDRED} as the low end). {len(pieces)} is {"far fewer" if len(pieces) < FEW_HUNDRED / 4 else "fewer"},
     so we stop at arms A and B, as the issue says. Cutting each piece into paragraphs would make more rows, but
-    they'd be the same 13 voices on the same 13 topics, and a fine-tune would mostly learn those topics.
+    they'd be the same {len(pieces)} pieces on the same topics, and a fine-tune would mostly learn the topics.
     """)
     return
 
@@ -152,6 +153,7 @@ def _():
 def _():
     def call_model(model: str, output_type: Any, instructions: str, prompt: str, temperature: float) -> dict:
         """One typed model call, retried on errors up to 4 times. Returns the output with its cost and time."""
+        assert temperature >= 0 and prompt, "bad call"
         agent = Agent(
             model,
             output_type=output_type,
@@ -159,7 +161,8 @@ def _():
             retries=2,
             model_settings=OpenRouterModelSettings(
                 temperature=temperature,
-                max_tokens=6000,
+                max_tokens=16000,
+                thinking=False if model == WRITER else "low",  # the writer drafts directly, as a fine-tune would
                 openrouter_usage={"include": True},
             ),
         )
@@ -222,17 +225,17 @@ def _(call_model, saved, test):
         )
 
     def _make_briefs() -> list[dict]:
-        return [
-            call_model(
+        def brief(p: dict) -> dict:
+            return call_model(
                 HELPER,
                 Brief,
                 "You turn a published article into a neutral writer's brief. Keep every fact, drop all voice.",
                 f"# {p['title']}\n\n{p['text']}",
                 temperature=0,
-            )
-            | {"url": p["url"], "title": p["title"], "words": p["words"]}
-            for p in test
-        ]
+            ) | {"url": p["url"], "title": p["title"], "words": p["words"]}
+
+        with ThreadPoolExecutor(6) as pool:
+            return list(pool.map(brief, test))
 
     briefs = saved("briefs", _make_briefs)
     assert [b["url"] for b in briefs] == [p["url"] for p in test], "saved briefs are for a different test set"
@@ -247,7 +250,7 @@ def _():
 
     The writer is Qwen 3.8 27B, an open-weight model small enough to LoRA on one GPU, so it's the model arm C would
     have trained. Both arms get the same instructions and the voice guide (its rules, without the guide's own
-    example passages, so arm A sees no examples at all). Arm B also gets the full text of all 9 training pieces.
+    example passages, so arm A sees no examples at all). Arm B also gets the full text of every training piece.
     Each arm writes 3 drafts per brief at temperature 0.8, so there are 12 pairs to judge rather than 4. Drafts are
     capped at 700 words so the founder can read 24 of them.
     """)
@@ -272,19 +275,20 @@ def _(briefs, call_model, saved, train):
             "A": base,
             "B": base + "\n\nThese are pieces we've published. Match how they sound.\n\n" + examples,
         }
-        drafts = []
-        for b in briefs:
-            words = min(b["words"], 700)
+        jobs = [(b, arm, sample) for b in briefs for arm in arms for sample in range(SAMPLES)]
+
+        def draft(job: tuple[dict, str, int]) -> dict:
+            b, arm, sample = job
             prompt = (
-                f"Write a post of about {words} words from this brief. Use only these facts, and invent no "
-                f"numbers, names, quotes or results.\n\n{json.dumps(b['output'], indent=1)}"
+                f"Write a post of about {min(b['words'], 700)} words from this brief. Use only these facts, and "
+                f"invent no numbers, names, quotes or results.\n\n{json.dumps(b['output'], indent=1)}"
             )
-            for arm, instructions in arms.items():
-                for sample in range(SAMPLES):
-                    print(f"drafting {arm}{sample} for {b['title'][:50]}")
-                    result = call_model(WRITER, Draft, instructions, prompt, temperature=0.8)
-                    drafts.append(result | {"url": b["url"], "arm": arm, "sample": sample})
-        return drafts
+            print(f"drafting {arm}{sample} for {b['title'][:50]}")
+            result = call_model(WRITER, Draft, arms[arm], prompt, temperature=0.8)
+            return result | {"url": b["url"], "arm": arm, "sample": sample}
+
+        with ThreadPoolExecutor(6) as pool:
+            return list(pool.map(draft, jobs))
 
     drafts = saved("drafts", _make_drafts)
     assert len(drafts) == len(briefs) * 2 * SAMPLES
@@ -331,8 +335,8 @@ def _(briefs, call_model, drafts, saved, test):
     _briefs = {b["url"]: b["output"] for b in briefs}
 
     def _make_checks() -> list[dict]:
-        return [
-            call_model(
+        def check(d: dict) -> dict:
+            return call_model(
                 HELPER,
                 FactCheck,
                 "You check a draft blog post for factual errors. List each specific claim (a number, name, "
@@ -342,10 +346,10 @@ def _(briefs, call_model, drafts, saved, test):
                 f"{_originals[d['url']]['text']}\n</original>\n\n<draft>\n# {d['output']['title']}\n\n"
                 f"{d['output']['body']}\n</draft>",
                 temperature=0,
-            )
-            | {"url": d["url"], "arm": d["arm"], "sample": d["sample"]}
-            for d in drafts
-        ]
+            ) | {"url": d["url"], "arm": d["arm"], "sample": d["sample"]}
+
+        with ThreadPoolExecutor(6) as pool:
+            return list(pool.map(check, drafts))
 
     checks = saved("factcheck", _make_checks)
     assert [(c["url"], c["arm"], c["sample"]) for c in checks] == [(d["url"], d["arm"], d["sample"]) for d in drafts]
@@ -359,7 +363,7 @@ def _():
 
     The guide names some things we never write: em-dashes, "it's not X, it's Y", "load-bearing", and a list of
     hype words. Counting them in each draft is cheap and objective, and it finds failures the blind picks can't
-    explain. We count the same tells in the 13 real pieces as a baseline.
+    explain. We count the same tells in the real pieces as a baseline.
     """)
     return
 
@@ -368,7 +372,9 @@ def _():
 def _(drafts, pieces):
     TELLS = {
         "em-dash": r"—",
-        "it's not X, it's Y": r"\b(?:it's|it is|this is|that's) not [^.;]{1,60}[,;] (?:it's|it is|but)\b",
+        "it's not X, it's Y": (
+            r"\b(?:it's|it is|this is|that's|that is) not [^.;]{1,60}[.,;] (?:it's|it is|this is|but)\b"
+        ),
         "load-bearing": r"load-bearing",
         "hype word": r"\b(?:revolutionary|game-changing|seamless|best-in-class|powerful|robust|transformative)\b",
         "press-release opener": r"\b(?:proud to announce|thrilled to|excited to)\b",
@@ -462,27 +468,30 @@ def _(call_model, pairs, saved, test):
     _originals = {p["url"]: p for p in test}
 
     def _make_judgments() -> list[dict]:
-        judgments = []
-        for p in pairs:
-            for first, second in (("left", "right"), ("right", "left")):
-                result = call_model(
-                    HELPER,
-                    Pick,
-                    "You judge writing voice. The reference is a real piece by a company. Pick the draft that "
-                    "sounds more like the same writer: sentence rhythm, word choice, how it opens and closes, how "
-                    "it handles evidence and uncertainty. Ignore which draft has more facts.",
-                    f"<reference>\n{_originals[p['url']]['text']}\n</reference>\n\n<first>\n"
-                    f"{p[first]['output']['body']}\n</first>\n\n<second>\n{p[second]['output']['body']}\n</second>",
-                    temperature=0,
-                )
-                pick = result["output"]["pick"]
-                arm = {
-                    "first": p[first]["arm"],
-                    "second": p[second]["arm"],
-                    "tie": "tie",
-                }[pick]
-                judgments.append(result | {"pair": p["pair"], "order": f"{first}-{second}", "winner": arm})
-        return judgments
+        jobs = [(p, order) for p in pairs for order in (("left", "right"), ("right", "left"))]
+
+        def judge(job: tuple[dict, tuple[str, str]]) -> dict:
+            p, (first, second) = job
+            result = call_model(
+                HELPER,
+                Pick,
+                "You judge writing voice. The reference is a real piece by a company. Pick the draft that "
+                "sounds more like the same writer: sentence rhythm, word choice, how it opens and closes, how "
+                "it handles evidence and uncertainty. Ignore which draft has more facts.",
+                f"<reference>\n{_originals[p['url']]['text']}\n</reference>\n\n<first>\n"
+                f"{p[first]['output']['body']}\n</first>\n\n<second>\n{p[second]['output']['body']}\n</second>",
+                temperature=0,
+            )
+            pick = result["output"]["pick"]
+            arm = {
+                "first": p[first]["arm"],
+                "second": p[second]["arm"],
+                "tie": "tie",
+            }[pick]
+            return result | {"pair": p["pair"], "order": f"{first}-{second}", "winner": arm}
+
+        with ThreadPoolExecutor(6) as pool:
+            return list(pool.map(judge, jobs))
 
     judgments = saved("judge", _make_judgments)
     assert len(judgments) == 2 * len(pairs)
@@ -548,7 +557,7 @@ def _(checks, draft_tells, drafts, judgments, pairs, real_tells):
             mo.md(
                 f"**Founder's blind picks:** {founder_line}\n\n"
                 f"**Provisional judge (helper model, both orders must agree):** {tally(_judge)}\n\n"
-                f"**Off-voice tells in the 13 real pieces:** {_real} per piece\n\n"
+                f"**Off-voice tells in the {len(real_tells)} real pieces:** {_real} per piece\n\n"
                 f"**Spent on drafts, fact checks and judging:** ${_spent:.3f}"
             ),
             mo.ui.table(rows, selection=None),
@@ -592,7 +601,7 @@ def _():
     mo.md(r"""
     ## What this doesn't show
 
-    - **Arm C, the fine-tune, wasn't run.** 13 pieces is far below the few hundred examples guides cite. So this
+    - **Arm C, the fine-tune, wasn't run.** 12 pieces is far below the few hundred examples guides cite. So this
       can't say whether fine-tuning would win with enough data; it says we don't have enough to try it on our own
       published pieces alone.
     - **The test set is 4 pieces.** 12 pairs can only show a large difference between A and B.
