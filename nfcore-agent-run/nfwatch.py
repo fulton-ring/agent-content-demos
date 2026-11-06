@@ -289,6 +289,7 @@ def launch_run(
         env=clean_env(),
     )
     run = state["runs"].setdefault(run_name, {"attempts": 0})
+    run.pop("ended", None)
     run.update(
         pid=proc.pid,
         attempts=run["attempts"] + 1,
@@ -346,7 +347,6 @@ def wait_for_run(run_name: str, max_minutes: int = 60) -> str:
 
 def request_approval(change: ChangeRequest) -> str:
     """Ask a person to approve a change to the pipeline or its parameters; wait for the answer."""
-    state = read_state()
     pending = WORKSPACE / "approvals"
     pending.mkdir(exist_ok=True)
     approval_id = f"a{len(list(pending.glob('*.request.json'))) + 1}"
@@ -360,14 +360,23 @@ def request_approval(change: ChangeRequest) -> str:
         log_event("approval_timeout", id=approval_id)
         return "No answer within an hour: treat it as denied."
     answer = json.loads(answer_path.read_text())
-    if answer["approved"]:
-        state = read_state()
-        state["approved"] += change.exact_args
-        write_state(state)
     return f"{'Approved' if answer['approved'] else 'Denied'}: {answer['note']}"
 
 
 # ------------------------------------------------------------------------------ the commands
+
+
+def approve(approval_id: str, approved: bool, note: str) -> None:
+    """Record a person's answer; an approval lets launch_run use the requested arguments."""
+    folder = WORKSPACE / "approvals"
+    change = ChangeRequest.model_validate_json((folder / f"{approval_id}.request.json").read_text())
+    if approved:
+        state = read_state()
+        state["approved"] += change.exact_args
+        write_state(state)
+    answer = {"approved": approved, "note": note}
+    (folder / f"{approval_id}.answer.json").write_text(json.dumps(answer))
+    log_event("approval_answered", id=approval_id, **answer)
 
 
 def prepare() -> None:
@@ -499,9 +508,7 @@ def main() -> None:
         assert os.environ.get("OPENROUTER_API_KEY"), "set OPENROUTER_API_KEY"
         asyncio.run(run_agent(" ".join(args[1:])))
     elif args[0] == "approve" and len(args) == 4:
-        answer = {"approved": args[2] == "yes", "note": args[3]}
-        (WORKSPACE / "approvals" / f"{args[1]}.answer.json").write_text(json.dumps(answer))
-        log_event("approval_answered", id=args[1], **answer)
+        approve(args[1], args[2] == "yes", args[3])
     elif args[0] == "intervene" and len(args) == 3:
         log_event("intervention", what=args[1], why=args[2])
     elif args[0] == "manifest":
