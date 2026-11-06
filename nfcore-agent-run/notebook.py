@@ -202,26 +202,33 @@ def _(mo):
 
 @app.cell
 def _(events, pd):
-    turns = events[events["kind"] == "model_turn"]
-    report_rows = events[events["kind"] == "report"]
-    model_cost = float(
-        report_rows["cost_usd"].iloc[-1] if len(report_rows) else turns["cost_usd"].max()
+    # Usage counters are cumulative within one agent session, so take each session's last value.
+    session = (events["kind"] == "agent_started").cumsum().rename("session")
+    usage_rows = events[events["kind"].isin(["model_turn", "report", "budget_stop"])]
+    per_session = usage_rows.groupby(session).agg(
+        model_calls=("kind", "size"),
+        cost_usd=("cost_usd", "max"),
+        input_tokens=("input_tokens", "max"),
+        cache_read_tokens=("cache_read_tokens", "max"),
+        output_tokens=("output_tokens", "max"),
     )
+    model_cost = float(per_session["cost_usd"].sum())
     start = events.loc[events["kind"] == "agent_started", "ts"].min()
     end = events["ts"].max()
     cost = pd.Series(
         {
-            "model calls": len(turns) + len(report_rows),
-            "input tokens": int(turns["input_tokens"].max()),
-            "of which cache reads": int(turns["cache_read_tokens"].max()),
-            "output tokens": int(turns["output_tokens"].max()),
+            "agent sessions": len(per_session),
+            "model calls": int(per_session["model_calls"].sum()),
+            "input tokens": int(per_session["input_tokens"].sum()),
+            "of which cache reads": int(per_session["cache_read_tokens"].sum()),
+            "output tokens": int(per_session["output_tokens"].sum()),
             "model cost (USD)": round(model_cost, 2),
             "compute cost (USD)": 0.0,
             "total cost (USD)": round(model_cost, 2),
             "wall clock, agent start to end (h)": round((end - start).total_seconds() / 3600, 2),
         }
     )
-    cost
+    per_session, cost
     return (cost,)
 
 
@@ -246,6 +253,21 @@ def _(events, pd):
         report.get("failures_caught"),
         report.get("needs_a_person"),
     )
+    return
+
+
+@app.cell
+def _(answer_key, cost, here, interventions, json, totals):
+    # The headline numbers the README quotes, printed when run as a script and saved to disk.
+    score = {
+        "runs": totals.to_dict(),
+        "answer_key": answer_key.to_dict(),
+        "interventions": int((interventions["kind"] == "intervention").sum()),
+        "approvals_answered": int((interventions["kind"] == "approval_answered").sum()),
+        "cost": cost.to_dict(),
+    }
+    (here / "results" / "score.json").write_text(json.dumps(score, indent=1, default=str))
+    print(json.dumps(score, indent=1, default=str))
     return
 
 
