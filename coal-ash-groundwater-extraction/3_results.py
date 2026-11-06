@@ -10,6 +10,7 @@ with app.setup:
     import os
     import re
     from collections import Counter
+    from datetime import date
     from pathlib import Path
 
     import marimo as mo
@@ -21,6 +22,7 @@ with app.setup:
     OUT = Path(os.environ.get("CCR_OUTPUT_DIR", HERE / "output"))
     PAGES = OUT / "pages"
     SHOTS = HERE / "screenshots"
+    RESULTS = HERE / "results"
     REVIEW_SECONDS, REVIEW_USD_PER_HOUR = 30, 40.0
 
 
@@ -39,6 +41,8 @@ def _():
 
     - `< 0.00200` is a non-detect at 0.002;
     - `ND` (Energy Laboratories' style) is a non-detect at the reporting limit printed beside it;
+    - units copied into the result (`ND mg/L`) are dropped, and only the day of a collection date is compared,
+      because one model adds the time of day and the other doesn't;
     - anything else is a number, so `0.0088` and `0.00880` are the same value.
 
     Constituent names are matched to the twenty Appendix III and IV constituents the results table holds. Radium,
@@ -85,7 +89,7 @@ def _():
 
     def meaning(printed: str | None, reporting_limit: str | None = None) -> tuple[bool, float | None] | None:
         """(non-detect, value) for a printed result, or None if it can't be read."""
-        text = (printed or "").strip().upper().replace(" ", "")
+        text = re.sub(r"(MG/L|UG/L|S\.?U\.?)$", "", (printed or "").strip().upper().replace(" ", ""))
         if not text:
             return None
         if text.startswith("<"):
@@ -126,7 +130,7 @@ def _(canonical, meaning, well_name):
                 values[analyte] = (meaning(row["result"]["printed"], row.get("reporting_limit")), row)
         return {
             "well": well_name((output.get("client_sample_id") or {}).get("printed")),
-            "date": (output.get("collection_date") or {}).get("iso"),
+            "date": ((output.get("collection_date") or {}).get("iso") or "")[:10] or None,
             "values": values,
         }
 
@@ -217,8 +221,11 @@ def _():
     ## Scoring against the results table
 
     Each lab page is matched to the results table by report, well and collection date (Gemini's reading first,
-    then Mistral's). Pages that match nothing are counted with their reason: field duplicates and blanks aren't in
-    the table, and blocks with an ambiguous well name were dropped from the key.
+    then Mistral's). The match allows three days, because the table sometimes gives the event's date and the lab
+    the day the bottle was filled, and treats the letter O and the digit 0 alike, because one Huntington well is
+    `HLF-1O` (letter O) and the models often read it as `HLF-10`. The well name itself is then scored exactly.
+    Pages that match nothing are counted with their reason: field duplicates and blanks aren't in the table,
+    and blocks with an ambiguous well name were dropped from the key.
 
     On a matched page every scored constituent is **right**, **wrong** or **missing** for each model. The truth is
     the results table, except where the table itself is in doubt: when both models agree with each other and not
@@ -231,12 +238,26 @@ def _():
 
 @app.cell
 def _(adjudications, fields, key, meaning, pages, reduced, same):
+    def loose(well: str) -> str:
+        return well.replace("O", "0")
+
     def match(page_key: str) -> tuple | None:
+        """The results-table sample for a page: same report, well (O and 0 alike) and date within three days."""
         report = pages[page_key]["report"]
         for name in ("gemini", "mistral"):
             r = reduced[name][page_key]
-            if r and (report, r["well"], r["date"]) in key:
-                return report, r["well"], r["date"]
+            if not r or not r["date"]:
+                continue
+            day = date.fromisoformat(r["date"])
+            near = [
+                s
+                for s in key
+                if s[0] == report
+                and loose(s[1]) == loose(r["well"])
+                and abs((date.fromisoformat(s[2]) - day).days) <= 3
+            ]
+            if near:
+                return min(near, key=lambda s: abs((date.fromisoformat(s[2]) - day).days))
         return None
 
     matched = {p: match(p) for p in {f["page"] for f in fields}}
@@ -290,8 +311,30 @@ def _(adjudications, fields, key, meaning, pages, reduced, same):
         f"unmatched pages: {len(_unmatched)}, e.g. {[(reduced['gemini'][p] or {}).get('well') for p in _unmatched[:8]]}"
     )
     print(f"{len(to_check)} fields still to check on the scan")
+
+    def true_well(page_key: str, sample: tuple) -> str:
+        return adjudications.get(f"{page_key}:well", {}).get("scan", sample[1])
+
+    well_scores = {"pages": sum(s is not None for s in matched.values())}
+    for _name in ("gemini", "mistral"):
+        well_scores[f"{_name} wrong"] = sum(
+            1 for p, s in matched.items() if s and reduced[_name][p] and reduced[_name][p]["well"] != true_well(p, s)
+        )
+    well_scores["accepted wrong"] = sum(
+        1
+        for p, s in matched.items()
+        if s and reduced["gemini"][p]["well"] == reduced["mistral"][p]["well"] != true_well(p, s)
+    )
+    print("well names:", well_scores)
+    SHOTS.mkdir(exist_ok=True)
+    for _old in SHOTS.glob("accepted-wrong-*.png"):
+        _old.unlink()
+    for _p, _s in matched.items():
+        if _s and reduced["gemini"][_p]["well"] == reduced["mistral"][_p]["well"] != true_well(_p, _s):
+            _img = Image.open(PAGES / f"{_p}.png")
+            _img.crop((0, 0, _img.size[0], _img.size[1] // 4)).save(SHOTS / f"accepted-wrong-well-{_p}.png")
     (OUT / "to_check.json").write_text(json.dumps(to_check, indent=1))
-    return matched, scored, to_check
+    return matched, scored, to_check, well_scores
 
 
 @app.cell(hide_code=True)
@@ -336,6 +379,8 @@ def _(pages, scored):
         _g_err = [f for f in _s if f["verdict"]["gemini"] != "right"]
         _row["gemini errors caught by review"] = f"{sum(bool(f['reasons']) for f in _g_err)} of {len(_g_err)}"
         accuracy.append(_row)
+    for _row in accuracy:
+        print(json.dumps(_row))
     mo.ui.table(accuracy, selection=None)
     return (accuracy,)
 
@@ -454,6 +499,12 @@ def _():
 @app.cell
 def _(fields, matched, page_review, pages, reports, scored):
     _checked = {f["id"]: f for f in scored}
+    RESULTS.mkdir(exist_ok=True)
+
+    def _box_suspect(box: list[int]) -> bool:
+        """A printed number is wider than it is tall; a box that isn't is probably [y, x, y, x] or wrong."""
+        return len(box) != 4 or (box[2] - box[0]) <= (box[3] - box[1])
+
     rows = []
     for _f in fields:
         if _f["field"] in ("well", "date"):
@@ -481,6 +532,7 @@ def _(fields, matched, page_review, pages, reports, scored):
                 "reporting_limit": _v[1].get("reporting_limit"),
                 "lab_qualifier": _v[1].get("qualifier"),
                 "bbox": json.dumps(_v[1]["result"]["bbox"]),
+                "bbox_suspect": _box_suspect(_v[1]["result"]["bbox"]),
                 "gemini_read": _f["gemini"][1]["result"]["printed"] if _f["gemini"] else None,
                 "mistral_read": _f["mistral"][1]["result"]["printed"] if _f["mistral"] else None,
                 "in_review": bool(_f["reasons"]) or bool(_head["well"]["reasons"]) or bool(_head["date"]["reasons"]),
@@ -491,21 +543,27 @@ def _(fields, matched, page_review, pages, reports, scored):
                 "in_results_table": matched.get(_f["page"]) is not None,
             }
         )
-    with open(OUT / "groundwater_results.csv", "w", newline="") as _fh:
+    with open(RESULTS / "groundwater_results.csv", "w", newline="") as _fh:
         _w = csv.DictWriter(_fh, fieldnames=list(rows[0]))
         _w.writeheader()
         _w.writerows(rows)
-    pq.write_table(pa.Table.from_pylist(rows), OUT / "groundwater_results.parquet")
+    pq.write_table(pa.Table.from_pylist(rows), RESULTS / "groundwater_results.parquet")
     _queue = [r for r in rows if r["in_review"]] + [
         {"page_url": f"{reports[pages[k]['report']]['url']}#page={pages[k]['page']}", "review_reason": why}
         for k, why in page_review.items()
     ]
-    with open(OUT / "review_queue.csv", "w", newline="") as _fh:
+    with open(RESULTS / "review_queue.csv", "w", newline="") as _fh:
         _w = csv.DictWriter(_fh, fieldnames=list(rows[0]))
         _w.writeheader()
         _w.writerows(_queue)
     print(f"{len(rows)} rows in groundwater_results.csv/.parquet, {len(_queue)} in review_queue.csv")
-    return (rows,)
+    suspect_pages = {r["page_url"] for r in rows if r["bbox_suspect"]}
+    _suspect = len([r for r in rows if r["bbox_suspect"]])
+    print(
+        f"{_suspect} values ({_suspect / len(rows):.1%}) "
+        f"on {len(suspect_pages)} pages have a box taller than wide: the box, not the value, is suspect"
+    )
+    return rows, suspect_pages
 
 
 @app.cell(hide_code=True)
@@ -550,12 +608,15 @@ def _(cost, lab_pages, pages, reports):
 
 
 @app.cell
-def _(MODELS, accuracy, confidence_caught, cost, sizing):
-    (OUT / "results.json").write_text(
+def _(MODELS, accuracy, confidence_caught, cost, rows, sizing, suspect_pages, well_scores):
+    (RESULTS / "results.json").write_text(
         json.dumps(
             {
                 "models": MODELS,
                 "accuracy": accuracy,
+                "well_names": well_scores,
+                "dataset_rows": len(rows),
+                "pages_with_suspect_boxes": len(suspect_pages),
                 "confidence_caught": confidence_caught,
                 "cost": cost,
                 "sizing": sizing,
@@ -563,7 +624,7 @@ def _(MODELS, accuracy, confidence_caught, cost, sizing):
             indent=1,
         )
     )
-    with open(OUT / "accuracy.csv", "w", newline="") as _fh:
+    with open(RESULTS / "accuracy.csv", "w", newline="") as _fh:
         _w = csv.DictWriter(_fh, fieldnames=list(accuracy[0]))
         _w.writeheader()
         _w.writerows(accuracy)

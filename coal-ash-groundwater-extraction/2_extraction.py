@@ -196,9 +196,10 @@ def _():
     weights). Coming from different companies, they are less likely to make the same mistake. Each sees only the
     page image and the schema.
 
-    We first tried the 990-EZ spike's pair, Gemini with **Qwen 3.8 27B**. On these pages Qwen named the well and
-    then returned an empty list of results. The cell after next reruns that trial on ten lab pages, so the failure
-    is on record and not just reported.
+    The 990-EZ spike paired Gemini with **Qwen 3.8 27B**. We swapped Qwen for Mistral after a one-page test, with
+    an earlier draft of the schema, in which Qwen named the well and returned no results. One page was too little to
+    go on: the cell after next has Qwen read ten lab pages with the frozen schema, and it reads every row. So Qwen
+    may work as well here; we didn't measure it on the full set.
     """)
     return
 
