@@ -388,39 +388,53 @@ def _(
     pd,
     real_gap,
 ):
-    _path = DATA / f"point-checks-{PULL_DATE}.parquet"
-    if not _path.exists():
-        _shapes = community_layer[community_layer["communityIdNumber"].isin(real_gap["cid"])]
-        _shapes = _shapes.dissolve("communityIdNumber").explode(index_parts=False)
-        _shapes["area"] = _shapes.geometry.area
-        _largest = _shapes.sort_values("area").groupby(level=0).tail(1)
-        _points = _largest.geometry.representative_point()
+    _path = DATA / f"point-checks-{PULL_DATE}.csv"
+    _done = pd.read_csv(_path, dtype={"cid": str}) if _path.exists() else pd.DataFrame()
+    _todo = set(real_gap["cid"]) - set(_done.get("cid", []))
+    _shapes = community_layer[community_layer["communityIdNumber"].isin(_todo)]
+    _shapes = _shapes.dissolve("communityIdNumber").explode(index_parts=False)
+    _shapes["area"] = _shapes.to_crs(5070).geometry.area
+    _largest = _shapes.sort_values("area").groupby(level=0).tail(1)
+    _points = list(_largest.geometry.representative_point().items())
 
-        def _ask(item: tuple[str, Point]) -> dict:
-            _cid, _pt = item
-            _where = {
-                "geometry": f"{_pt.x},{_pt.y}",
-                "geometryType": "esriGeometryPoint",
-                "inSR": 4326,
-                "spatialRel": "esriSpatialRelIntersects",
-                "returnGeometry": "false",
-            }
+    def _ask(item: tuple[str, Point]) -> dict | None:
+        _cid, _pt = item
+        _where = {
+            "geometry": f"{_pt.x},{_pt.y}",
+            "geometryType": "esriGeometryPoint",
+            "inSR": 4326,
+            "spatialRel": "esriSpatialRelIntersects",
+            "returnGeometry": "false",
+        }
+        try:
             _jur = arcgis_json(f"{NFHL}/22/query", {**_where, "outFields": "CID,POL_NAME1"})
             _pan = arcgis_json(f"{NFHL}/3/query", {**_where, "outFields": "FIRM_PAN"})
-            _hits = [_f["attributes"] for _f in _jur["features"]]
-            return {
-                "cid": _cid,
-                "lon": round(_pt.x, 5),
-                "lat": round(_pt.y, 5),
-                "nfhl_cid_at_point": ";".join(str(_h["CID"]) for _h in _hits) or None,
-                "nfhl_name_at_point": ";".join(str(_h["POL_NAME1"]) for _h in _hits) or None,
-                "firm_panel_at_point": len(_pan["features"]) > 0,
-            }
+        except RuntimeError:
+            return None  # left out of the cache, so the next run asks again
+        _hits = [_f["attributes"] for _f in _jur["features"]]
+        return {
+            "cid": _cid,
+            "lon": round(_pt.x, 5),
+            "lat": round(_pt.y, 5),
+            "nfhl_cid_at_point": ";".join(str(_h["CID"]) for _h in _hits) or None,
+            "nfhl_name_at_point": ";".join(str(_h["POL_NAME1"]) for _h in _hits) or None,
+            "firm_panel_at_point": len(_pan["features"]) > 0,
+        }
 
-        with ThreadPoolExecutor(6) as _pool:
-            _checks = pd.DataFrame(list(_pool.map(_ask, _points.items())))
-        _checks.to_parquet(_path)
-    point_checks = pd.read_parquet(_path)
+    # Ask in chunks and append each chunk to the cache, so a dropped run resumes.
+    with ThreadPoolExecutor(6) as _pool:
+        for _start in range(0, len(_points), 120):
+            _rows = [r for r in _pool.map(_ask, _points[_start : _start + 120]) if r]
+            if _rows:
+                pd.DataFrame(_rows).to_csv(_path, mode="a", header=not _path.exists(), index=False)
+    point_checks = pd.read_csv(_path, dtype={"cid": str, "nfhl_cid_at_point": str})
+    _unchecked = int(
+        (real_gap["in_community_layer"] & ~real_gap["cid"].isin(point_checks["cid"])).sum()
+    )
+    print(
+        f"Point checks: {len(point_checks):,} communities; NFHL never answered for "
+        f"{_unchecked} (rerun to retry them)"
+    )
     return (point_checks,)
 
 
@@ -436,6 +450,9 @@ def _(point_checks, real_gap):
     causes.loc[_panel & ~_polygon, "cause"] = "mapped: FIRM panel, but no political polygon"
     causes.loc[_panel & _polygon & ~_county, "cause"] = "mapped under another community's CID"
     causes.loc[_panel & _polygon & _county, "cause"] = "mapped under the county's or parish's CID"
+    causes.loc[causes["in_community_layer"] & causes["lon"].isna(), "cause"] = (
+        "NFHL query failed (rerun)"
+    )
     causes.loc[~causes["in_community_layer"], "cause"] = "no Community Layer polygon to check"
     cause_table = (
         causes.groupby("cause")
