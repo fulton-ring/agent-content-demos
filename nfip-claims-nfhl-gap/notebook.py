@@ -451,7 +451,7 @@ def _(
 
 
 @app.cell
-def _(point_checks, real_gap):
+def _(nfhl, point_checks, real_gap):
     _COUNTY_WORDS = "COUNTY|PARISH|BOROUGH|MUNICIPIO|CENSUS AREA"
     causes = real_gap.merge(point_checks, on="cid", how="left")
     _polygon = causes["nfhl_cid_at_point"].notna()
@@ -476,6 +476,12 @@ def _(point_checks, real_gap):
         100 * cause_table["claims"] / cause_table["claims"].sum()
     ).round(1)
     print(cause_table.to_string(index=False))
+    _bare = causes[causes["cause"] == "no map: nothing in the NFHL at the point"]
+    _empty_county = ~_bare["county_fips"].isin(set(nfhl["county_fips"]))
+    print(
+        f"Of {len(_bare):,} communities with nothing at the point, {int(_empty_county.sum()):,} "
+        "are in counties with no NFHL polygon at all"
+    )
     cause_table
     return (causes,)
 

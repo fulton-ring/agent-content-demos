@@ -19,7 +19,7 @@ needs the preserved Community Layer (HIFLD Next's copy, which this notebook read
 
 Needs [uv](https://docs.astral.sh/uv/) and internet access, no key or account. It runs
 `notebook.py` (a [marimo](https://marimo.io) notebook) as a script and saves the output to
-`results/last-run.txt`. A first run takes about 18 minutes, mostly the NFHL point checks;
+`results/last-run.txt`. A first run takes 18 to 27 minutes, mostly the NFHL point checks;
 a second run the same day reuses `data/` and takes seconds. `uv run marimo edit notebook.py`
 opens the notebook with its tables.
 
@@ -60,15 +60,14 @@ the NFHL:
 
 | Cause | Communities | Claims | Share |
 |---|---|---|---|
-| No map: nothing in the NFHL at the point | 1,575 | 89,685 | 86.7% |
+| No map: nothing in the NFHL at the point | 1,576 | 89,689 | 86.7% |
 | No map: inside a political polygon, but no flood zone (Slidell) | 6 | 11,423 | 11.0% |
 | No Community Layer polygon to check | 9 | 1,768 | 1.7% |
 | Mapped under another community's CID | 18 | 471 | 0.5% |
 | Mapped: flood zone, but no political polygon | 2 | 71 | 0.1% |
 | Mapped under the county's or parish's CID | 6 | 38 | 0.0% |
-| NFHL query failed (retried on the next run) | 1 | 4 | 0.0% |
 
-1,118 of the 1,575 unmapped communities are in counties with nothing in the NFHL at all.
+1,118 of the 1,576 unmapped communities are in counties with nothing in the NFHL at all.
 St. Charles Parish and Jefferson County, Texas (Beaumont, Port Arthur) are among them.
 
 **County crosswalk.** 99,352 of the 103,460 claims carry a county code, but only 18,367 are
@@ -85,7 +84,7 @@ in `results/status-book-no-nfhl-by-state.csv`. (The earlier analysis said 3,141.
 and answered with 29,898 features, the same count as No Overlaps Whole. Whether it survives
 November 9 is sub-issue #221, which re-runs this after that date.
 
-**Run time:** 1,050 s for the full fresh run.
+**Run time:** 1,598 s for the full fresh run from a clean checkout (an earlier run took 1,050 s; the NFHL server's speed varies). `results/last-run.txt` is a same-day rerun on that run's cached data, so it shows 4 s.
 
 ## Files
 
@@ -103,7 +102,7 @@ November 9 is sub-issue #221, which re-runs this after that date.
   looked mapped by a neighbor's panel with no flood zone under it. Flood Hazard Zones
   (layer 28) are the test now.
 - **One point per community.** A community partly on a digital map gets the answer for one
-  spot in its largest piece. The 89,685 figure could hide a few partly mapped places.
+  spot in its largest piece. The 89,689 figure could hide a few partly mapped places.
 - **FEMA's NFHL server drops connections.** Calls retry with backoff, results are cached in
   chunks, and a point that never answers is reported and retried on the next run.
 - **Snapshots.** The NFHL changes as maps go effective (Buchanan County, MO has a map due
