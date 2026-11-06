@@ -35,7 +35,7 @@ missing too. Panels that overlap Beaumont's bounding box belong to the neighbori
 
 **Port Arthur.** Also in Jefferson County, so the same absence. The point inside its
 largest piece lands on a Cameron Parish, Louisiana panel, because that panel extends over
-Sabine Lake, which the Community Layer includes in Port Arthur's boundary. The notebook
+Sabine Lake, which the Community Layer includes in Port Arthur's boundary. The NFHL
 has no flood zone there, so the notebook files Port Arthur as no map. This case is why the
 notebook tests for a flood zone (layer 28) and not a FIRM panel (layer 3): panel
 rectangles run over county lines and water, and a first version that used panels wrongly
