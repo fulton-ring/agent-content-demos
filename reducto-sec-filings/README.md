@@ -24,6 +24,8 @@ it isn't already there), then runs the notebook as a script. To read the noteboo
 minutes and cost $3.23 on OpenRouter and $5.36 on Reducto at list price. Answers are saved under
 `output/`, so a second run rescores without paying again.
 
+**Where the numbers come from.** The saved answers weren't committed (`output/` is ignored by git), so the numbers here come from the worker's own run on 2026-10-28. A run from a clean checkout pays for every call again, about $3.23 on OpenRouter and $5.36 on Reducto. The founders accepted the results without a re-run on 2026-11-06. A review re-ran the free part byte for byte: the EDGAR downloads, the printed pages, the XBRL key, and the 5,289 key values with the 60 unprinted and 446 unmatched counts.
+
 ## Where the data comes from
 
 - **Filings.** A list of 30 filers and 3 reserves, fixed and committed before any full run. It spans tech,
