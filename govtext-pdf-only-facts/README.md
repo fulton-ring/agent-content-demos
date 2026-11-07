@@ -19,7 +19,7 @@ the layer, the check against page images, and what didn't work.
 It needs [uv](https://docs.astral.sh/uv/) and internet access. It needs no key, because the model's answers for
 the sample are saved in `outputs/model_answers.jsonl`. A run downloads about 1 GB of GovText text for 5,000 PDFs
 and 60 PDFs for the check (cached in `data/`, which isn't committed). From a clean checkout it takes about
-[CLEAN_RUN_TIME]; a rerun with the cache takes under two minutes. It writes:
+five minutes (4 min 43 s in our clean run, with no key set); a rerun with the cache takes under two minutes. It writes:
 
 - `outputs/facts.csv`: one row per fact (896), with the facility's layer and row, the fact type, the quote, the
   model's verdict against the layer record, and whether each text contains the quote;
@@ -96,7 +96,7 @@ or missing the words. That is close to GovText's corpus-wide 12.45% of pages rea
   right, so about 1 in 10 "OCR-only" calls is a false alarm.
 
 **Cost and time.** The model calls for the final sample cost $0.24 (253 pages, claude-haiku-5.5 at OpenRouter's
-price on the day). Development, including two discarded samples, spent $0.88 in total. Run time is given above.
+price on the day). Development, including two discarded samples, spent $0.88 in total. The clean run took 4 min 43 s.
 
 ## What it shows and doesn't
 
