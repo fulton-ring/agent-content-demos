@@ -19,8 +19,8 @@ rated ones sit where the 100-year geoelectric field is 3 V/km or more. 37% are i
 ```
 
 It runs the notebook [`grid_exposure.py`](grid_exposure.py) as a script and writes `outputs/`. To read the
-notebook with each step's output next to it, run `uv run marimo edit grid_exposure.py`. **Run time:** 74 s from a
-clean checkout with an empty `data/` (2026-11-06), including downloads; about 35 s once `data/` is filled. It
+notebook with each step's output next to it, run `uv run marimo edit grid_exposure.py`. **Run time:** 74 to 102 s from a
+clean checkout with an empty `data/` (two runs, 2026-11-06 and 2026-11-07), including downloads and uv setup. It
 costs nothing.
 
 ## Data (all public, downloaded at run time, nothing downloaded is committed)

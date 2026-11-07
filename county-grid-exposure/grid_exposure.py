@@ -747,7 +747,7 @@ def _(mo):
       unrated (Alaska, Hawaii, much of the Southeast and Texas). Unrated is not low.
     - **The substations are derived**, not an asset list: they miss the share of OSM's 230 kV+ substations shown in
       section 2, and a few derived points are taps or plant switchyards (`us-substations-verified/hand_check.csv`).
-      Voltages are floors: 14% of derived substations have no voltage on any line that ends there.
+      Voltages are floors: some derived substations have no voltage on any line that ends there.
     - **Suppression protects against counting, not against other sources.** It stops this table from pinning down
       a site. It can't stop someone joining it to a public point layer, including the one in this repo's
       `us-substations-verified/dataset/`.
