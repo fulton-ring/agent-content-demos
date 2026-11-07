@@ -492,6 +492,26 @@ def _(measured, mo):
     return (far_mw,)
 
 
+@app.cell
+def _(OUT, measured):
+    import matplotlib.pyplot as plt
+
+    _fig, _ax = plt.subplots(figsize=(8, 4))
+    _groups = [("All campuses", measured), ("Gigawatt", measured[measured["gigawatt"]])]
+    for _label, _frame in _groups:
+        _miles = _frame["sub230_mi"].sort_values().clip(upper=30)
+        _ax.step(_miles, [(i + 1) / len(_miles) for i in range(len(_miles))], where="post", label=_label)
+    for _band in [1, 5, 10]:
+        _ax.axvline(_band, color="grey", linewidth=0.5)
+    _ax.set_xlabel("miles to nearest 230 kV+ substation (capped at 30)")
+    _ax.set_ylabel("share of campuses within")
+    _ax.legend()
+    _fig.tight_layout()
+    _fig.savefig(OUT / "distance_to_230kv_substation.png", dpi=150)
+    _ax
+    return
+
+
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
