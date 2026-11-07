@@ -821,5 +821,34 @@ def _(
     return
 
 
+@app.cell
+def _(mo):
+    mo.md(
+        """
+    ## 9. What didn't work, and what this can't show
+
+    - **No text search.** GovText can't be searched by content, so candidates come from URL words. That favours
+      PDFs whose file names say "dam" or "hospital" and misses hazard plans with plain names. The counts are
+      for this pool, not the corpus.
+    - **Name matching first matched place names.** Before the facility-word rule, "Grand Forks" and "Mountain
+      Lake" matched as facilities. After it, the model still judged 15 to 21% of sampled pages not to be about
+      the matched facility (`about_facility` in section 5).
+    - **Power plants barely match.** Layer names like "EL SEGUNDO POWER" rarely appear verbatim in prose, so
+      only 57 plants matched and the power-plant sample is 53 pages, not 100.
+    - **Our first quote check was wrong.** It kept HTML tags in quotes from OCR tables and required one
+      contiguous stretch, so 27% of quotes were "not found" and table facts looked OCR-only. Section 6 now
+      strips tags from both sides and accepts 90% word coverage; 2% of quotes are still not found.
+    - **Our first two samples weren't reproducible.** DuckDB's `GROUP BY` and Python sets return rows in
+      arbitrary order, so each run drew different pages (and sent them to the model). Sorting before the seeded
+      draws fixed it; the saved answers hold only the final sample.
+    - **The hand check is not a person's.** The labels were made by Claude reading page images. Every row has
+      its page image in `data/hand_check/` after a run, so anyone can redo it.
+    - **"Not in the layer" is the model's call** against one record. It doesn't check other datasets (EIA, CMS,
+      the full NID), so some of these facts exist in a dataset somewhere, just not in the HIFLD layer.
+    """
+    )
+    return
+
+
 if __name__ == "__main__":
     app.run()
