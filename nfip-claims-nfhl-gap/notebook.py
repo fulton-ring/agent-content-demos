@@ -679,8 +679,8 @@ def _(mo):
     - **The bulk claims file refuses scripted downloads** (HTTP 403), so the notebook
       pages the OpenFEMA API instead: about 275 calls, two to three minutes.
     - **FEMA's NFHL server resets connections** on a good share of calls. Every call is
-      retried with backoff up to six times; a run that still fails stops rather than
-      reporting partial numbers.
+      retried with backoff up to six times. A download that still fails stops the run; a
+      point check that still fails is counted as unchecked and asked again on the next run.
     - **One point per community.** The cause check asks the NFHL about one point inside
       each community's largest piece. A community partly on a digital map and partly
       not (Port Arthur is split this way) gets the answer for that one point.

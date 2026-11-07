@@ -19,7 +19,7 @@ needs the preserved Community Layer (HIFLD Next's copy, which this notebook read
 
 Needs [uv](https://docs.astral.sh/uv/) and internet access, no key or account. It runs
 `notebook.py` (a [marimo](https://marimo.io) notebook) as a script and saves the output to
-`results/last-run.txt`. A first run takes 18 to 27 minutes, mostly the NFHL point checks;
+`results/last-run.txt`. A first run took 7 to 27 minutes in our runs, mostly the NFHL point checks;
 a second run the same day reuses `data/` and takes seconds. `uv run marimo edit notebook.py`
 opens the notebook with its tables.
 
