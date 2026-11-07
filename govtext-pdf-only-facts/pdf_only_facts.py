@@ -594,9 +594,10 @@ def _(mo):
         """
     ## 6. Which facts the layer lacks, and which needed OCR
 
-    Each fact becomes a row. A fact needed OCR when its quote is in the OCR text and not in the embedded text
-    (fuzzy match, after lowercasing and dropping punctuation and HTML tags, so table layout doesn't count as a
-    difference). A page with no embedded text at all is the plain case of that.
+    Each fact becomes a row. A fact needed OCR when its quote is in the OCR text and not in the embedded text.
+    "In" means, after lowercasing and dropping punctuation and HTML tags: the quote appears as one stretch
+    (fuzzy match), or at least 90% of its words are on the page, since a table row's label and value are not
+    next to each other in either text. A page with no embedded text at all is the plain case of OCR-only.
     """
     )
     return
@@ -607,8 +608,13 @@ def _(OUT, answers, norm, pd, re, texts):
     from rapidfuzz import fuzz
 
     def found_in(quote: str, text: str) -> bool:
-        q, t = norm(quote), norm(re.sub(r"<[^>]+>", " ", text))
-        return bool(q.strip()) and bool(t.strip()) and fuzz.partial_ratio(q, t) >= 90
+        """The quote is in the text: as one stretch (fuzzy), or at least 90% of its words (table cells)."""
+        q, t = (norm(re.sub(r"<[^>]+>", " ", x)) for x in (quote, text))
+        if not q.strip() or not t.strip():
+            return False
+        words, page_words = q.split(), set(t.split())
+        coverage = sum(w in page_words for w in words) / len(words)
+        return fuzz.partial_ratio(q, t) >= 90 or coverage >= 0.9
 
     _rows = []
     for _a in answers:
@@ -707,7 +713,7 @@ def _(DATA, GOVTEXT, SEED, facts, http, norm, pd, re, texts):
     _dir.mkdir(exist_ok=True)
     _sheet = []
     for _r in hand_sample.itertuples():
-        _png = _dir / f"{_r.check_id:02d}.png"
+        _png = _dir / f"{_r.check_id:02d}-{_r.pdf_id}-p{_r.page}.png"
         if not _png.exists():
             _pdf = http.get(f"{GOVTEXT}/pdfs/{_r.pdf_id}.pdf", timeout=300)
             assert _pdf.status_code == 200, f"{_r.pdf_id}: HTTP {_pdf.status_code}"
@@ -734,20 +740,27 @@ def _(Path, hand_sample, pd):
     assert (labels["fact_id"] == labels["fact_id_run"]).all() and len(labels) == len(hand_sample), (
         "labels don't match this run's hand-check sample"
     )
-    _with_emb = labels[labels["embedded_correct"] != "absent"]
-    _real = labels[(labels["fact_on_page"] == "yes") & (labels["about_facility"] == "yes")]
+    _both, _ocr_only = labels[~labels["ocr_only"]], labels[labels["ocr_only"]]
     hand = {
         "facts_checked": len(labels),
         "fact_on_page": round((labels["fact_on_page"] == "yes").mean(), 3),
         "about_facility": round((labels["about_facility"] == "yes").mean(), 3),
         "substantive": round((labels["substantive"] == "yes").mean(), 3),
-        "real_and_substantive": round(((labels["substantive"] == "yes") & labels.index.isin(_real.index)).mean(), 3),
-        "ocr_text_error_rate": round((labels["ocr_correct"] == "no").mean(), 3),
-        "embedded_text_checked": len(_with_emb),
-        "embedded_text_error_rate": round((_with_emb["embedded_correct"] == "no").mean(), 3),
-        "embedded_text_absent": int((labels["embedded_correct"] == "absent").sum()),
-        "ocr_only_facts_embedded_absent": int((labels["ocr_only"] & (labels["embedded_correct"] == "absent")).sum()),
-        "ocr_only_facts_embedded_present": int((labels["ocr_only"] & (labels["embedded_correct"] != "absent")).sum()),
+        "on_page_about_facility_and_substantive": round(
+            (
+                (labels["fact_on_page"] == "yes")
+                & (labels["about_facility"] == "yes")
+                & (labels["substantive"] == "yes")
+            ).mean(),
+            3,
+        ),
+        "ocr_text_wrong": int((labels["ocr_correct"] == "no").sum()),
+        "both_texts_facts": len(_both),
+        "both_texts_embedded_wrong": int((_both["embedded_correct"] == "no").sum()),
+        "ocr_only_facts": len(_ocr_only),
+        "ocr_only_embedded_absent": int((_ocr_only["embedded_correct"] == "absent").sum()),
+        "ocr_only_embedded_wrong": int((_ocr_only["embedded_correct"] == "no").sum()),
+        "ocr_only_embedded_right": int((_ocr_only["embedded_correct"] == "yes").sum()),
     }
     print(
         labels.groupby("ocr_only")[["fact_on_page", "about_facility", "substantive", "ocr_correct", "embedded_correct"]]
