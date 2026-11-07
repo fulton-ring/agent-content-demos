@@ -29,7 +29,7 @@ Three marimo notebooks, each meant to be read top to bottom. Open one with `uv r
 
 You need [uv](https://docs.astral.sh/uv/). The model answers are committed under `answers/`, so a re-run rescores without calling a model and needs no key. Reading a page that isn't saved needs `OPENROUTER_API_KEY`, and spending stops at $4.50.
 
-`run.sh` runs the three notebooks in order. They download the seven reports (about 120 MB) to `output/`, which is not committed (set `CCR_OUTPUT_DIR` to put it elsewhere), and write the dataset to `results/`. With the saved answers, a run from a clean clone took about 5 minutes. The first run, which called the models, took 22 minutes for the reading and cost **$2.06**. A ten-page Qwen trial added $0.05.
+`run.sh` runs the three notebooks in order. They download the seven reports (about 120 MB) to `output/`, which is not committed (set `CCR_OUTPUT_DIR` to put it elsewhere), and write the dataset to `results/`. With the saved answers, a run from a clean clone took about 5 minutes. The first run, which called the models, took 22 minutes for the reading and cost **$2.06** (including the schema draft). A ten-page Qwen trial added $0.05, for $2.10 in all.
 
 ## The data
 
@@ -53,7 +53,7 @@ From the run of `./run.sh` on 2026-11-06. Of the 232 lab pages, 188 matched a sa
 | Born-digital pages (516 values) | 0 | 1 wrong | 0 accepted wrong (0% to 0.74%) |
 | Well names wrong (188 pages) | 4 | 5 | **3 accepted wrong** |
 
-**Review rate.** 8 of 2,644 fields on lab pages went to review (0.3%). Counting the 2 pages that only one model called a lab page, 8 of 234 pages (3.4%) have something in review. Review caught the one value error that mattered: Mistral read calcium `496` as `4.96`. Gemini's own confidence, given the same review budget, caught none. It put 0.95 or higher on every value.
+**Review rate.** 8 of 2,644 fields on lab pages went to review (0.3%). Counting the 2 pages that only one model called a lab page, 8 of 234 pages (3.4%) have something in review. Disagreement sent both single-model value errors to review: Gemini skipped a mercury result (`< 0.000150`) that Mistral read, and Mistral read calcium `496` as `4.96`. Gemini's own confidence, given the same review budget, caught none. It put 0.95 or higher on every value.
 
 **What got through: well names.** On 3 of 188 pages, both models read the well `HLF-1O` (letter O) as `HLF-10` (zero), so every result on those pages sits under the wrong well. Disagreement can't catch an error both models make. A check against the report's own list of wells would, and it isn't built (see below).
 
