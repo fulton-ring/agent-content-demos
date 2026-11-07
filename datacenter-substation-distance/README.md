@@ -49,7 +49,7 @@ high-voltage grid. A real minority needs new high-voltage substations, and filin
     than 5 km for none. Using the Atlas coordinate moves 1 campus to a different substation band.
   - Planned MW differs by more than 25% for 8 of the 20 pairs where both lists give a figure. Examples: Colossus
     is 1,500 vs 340 MW, Project Tembo/Jade 1,800 vs 10,000 MW, Galaxy Helios 800 vs 1,600 MW.
-- **Run time:** 38 s for the notebook from a clean clone (42 s with `uv` setup), most of it downloads. Repeat runs
+- **Run time:** 36–38 s for the notebook in two clean-clone runs (about 42 s with `uv` setup), mostly downloads. Repeat runs
   use `data/` and take about 5 s.
 
 ![Share of campuses within a given distance of a 230 kV+ substation](outputs/distance_to_230kv_substation.png)
