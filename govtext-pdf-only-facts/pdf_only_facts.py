@@ -111,9 +111,6 @@ def _(HIFLD, con):
             ("hospitals", "hospitals-3", "v1.1.0"),
             ("power_plants", "power-plants-1", "v1.0.0"),
         ]
-    }/national-inventory-of-dams-nid-1/national-inventory-of-dams-nid-1/v1.0.0/geoparquet/national-inventory-of-dams-nid-1.parquet",
-        "hospitals": f"{HIFLD}/hospitals-3/hospitals-3/v1.1.0/geoparquet/hospitals-3.parquet",
-        "power_plants": f"{HIFLD}/power-plants-1/power-plants-1/v1.0.0/geoparquet/power-plants-1.parquet",
     }
     DROP = {"geometry", "bbox", "OBJECTID", "id", "geom"}
     layers = {}
@@ -234,7 +231,7 @@ def _(DATA, GOVTEXT, HTTPAdapter, Retry, ThreadPoolExecutor, io, json, requests,
         texts = dict(zip(sample_docs["pdf_id"], _pool.map(fetch_text, sample_docs["pdf_id"]), strict=True))
     _pages = sum(len(set(d["ocr"]) | set(d["embedded"])) for d in texts.values())
     print(f"Read {len(texts):,} PDFs, {_pages:,} pages with text")
-    return (texts,)
+    return http, texts
 
 
 @app.cell
@@ -554,7 +551,7 @@ def _(OUT, PageFacts, ThreadPoolExecutor, json, layers, os, page_sample, request
                 f"Page {r['page']} ({source} text):\n{text[:15000]}"
             )
             result = agent.run_sync(prompt)
-            usage = result.usage()
+            usage = result.usage
             return {
                 "key": key(r),
                 **r,
@@ -656,6 +653,135 @@ def _(facts, pd):
     print(by_type.to_string())
     by_layer
     return by_layer, by_type
+
+
+@app.cell
+def _(mo):
+    mo.md(
+        """
+    ## 7. Checking by eye against the page images
+
+    GovText has no ground truth, and neither does the model. So we draw 60 of the facts the layer lacks (30
+    that only the OCR text has, 30 that both texts have, fixed seed), download each PDF, render the page and
+    compare it with the fact, the OCR text and the embedded text. For each fact we label: is the fact on the
+    page, is it about the matched facility, is the OCR text of it right, is the embedded text of it right (or
+    absent). The labels are in `hand_check_labels.csv`. They were made by the Claude worker that built this
+    notebook, reading the rendered page images, not by a person; a founder can redo any row from the page
+    image in `data/hand_check/`.
+    """
+    )
+    return
+
+
+@app.cell
+def _(DATA, GOVTEXT, SEED, facts, http, norm, pd, re, texts):
+    import fitz
+    from rapidfuzz import fuzz as _fuzz
+
+    _missing = facts[(facts["layer_status"] == "not in layer") & facts["quote_found"]]
+    hand_sample = (
+        pd.concat([g.sample(min(30, len(g)), random_state=SEED) for _, g in _missing.groupby("ocr_only")])
+        .reset_index(drop=True)
+        .assign(check_id=lambda d: d.index + 1)
+    )
+
+    def embedded_span(quote: str, text: str) -> str:
+        """The stretch of embedded text that best matches the quote, for comparing with the image."""
+        if not text.strip():
+            return ""
+        flat = re.sub(r"\s+", " ", text)
+        al = _fuzz.partial_ratio_alignment(norm(quote).strip(), flat.lower())
+        return flat[max(0, al.dest_start - 20) : al.dest_end + 20] if al and al.score >= 60 else ""
+
+    _dir = DATA / "hand_check"
+    _dir.mkdir(exist_ok=True)
+    _sheet = []
+    for _r in hand_sample.itertuples():
+        _png = _dir / f"{_r.check_id:02d}.png"
+        if not _png.exists():
+            _pdf = http.get(f"{GOVTEXT}/pdfs/{_r.pdf_id}.pdf", timeout=300)
+            assert _pdf.status_code == 200, f"{_r.pdf_id}: HTTP {_pdf.status_code}"
+            with fitz.open(stream=_pdf.content, filetype="pdf") as _doc:
+                _doc[_r.page - 1].get_pixmap(dpi=110).save(_png)
+        _emb = embedded_span(_r.quote, texts[_r.pdf_id]["embedded"].get(str(_r.page), ""))
+        _sheet.append(
+            f"## {_r.check_id:02d} {_png.name} ({_r.layer}, page {_r.page}, ocr_only={_r.ocr_only})\n"
+            f"- fact: {_r.statement}\n- OCR quote: {_r.quote!r}\n- embedded: {_emb!r}\n"
+        )
+    (_dir / "sheet.md").write_text("\n".join(_sheet))
+    print(f"{len(hand_sample)} facts drawn; page images and a checking sheet in {_dir}/")
+    return (hand_sample,)
+
+
+@app.cell
+def _(Path, hand_sample, pd):
+    _path = Path("hand_check_labels.csv")
+    assert _path.exists(), "hand_check_labels.csv is missing: label the facts in data/hand_check/sheet.md first"
+    labels = pd.read_csv(_path).merge(hand_sample[["check_id", "fact_id", "ocr_only"]], on=["check_id", "fact_id"])
+    assert len(labels) == len(hand_sample), "labels don't match this run's hand-check sample"
+    _with_emb = labels[labels["embedded_correct"] != "absent"]
+    hand = {
+        "facts_checked": len(labels),
+        "fact_on_page": round((labels["fact_on_page"] == "yes").mean(), 3),
+        "about_facility": round((labels["about_facility"] == "yes").mean(), 3),
+        "ocr_text_error_rate": round((labels["ocr_correct"] == "no").mean(), 3),
+        "embedded_text_checked": len(_with_emb),
+        "embedded_text_error_rate": round((_with_emb["embedded_correct"] == "no").mean(), 3),
+        "embedded_text_absent": int((labels["embedded_correct"] == "absent").sum()),
+        "ocr_only_facts_with_embedded_text_present_and_right": int(
+            (labels["ocr_only"] & (labels["embedded_correct"] == "yes")).sum()
+        ),
+    }
+    hand
+    return (hand,)
+
+
+@app.cell
+def _(mo):
+    mo.md("""## 8. Outputs""")
+    return
+
+
+@app.cell
+def _(
+    MODEL,
+    OUT,
+    RUN_STARTED,
+    by_layer,
+    by_type,
+    facts,
+    hand,
+    json,
+    match_summary,
+    model_cost,
+    page_stats,
+    pool,
+    sample_docs,
+    texts,
+    time,
+):
+    _missing = facts[facts["layer_status"] == "not in layer"]
+    facts.to_csv(OUT / "facts.csv", index=False)
+    summary = {
+        "candidate_pdfs_in_pool": len(pool),
+        "pdfs_read": len(sample_docs),
+        "pages_read": sum(len(set(d["ocr"]) | set(d["embedded"])) for d in texts.values()),
+        "matches": match_summary.reset_index().to_dict("records"),
+        "pages_sampled": page_stats.reset_index().to_dict("records"),
+        "facts": by_layer.reset_index().to_dict("records"),
+        "facts_not_in_layer": len(_missing),
+        "facts_not_in_layer_per_page": round(len(_missing) / int(page_stats["pages"].sum()), 2),
+        "facts_not_in_layer_by_type": by_type.reset_index().to_dict("records"),
+        "ocr_only_share_of_not_in_layer": round(_missing["ocr_only"].mean(), 3),
+        "quote_not_found_share": round(1 - facts["quote_found"].mean(), 3),
+        "hand_check": hand,
+        "model": MODEL,
+        "model_cost_usd": round(model_cost, 2),
+        "run_seconds": round(time.time() - RUN_STARTED),
+    }
+    (OUT / "summary.json").write_text(json.dumps(summary, indent=2, default=str))
+    print(json.dumps(summary, indent=2, default=str))
+    return
 
 
 if __name__ == "__main__":
