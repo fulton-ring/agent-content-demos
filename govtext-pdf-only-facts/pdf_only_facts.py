@@ -38,7 +38,7 @@ def _():
     from concurrent.futures import ThreadPoolExecutor
     from pathlib import Path
 
-    import ahocorasick
+    import ahocorasick  # ty: ignore[import-not-found]  # compiled module with no type stubs
     import duckdb
     import pandas as pd
     import requests
@@ -552,6 +552,8 @@ def _(OUT, PageFacts, ThreadPoolExecutor, json, layers, os, page_sample, request
             )
             result = agent.run_sync(prompt)
             usage = result.usage
+            facts_out = result.output
+            assert isinstance(facts_out, PageFacts), "model answer did not validate"
             return {
                 "key": key(r),
                 **r,
@@ -559,7 +561,7 @@ def _(OUT, PageFacts, ThreadPoolExecutor, json, layers, os, page_sample, request
                 "source": source,
                 "input_tokens": usage.input_tokens,
                 "output_tokens": usage.output_tokens,
-                "answer": result.output.model_dump(),
+                "answer": facts_out.model_dump(),
             }
 
         with ThreadPoolExecutor(max_workers=8) as _pool, ANSWERS.open("a") as _f:
@@ -595,7 +597,7 @@ def _(mo):
 
 
 @app.cell
-def _(answers, norm, pd, re, texts):
+def _(OUT, answers, norm, pd, re, texts):
     from rapidfuzz import fuzz
 
     def found_in(quote: str, text: str) -> bool:
@@ -626,6 +628,7 @@ def _(answers, norm, pd, re, texts):
     facts = pd.DataFrame(_rows)
     facts["ocr_only"] = facts["in_ocr"] & ~facts["in_embedded"]
     facts["quote_found"] = facts["in_ocr"] | facts["in_embedded"]
+    facts.to_csv(OUT / "facts.csv", index=False)
     _pages = pd.DataFrame(
         [{"layer": a["layer"], "about": a["answer"]["about_facility"], "n": len(a["answer"]["facts"])} for a in answers]
     )
@@ -664,8 +667,9 @@ def _(mo):
     GovText has no ground truth, and neither does the model. So we draw 60 of the facts the layer lacks (30
     that only the OCR text has, 30 that both texts have, fixed seed), download each PDF, render the page and
     compare it with the fact, the OCR text and the embedded text. For each fact we label: is the fact on the
-    page, is it about the matched facility, is the OCR text of it right, is the embedded text of it right (or
-    absent). The labels are in `hand_check_labels.csv`. They were made by the Claude worker that built this
+    page, is it about the matched facility, is it substantive (an attribute or finding a dataset could hold,
+    not just a mention in a list or a photo caption), is the OCR text of it right, is the embedded text of it
+    right (or absent). The labels are in `hand_check_labels.csv`. They were made by the Claude worker that built this
     notebook, reading the rendered page images, not by a person; a founder can redo any row from the page
     image in `data/hand_check/`.
     """
@@ -717,21 +721,32 @@ def _(DATA, GOVTEXT, SEED, facts, http, norm, pd, re, texts):
 def _(Path, hand_sample, pd):
     _path = Path("hand_check_labels.csv")
     assert _path.exists(), "hand_check_labels.csv is missing: label the facts in data/hand_check/sheet.md first"
-    labels = pd.read_csv(_path).merge(hand_sample[["check_id", "fact_id", "ocr_only"]], on=["check_id", "fact_id"])
-    assert len(labels) == len(hand_sample), "labels don't match this run's hand-check sample"
+    labels = pd.read_csv(_path).merge(
+        hand_sample[["check_id", "fact_id", "ocr_only"]], on="check_id", suffixes=("", "_run")
+    )
+    assert (labels["fact_id"] == labels["fact_id_run"]).all() and len(labels) == len(hand_sample), (
+        "labels don't match this run's hand-check sample"
+    )
     _with_emb = labels[labels["embedded_correct"] != "absent"]
+    _real = labels[(labels["fact_on_page"] == "yes") & (labels["about_facility"] == "yes")]
     hand = {
         "facts_checked": len(labels),
         "fact_on_page": round((labels["fact_on_page"] == "yes").mean(), 3),
         "about_facility": round((labels["about_facility"] == "yes").mean(), 3),
+        "substantive": round((labels["substantive"] == "yes").mean(), 3),
+        "real_and_substantive": round(((labels["substantive"] == "yes") & labels.index.isin(_real.index)).mean(), 3),
         "ocr_text_error_rate": round((labels["ocr_correct"] == "no").mean(), 3),
         "embedded_text_checked": len(_with_emb),
         "embedded_text_error_rate": round((_with_emb["embedded_correct"] == "no").mean(), 3),
         "embedded_text_absent": int((labels["embedded_correct"] == "absent").sum()),
-        "ocr_only_facts_with_embedded_text_present_and_right": int(
-            (labels["ocr_only"] & (labels["embedded_correct"] == "yes")).sum()
-        ),
+        "ocr_only_facts_embedded_absent": int((labels["ocr_only"] & (labels["embedded_correct"] == "absent")).sum()),
+        "ocr_only_facts_embedded_present": int((labels["ocr_only"] & (labels["embedded_correct"] != "absent")).sum()),
     }
+    print(
+        labels.groupby("ocr_only")[["fact_on_page", "about_facility", "substantive", "ocr_correct", "embedded_correct"]]
+        .agg(lambda c: c.value_counts().to_dict())
+        .to_string()
+    )
     hand
     return (hand,)
 
@@ -761,7 +776,6 @@ def _(
     time,
 ):
     _missing = facts[facts["layer_status"] == "not in layer"]
-    facts.to_csv(OUT / "facts.csv", index=False)
     summary = {
         "candidate_pdfs_in_pool": len(pool),
         "pdfs_read": len(sample_docs),
@@ -773,6 +787,9 @@ def _(
         "facts_not_in_layer_per_page": round(len(_missing) / int(page_stats["pages"].sum()), 2),
         "facts_not_in_layer_by_type": by_type.reset_index().to_dict("records"),
         "ocr_only_share_of_not_in_layer": round(_missing["ocr_only"].mean(), 3),
+        "ocr_only_share_of_not_in_layer_on_pages_without_embedded_text": round(
+            (_missing["ocr_only"] & ~_missing["page_has_embedded"]).mean(), 3
+        ),
         "quote_not_found_share": round(1 - facts["quote_found"].mean(), 3),
         "hand_check": hand,
         "model": MODEL,
