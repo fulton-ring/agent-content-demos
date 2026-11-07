@@ -66,7 +66,8 @@ def _(mo):
     `FRI_CACHE` to move it): FEMA's datasheet, Census 2020 counties, LANDFIRE fuel models at
     500 m, NASA's yearly FWI files for MME50 and MME75 (about 13 GB transferred, kept as the
     CONUS box), and one NEX-GDDP-CMIP6 file for the 0.25° grid. Already cached files are
-    skipped. NASA's portal is missing a few years in each 30-year period; those are skipped.
+    skipped. Any year the portal doesn't serve is skipped. The rebuild found 4-7 of the 30
+    years missing in each period; on 7 November 2026 all 300 files were there.
     """)
     return
 
@@ -247,8 +248,10 @@ def _(mo):
     mo.md(r"""
     **Check against the rebuild.** Two cells of this grid are exactly the rebuild's pipelines:
     simple + MME50 + mean is Claude Code agent 3 (held-out log error 0.027 there), and swarm +
-    MME75 + P95 is the kept swarm pipeline (0.072). If the numbers below match, this notebook
-    reproduces them and only the FWI choice changes between cells.
+    MME75 + P95 is the kept swarm pipeline (0.072). They come out about 0.001-0.002 higher
+    here. The likely reason is that this run averages all 30 years per period, where the
+    rebuild had 23-26; we can't confirm it because the rebuild didn't record which years it
+    lacked. The gap is small next to the differences between cells.
     """)
     return
 
