@@ -204,9 +204,9 @@ def _(AI_AGENTS, NETWORKS, live, mo, pd):
     ## Where the two networks disagree
 
     Of {len(_cmp)} host-and-user-agent pairs (six AI agents plus the browser), **{len(_diff)}** got a different
-    outcome on the two networks, on **{disagreement["hosts_disagreeing"]}** hosts. A pair that is `ok` from
-    Anthropic's network and refused from Azure, for a Claude user agent, is a firewall that checks the bot's
-    address: it lets the real ClaudeBot in and shuts out anyone wearing its name.
+    outcome on the two networks, on **{disagreement["hosts_disagreeing"]}** hosts. Hosts that turn away every user
+    agent, browser included, from one network only are blocking that network. Hosts where the same AI user agent gets in
+    from one network and not the other are judging the agent together with where it comes from.
     """),
             _diff,
         ]
