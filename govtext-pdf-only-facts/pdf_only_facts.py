@@ -685,7 +685,7 @@ def _(mo):
 
 @app.cell
 def _(DATA, GOVTEXT, SEED, facts, http, norm, pd, re, texts):
-    import fitz
+    import pymupdf
     from rapidfuzz import fuzz as _fuzz
 
     _missing = facts[(facts["layer_status"] == "not in layer") & facts["quote_found"]]
@@ -711,7 +711,7 @@ def _(DATA, GOVTEXT, SEED, facts, http, norm, pd, re, texts):
         if not _png.exists():
             _pdf = http.get(f"{GOVTEXT}/pdfs/{_r.pdf_id}.pdf", timeout=300)
             assert _pdf.status_code == 200, f"{_r.pdf_id}: HTTP {_pdf.status_code}"
-            with fitz.open(stream=_pdf.content, filetype="pdf") as _doc:
+            with pymupdf.open(stream=_pdf.content, filetype="pdf") as _doc:
                 _doc[_r.page - 1].get_pixmap(dpi=110).save(_png)
         _emb = embedded_span(_r.quote, texts[_r.pdf_id]["embedded"].get(str(_r.page), ""))
         _sheet.append(
