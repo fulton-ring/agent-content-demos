@@ -571,8 +571,19 @@ def _(mo):
     For every campus more than 5 miles from a 230 kV+ substation we looked at Esri World Imagery (current at the
     time of the check) around the campus and along the nearest lines, for a substation or switchyard under
     construction or one the datasets miss, and searched for a utility filing that names a new substation for the
-    campus. The labels are in `hand_check.csv` (campus name, label, note, link; no coordinates).
-    `hand_check_chips.py` redraws the images we looked at.
+    campus. The labels are in `hand_check.csv` (campus name, what the imagery shows, label, note, link; no
+    coordinates). `hand_check_chips.py` redraws the images we looked at. The imagery is undated and often a year or
+    more old, so "undeveloped" means only that it predates construction.
+
+    | label | meaning |
+    |---|---|
+    | `new_hv_substation_in_filing` | a filing or utility names a new 230 kV+ substation or switching station for it |
+    | `new_hv_substation_customer_unnamed` | a new 230 kV+ substation is planned nearby for an unnamed large load |
+    | `site_plan_substation_only` | the developer or a site plan says "substation", with no voltage or utility project |
+    | `new_lower_voltage_substation`, `new_lower_voltage_tie` | the named new grid work is below 230 kV |
+    | `on_site_gas` | the campus is permitted or described as powered by its own gas generation |
+    | `existing_lower_voltage` | an existing building already served from a 100-229 kV substation |
+    | `nothing_found` | no substation in the imagery and no filing found (or not searched) |
     """)
     return
 
@@ -607,8 +618,9 @@ def _(Path, measured, pd):
     hand = pd.read_csv(_path) if _path.exists() else pd.DataFrame(columns=["campus", "label", "note", "link"])
     _missing = sorted(set(_far["campus"]) - set(hand["campus"]))
     print(f"{len(_far)} far campuses; {len(_far) - len(_missing)} hand-checked; not yet checked: {_missing}")
-    hand_summary = hand[hand["campus"].isin(_far["campus"])]["label"].value_counts()
-    hand_summary
+    _labelled = _far.merge(hand, on="campus").merge(measured[["campus", "gigawatt"]], on="campus")
+    hand_summary = _labelled["label"].value_counts()
+    pd.crosstab(_labelled["label"], _labelled["gigawatt"].map({True: "gigawatt", False: "smaller or unknown MW"}))
     return (hand_summary,)
 
 
@@ -648,6 +660,27 @@ def _(
     }
     (OUT / "summary.json").write_text(json.dumps(summary, indent=2))
     print(json.dumps(summary, indent=2))
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## 8. What didn't work, and what this doesn't show
+
+    - **Matching the lists by nearest point** paired the wrong campuses (Meta Prometheus with a Google campus,
+      AVAIO Leo with a TierPoint building). Name matching fixed it, but it is a heuristic; every pair is printed.
+    - **The Atlas has few capacity figures**: 23 of 130 site-located US sites, so planned MW beyond 5 miles is
+      mostly Malachi's numbers, and Atlas-only campuses without a figure count as zero MW.
+    - **GMWID's 2026-10-11 build is gone**; only the latest build is served, so the OpenStreetMap line numbers will
+      drift from run to run. The ETag of the build used is in `outputs/summary.json`.
+    - **OpenStreetMap's construction tags** don't help: 35 US substations are tagged under construction or
+      proposed, none within 5 miles of a far campus, while filings name new substations for at least five.
+    - **Distance is not capacity.** A substation next door may have no headroom; a far campus may already have a
+      utility project under way. Straight-line distance also ignores routing.
+    - **230 kV is a regional threshold.** Much of the Midwest and South transmits at 115-161 kV: with any
+      100 kV+ substation, almost every campus is within 5 miles.
+    """)
     return
 
 
