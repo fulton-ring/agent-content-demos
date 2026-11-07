@@ -159,6 +159,7 @@ def _(GOVTEXT, con):
         WHERE regexp_matches(u, '{POOL_PATTERN}')
           AND NOT regexp_matches(u, '/content/dam/|dam migration|pdg\\.lbl\\.gov')
         GROUP BY digest
+        ORDER BY digest
     """).df()
     assert len(pool) > 5000, f"pool too small: {len(pool)}"
     print(f"Candidate PDFs: {len(pool):,} from {pool['host'].nunique():,} hosts")
@@ -397,11 +398,16 @@ def _(NID_IDS, NID_ROW, STATES, automaton, facilities, norm, pd, re, texts):
 
     _rows = []
     for _pdf_id, _doc in texts.items():
-        for _page in set(_doc["ocr"]) | set(_doc["embedded"]):
+        for _page in sorted(set(_doc["ocr"]) | set(_doc["embedded"]), key=int):
             _raw = _doc["ocr"].get(_page, "") + "\n" + _doc["embedded"].get(_page, "")
             for _layer, _row, _how in set(match_page(_raw)):
                 _rows.append({"pdf_id": _pdf_id, "page": int(_page), "layer": _layer, "row": _row, "how": _how})
-    matches = pd.DataFrame(_rows, columns=["pdf_id", "page", "layer", "row", "how"])
+    # Sorted, so the seeded sample below draws the same pages on every run.
+    matches = (
+        pd.DataFrame(_rows, columns=["pdf_id", "page", "layer", "row", "how"])
+        .sort_values(["layer", "pdf_id", "page", "row"])
+        .reset_index(drop=True)
+    )
     match_summary = matches.groupby("layer").agg(
         facilities=("row", "nunique"), page_matches=("page", "size"), pdfs=("pdf_id", "nunique")
     )
@@ -710,6 +716,7 @@ def _(DATA, GOVTEXT, SEED, facts, http, norm, pd, re, texts):
         _emb = embedded_span(_r.quote, texts[_r.pdf_id]["embedded"].get(str(_r.page), ""))
         _sheet.append(
             f"## {_r.check_id:02d} {_png.name} ({_r.layer}, page {_r.page}, ocr_only={_r.ocr_only})\n"
+            f"- fact_id: {_r.fact_id}\n"
             f"- fact: {_r.statement}\n- OCR quote: {_r.quote!r}\n- embedded: {_emb!r}\n"
         )
     (_dir / "sheet.md").write_text("\n".join(_sheet))
