@@ -17,9 +17,9 @@ the layer, the check against page images, and what didn't work.
 ```
 
 It needs [uv](https://docs.astral.sh/uv/) and internet access. It needs no key, because the model's answers for
-the sample are saved in `outputs/model_answers.jsonl`. A run downloads about 1 GB of GovText text for 5,000 PDFs
-and 60 PDFs for the check (cached in `data/`, which isn't committed). From a clean checkout it takes about
-five minutes (4 min 43 s in our clean run, with no key set); a rerun with the cache takes under two minutes. It writes:
+the sample are saved in `outputs/model_answers.jsonl`. A run downloads about 0.7 GB of GovText text for 5,000 PDFs
+and 60 PDFs for the check (cached in `data/`, which isn't committed). From a clean checkout it takes five to
+seven minutes depending on bandwidth (4 min 43 s and 6 min 40 s in two clean runs, with no key set); a rerun with the cache takes under two minutes. It writes:
 
 - `outputs/facts.csv`: one row per fact (896), with the facility's layer and row, the fact type, the quote, the
   model's verdict against the layer record, and whether each text contains the quote;
