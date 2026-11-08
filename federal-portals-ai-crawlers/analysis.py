@@ -146,7 +146,8 @@ def _(AI_AGENTS, NETWORKS, live, mo, pd):
     _any = refusals.groupby(["network", "host"])["refused"].any()
     _control_blocked = (~_control_ok).groupby(level="network").sum()
     # The opposite case: the browser control was turned away but at least one AI agent got the page.
-    _ai_let_in = ((_wide["browser-before"] != "ok") & (_wide[AI_AGENTS] == "ok").any(axis=1)).groupby(level="network")
+    _browser_refused = _wide["browser-before"].isin(["refused", "challenge"])
+    _ai_let_in = (_browser_refused & (_wide[AI_AGENTS] == "ok").any(axis=1)).groupby(level="network")
     _ai_preferred = {n: int(v.sum()) for n, v in _ai_let_in}
     live_refusing_hosts = sorted(_any[_any].index.get_level_values("host").unique())
     _per_network = {n: int(_any[n].sum()) for n in NETWORKS}

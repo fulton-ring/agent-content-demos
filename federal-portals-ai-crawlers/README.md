@@ -9,7 +9,7 @@ two networks, and what two search assistants cite when asked about the datasets 
 9 of 100 hosts disallow an AI agent in robots.txt. Only 3 name AI bots; the other 6 shut out every crawler,
 Googlebot included. 14 hosts refuse at least one AI user agent at the server while serving a browser. The bigger
 pattern runs the other way: on 10 hosts, the bot firewall challenged our browser control but let at least one AI
-agent's user agent through (7 from the second network). Assistants still cited the agency for 97% of questions about
+agent's user agent through (6 from the second network). Assistants still cited the agency for 97% of questions about
 blocked datasets. The block that does hide a dataset host is the old "Disallow: /" for everyone: those hosts were
 cited in a third of answers, against 95 to 100% for every other group.
 
@@ -21,7 +21,8 @@ SKIP_CRAWL=1 ./run.sh    # the analysis only, from the committed crawl results
 ```
 
 `OPENROUTER_API_KEY` is needed only for questions with no saved answer in `answers/`. A rerun reads the saved
-answers, so it costs nothing. `REFRESH_ANSWERS=1` asks the assistants again (about $1.25). Set `NETWORK` to name
+answers, so it costs nothing. A live re-crawl can drift; if it puts a new host in the blocked set, that host has no
+saved answer and the run needs a key. `REFRESH_ANSWERS=1` asks the assistants again (about $1.25). Set `NETWORK` to name
 the network you crawl from.
 
 ## What's here
@@ -57,7 +58,7 @@ the network you crawl from.
 | ...of which keep AI out but let Googlebot in | 3 (civilrightsdata.ed.gov, data.hrsa.gov, sciencebase.gov) |
 | Hosts refusing ≥1 AI user agent while serving the browser | **14** from anthropic-cloud, **12** from github-actions |
 | Hosts refusing the browser control too | 15 / 21 |
-| ...where an AI user agent got in anyway | **10** / 7 |
+| ...where an AI user agent got in anyway | **10** / 6 |
 | Host and user agent pairs that disagree between networks | 66 of 700, on 19 hosts |
 | Crawl | 1,600 requests, about 5 min per network, $0 |
 | Assistant check | 76 answers, $1.25 on OpenRouter |
