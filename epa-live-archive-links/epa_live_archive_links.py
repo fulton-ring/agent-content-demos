@@ -386,6 +386,7 @@ def _(OUT, pages, pd, unquote, urlsplit):
         links["in_main"].sum(),
     ]
     links_by_kind.to_csv(OUT / "links_by_kind.csv")
+    print(links_by_kind.to_string())
     links_by_kind
     return classify, links
 
@@ -647,6 +648,7 @@ def _(OUT, copies, pd, targets):
         archive_only_by_name=("archive_only_by_name", "sum"),
     )
     copy_summary.loc["all"] = copy_summary.sum()
+    print(copy_summary.to_string())
     copy_summary
     return (files,)
 
@@ -702,7 +704,9 @@ def _(mo):
         at an archive-only file. We count those pages by the program that owns them (the
         first part of the page's address on www.epa.gov), and list the ten with the most
         archive-only files, with how many of those files #217's crawl captured and extracted.
-        The corrected estimate multiplies the file-name count by the hand-check rate.
+        Files the hand check found elsewhere no longer count as archive-only. Pages with at
+        least one hand-confirmed archive-only file are a lower bound; the estimated number of
+        archive-only files multiplies the file-name count by the hand-check rate.
         """
     )
     return
@@ -712,10 +716,13 @@ def _(mo):
 def _(OUT, checked, confirmed_rate, data_links, files, hand_check, pd):
     joined = data_links.merge(files, on="address")
     confirmed_no = set(hand_check.loc[hand_check["archive_only"] == "no", "address"])
+    confirmed_yes = set(hand_check.loc[hand_check["archive_only"] == "yes", "address"])
     joined["archive_only"] = joined["archive_only_by_name"] & ~joined["address"].isin(confirmed_no)
+    joined["confirmed_archive_only"] = joined["address"].isin(confirmed_yes)
     per_page = joined.groupby(["page", "page_title", "section"]).agg(
         data_links=("address", "size"),
         archive_only_files=("archive_only", "sum"),
+        hand_confirmed=("confirmed_archive_only", "sum"),
         files_404_today=("status_today", lambda s: (s == 404).sum()),
         in_217_crawl=("in_217_crawl", "sum"),
         in_217_parquet=("in_217_parquet", "sum"),
@@ -727,23 +734,30 @@ def _(OUT, checked, confirmed_rate, data_links, files, hand_check, pd):
     dependent = per_page[per_page["archive_only_files"] > 0]
     by_program = (
         dependent.groupby("section")
-        .agg(pages=("page", "size"), archive_only_files=("archive_only_files", "sum"))
-        .sort_values(["pages", "archive_only_files"], ascending=False)
+        .agg(pages=("page", "size"), archive_only_file_links=("archive_only_files", "sum"))
+        .sort_values(["pages", "archive_only_file_links"], ascending=False)
     )
     by_program.to_csv(OUT / "dependent_pages_by_program.csv")
     top_ten = dependent.head(10)
     top_ten.to_csv(OUT / "top_ten_pages.csv", index=False)
     headline = pd.Series(
-        {
+        dtype=object,
+        data={
             "pages with a data link into the archive": len(per_page),
-            "pages with an archive-only data file (file-name match)": len(dependent),
-            "hand-check confirmation rate": round(confirmed_rate, 3),
-            "estimated pages after the hand check": (
-                round(len(dependent) * confirmed_rate) if len(checked) else "not hand-checked"
+            "pages with an archive-only data file": len(dependent),
+            "pages with a hand-confirmed archive-only file (lower bound)": int(
+                (dependent["hand_confirmed"] > 0).sum()
             ),
             "programs with a dependent page": dependent["section"].nunique(),
-        }
+            "archive-only data files by file name": int(files["archive_only_by_name"].sum()),
+            "hand-check confirmation rate": round(confirmed_rate, 3) if len(checked) else "none",
+            "estimated archive-only data files": (
+                round(files["archive_only_by_name"].sum() * confirmed_rate) if len(checked) else ""
+            ),
+        },
     )
+    print(headline.to_string())
+    print(by_program.to_string())
     headline
     return by_program, dependent, headline, top_ten
 
@@ -751,6 +765,49 @@ def _(OUT, checked, confirmed_rate, data_links, files, hand_check, pd):
 @app.cell
 def _(by_program, mo, top_ten):
     mo.vstack([mo.md("**Dependent pages by program**"), by_program, mo.md("**Top ten**"), top_ten])
+    return
+
+
+@app.cell
+def _(checked, confirmed_rate, crawl_summary, data_links, dependent, files, links, mo):
+    crawled_ok = crawl_summary.loc["HTTP 200", "pages"]
+    linking_pages = links["page"].nunique()
+    direct_files = (data_links["route"] == "direct link").sum()
+    home_pages = links.loc[links["kind"] == "archive home", "page"].nunique()
+    found_live = checked.loc[checked["archive_only"] == "no", "where_found"]
+    cair_via = "archive.epa.gov/airmarkets/programs/cair/web/html/index.html"
+    cair_pages = data_links.loc[
+        (data_links["via"] == cair_via) & data_links["page"].isin(dependent["page"]), "page"
+    ].nunique()
+    mo.md(
+        f"""
+        ## Result
+
+        **The argument mostly fails for data, and EPA has largely cut the dependency.** Of
+        {crawled_ok:,} live pages, {linking_pages:,} ({linking_pages / crawled_ok:.1%}) link into
+        the archive, and **{direct_files} of those links point straight at a data file**. Following
+        page links one step into the archive, {data_links["page"].nunique()} live pages reach
+        {len(files)} data files, and {len(dependent)} of them reach at least one file with no live
+        copy elsewhere, across {dependent["section"].nunique()} programs. The hand check confirmed
+        {(checked["archive_only"] == "yes").sum()} of {len(checked)} sampled archive-only files
+        ({confirmed_rate:.0%}); the {len(found_live)} copies it found were in a regulations.gov
+        docket, not on EPA's site. {(dependent["hand_confirmed"] > 0).sum()} pages have at least
+        one hand-confirmed archive-only file. {cair_pages} of the {len(dependent)} pages reach
+        their files through a single archive page, the Clean Air Interstate Rule's.
+
+        **The wider dependency is reading, not data.** {home_pages} live pages send readers to the
+        archive's home page to search for something, as the NAEMS page does ("Search EPA
+        Archive"), and the other links point at archived pages and PDFs: old news releases,
+        enforcement case documents and program history. Those are the links that will break for
+        ordinary readers on January 1.
+
+        **What didn't work.** The Wayback Machine's availability and CDX APIs returned HTTP 429
+        from this environment, so we couldn't check which files the Internet Archive holds
+        beyond #217's indexed crawl. gaftp.epa.gov can't be searched by file name, so it was
+        only checked by hand. Sorting by extension counts a zip as data even when it holds Word
+        or WordPerfect documents, which several SAP and ozone zips do.
+        """
+    )
     return
 
 
