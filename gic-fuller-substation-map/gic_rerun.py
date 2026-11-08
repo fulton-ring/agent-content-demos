@@ -9,6 +9,7 @@ def _():
     import os
     import tarfile
     import time
+    import warnings
     import zipfile
     from pathlib import Path
 
@@ -54,6 +55,7 @@ def _():
         substring,
         tarfile,
         time,
+        warnings,
         xr,
         zipfile,
         zstandard,
@@ -461,8 +463,13 @@ def _(C, CS, DATA, SECS, mt_sites, np, pd, site_latlon, time, xr):
         if _n not in _Z:
             _Z[_n] = np.stack([s.calcZ(np.fft.rfftfreq(_n, d=60)) for s in mt_sites], axis=1)  # (4, sites, f)
         _X, _Y = np.fft.rfft(_Bp[:, :, 0], n=_n, axis=0).T, np.fft.rfft(_Bp[:, :, 1], n=_n, axis=0).T
-        _E = np.stack([np.fft.irfft(_Z[_n][0] * _X + _Z[_n][1] * _Y, axis=1)[:, :_n0].T,
-                       np.fft.irfft(_Z[_n][2] * _X + _Z[_n][3] * _Y, axis=1)[:, :_n0].T], axis=2)
+        _E = np.stack(
+            [
+                np.fft.irfft(_Z[_n][0] * _X + _Z[_n][1] * _Y, axis=1)[:, :_n0].T,
+                np.fft.irfft(_Z[_n][2] * _X + _Z[_n][3] * _Y, axis=1)[:, :_n0].T,
+            ],
+            axis=2,
+        )
         if _padded:
             _E = _E[360:-360]
         _V = np.asarray(C.T @ np.nan_to_num(_E, nan=0.0, posinf=0.0, neginf=0.0).reshape(len(_E), -1).T).T
@@ -546,11 +553,15 @@ def _(erf, erfinv, log_ndtr, np):
 
 
 @app.cell
-def _(CS, DATA, all_segs, h5py, np, outside, polarity, published_line_values, return_levels, storm_max, v_gannon):
+def _(
+    CS, DATA, all_segs, h5py, np, outside, polarity, published_line_values, return_levels, storm_max, v_gannon, warnings
+):
     if (DATA / "return_levels.npy").exists():
         v_rp = np.load(DATA / "return_levels.npy")
     else:
-        v_rp = return_levels(storm_max)
+        with warnings.catch_warnings():  # lines with no storm voltage (outside the sites) give all-NaN fits
+            warnings.simplefilter("ignore", RuntimeWarning)
+            v_rp = return_levels(storm_max)
         np.save(DATA / "return_levels.npy", v_rp)
     _sign = polarity(v_gannon)
     segs = all_segs.assign(v100=v_rp[:, 0] * _sign, v250=v_rp[:, 1] * _sign, outside=outside)
@@ -739,18 +750,27 @@ def _(CS, build_grid, h5py, np, ours, polarity, published_subs, run_model, segs,
     run_pub = run_model(_buses_pub, _lines_pub, _xy_b.loc[_buses_pub["sub"]].to_numpy(), _v, N_DRAWS)
     # (c) and the after grid: our recomputed voltages
     run_before = run_model(
-        buses_b, lines_b, _xy_b.loc[buses_b["sub"]].to_numpy(), lines_b[["v100", "v250"]].to_numpy(), N_DRAWS
+        buses_b,
+        lines_b,
+        _xy_b.loc[buses_b["sub"]].to_numpy(),
+        np.nan_to_num(lines_b[["v100", "v250"]].to_numpy()),
+        N_DRAWS,
     )
     run_after = run_model(
-        buses_a, lines_a, _xy_a.loc[buses_a["sub"]].to_numpy(), lines_a[["v100", "v250"]].to_numpy(), N_DRAWS
+        buses_a,
+        lines_a,
+        _xy_a.loc[buses_a["sub"]].to_numpy(),
+        np.nan_to_num(lines_a[["v100", "v250"]].to_numpy()),
+        N_DRAWS,
     )
     # (a) C-SWIM's own Monte Carlo output (mean affected people per transformer draw)
-    _ds = xr.open_mfdataset(
-        sorted((CS / "econ_data/gic_processing_batches").glob("summary_batch_*.nc")),
-        combine="nested",
-        concat_dim="gic_realization",
+    _ds = xr.concat(
+        [xr.open_dataset(p) for p in sorted((CS / "econ_data/gic_processing_batches").glob("summary_batch_*.nc"))],
+        dim="gic_realization",
     )
-    cswim_mc = {p: _ds["mean_pop_affected"].sel(scenario=f"e_{p}-year-hazard A/ph").values for p in ("100", "250")}
+    cswim_mc = np.column_stack(
+        [_ds["mean_pop_affected"].sel(scenario=f"e_{p}-year-hazard A/ph").values for p in ("100", "250")]
+    )
     model_seconds = time.perf_counter() - _t
     print(f"Monte Carlo, {N_DRAWS} draws on each of three grids: {model_seconds:.0f} s")
     return N_DRAWS, buses_a, buses_b, cswim_mc, lines_a, lines_b, model_seconds, run_after, run_before, run_pub
@@ -761,7 +781,7 @@ def _(PAPER, USD_PER_PERSON, cswim_mc, mo, np, pd, run_after, run_before, run_pu
     def summary(label: str, affected: np.ndarray) -> list[dict]:
         rows = []
         for j, p in enumerate(("100", "250")):
-            a = affected[:, j] if affected.ndim == 2 else affected[p]
+            a = affected[:, j]
             rows.append(
                 {
                     "run": label,
@@ -864,7 +884,7 @@ def _(buses_a, buses_b, counties, gpd, np, ours, pd, published_subs, run_after, 
 
 @app.cell
 def _(OUT, county, mo, np, pd, state):
-    _few = (county[["subs_before", "subs_after"]].replace(0, np.nan).min(axis=1) <= 2).to_numpy()
+    _few = (county[["subs_before", "subs_after"]].replace(0, np.nan).min(axis=1) <= 2).to_numpy().copy()
     for _st, _g in county[_few].groupby("state"):
         if len(_g) == 1:  # one blanked county in a state could be recovered from the state total
             _rest = county[(county["state"] == _st) & ~_few]
@@ -876,7 +896,10 @@ def _(OUT, county, mo, np, pd, state):
     published.insert(2, "few_substations", _few)
     published[_vals] = published[_vals].round(-2)
     published.to_csv(OUT / "county_changes.csv", index_label="fips")
-    state.round(-2).to_csv(OUT / "state_changes.csv")
+    _people = [c for c in state.columns if not c.startswith("subs_")]
+    state.assign(**{c: state[c].round(-2) for c in _people}).astype({"subs_before": int, "subs_after": int}).to_csv(
+        OUT / "state_changes.csv"
+    )
     _top = published[~_few].sort_values("change_100", key=np.abs, ascending=False).head(15)
     mo.vstack(
         [
@@ -953,15 +976,19 @@ def _(
     mo,
     model_seconds,
     np,
-    seg_after,
-    seg_before,
+    segs,
     started,
     time,
     totals,
+    state,
+    county,
+    ours,
 ):
     _net = {
         "substations": (len(buses_b), len(buses_a)),
-        "line segments in the grid (paper: 16,256)": (len(seg_before), len(seg_after)),
+        "line segments inside the site triangulation (paper: 16,256)": tuple(
+            int(((segs["grid"] == g) & ~segs["outside"]).sum()) for g in ("before", "after")
+        ),
         "lines in the admittance network": (len(lines_b), len(lines_a)),
     }
     _t = totals.set_index(["run", "storm"])["people affected"]
@@ -972,6 +999,28 @@ def _(
             f"{_p} people affected: before {_t[(_b, _p)]:,.0f}, after {_t[(_a, _p)]:,.0f} "
             f"({_t[(_a, _p)] / _t[(_b, _p)] - 1:+.1%})"
         )
+    for _p in ("100", "250"):
+        _change = state[f"change_{_p}"].sum()
+        _ny = state.loc["NY", f"change_{_p}"]
+        _lines.append(
+            f"{_p}-year change: {_change:,.0f} people; New York {_ny:+,.0f} ({_ny / _change:.0%} of it); "
+            f"all other states together {_change - _ny:+,.0f}"
+        )
+    _c = county.sort_values("change_100", key=np.abs, ascending=False)
+    _lines.append(
+        "Counties that move most (100-year): "
+        + "; ".join(f"{r.county}, {r.state} {r.change_100:+,.0f}" for r in _c.head(6).itertuples())
+    )
+    _lines.append(
+        f"Washington (100-year): {state.loc['WA', 'affected_100_before']:,.0f} -> "
+        f"{state.loc['WA', 'affected_100_after']:,.0f} with {int(state.loc['WA', 'subs_after'])} substations"
+    )
+    _src = buses_a["sub"].map(dict(zip(ours["id"].astype(str), ours["source"], strict=True))).value_counts()
+    _lines.append(
+        "After-grid substations by source in our file: "
+        + ", ".join(f"{k} {v:,}" for k, v in _src.items())
+        + " (both = HIFLD-derived with OSM within 1 km; osm = OSM only; derived = HIFLD-derived only)"
+    )
     _lines += [f"{k}: {v}" for k, v in field_checks.items()]
     _lines += [
         f"Monte Carlo draws per grid: {N_DRAWS}",
@@ -999,6 +1048,14 @@ def _(mo):
       weighted ZIP-code areal interpolation.
     - **Dollars are a fixed rate per affected person**, taken from the paper; they move exactly with people.
     - **Monte Carlo draws** are fewer than C-SWIM's 2,039 (see the totals table for the spread across draws).
+    - **Most of the gain is current OpenStreetMap, not HIFLD.** Our file merges HIFLD-derived line ends with
+      OpenStreetMap (via Overture, 2026). Only a few hundred after-grid substations are HIFLD-derived alone (see
+      the source line above). C-SWIM's own code switched to current OpenStreetMap in August 2026, after the paper,
+      so the authors' next run may close much of this gap themselves.
+    - **Service areas are coarse.** A substation's people are everyone nearer to it than to any other 161 kV+
+      substation. Where few such substations serve a dense place (Long Island, New York City), one substation can
+      stand for a million people, so adding or removing a handful of substations moves the total a lot. That is a
+      property of C-SWIM's method, and it is the main reason the totals move.
     - Like the paper, this counts transformer heating only, with random transformer types, earthing and ages; it
       says where the modelled risk moves, not which real substation would fail.
     """)
