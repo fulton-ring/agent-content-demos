@@ -59,8 +59,9 @@ and JS. The other 20,923 are close to the claim. The merged CDX indexes 77.5 GB 
 81.3 GB claimed. The item has since grown to 147.1 GB: 129 later WARC files (69.5 GB) aren't in the
 merged index yet, so this spike doesn't describe them.
 
-**Damaged and missing.** 6,879 addresses never returned 200: 6,007 ended in 404 and 872 in 403. That
-is about twice the "3,400+" the crawlers reported, which they called a figure "so far". All but one
+**Damaged and missing.** 6,888 addresses never returned 200. 6,879 of them ended in an error (6,007 in
+404, 872 in 403); the other 9 only ever redirected. The 6,879 errors are
+about twice the "3,400+" the crawlers reported, which they called a figure "so far". All but one
 are links from archive pages, not sitemap entries, so these are links that were already dead on
 EPA's server. By kind: 5,261 web pages, 737 images, 506 PDFs, 203 media files and 17 data files.
 The 17 data files are 14 NAEMS animal-feeding-operation spreadsheets, two PM emissions files and
@@ -76,7 +77,7 @@ copy, and the split by origin is stark:
 
 data.gov matched none of the 100 by file name. Across the whole inventory, 1,009 of the 1,759 data
 files come from the legacy program sites. The check matches file names, so it misses a dataset that
-was republished under a new name. That makes "0 of 61" an upper bound on how much is archive-only. A
+was republished under a new name. So "0 of 61" is a floor on live copies, and "61 of 61 archive-only" is a ceiling. A
 manual spot-check by web search found one partial case: EPA's AP-42 FTP site has
 [NAEMS daily summary CSVs](https://gaftp.epa.gov/ap42/ch09/s04/Related_Information/) (2024), though
 not the raw half-hourly files. Meanwhile EPA's live
