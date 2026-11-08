@@ -694,8 +694,9 @@ def _(mo):
       mostly Malachi's numbers, and Atlas-only campuses without a figure count as zero MW.
     - **GMWID's 2026-10-11 build is gone**; only the latest build is served, so the OpenStreetMap line numbers will
       drift from run to run. The ETag of the build used is in `outputs/summary.json`.
-    - **OpenStreetMap's construction tags** don't help: 35 US substations are tagged under construction or
-      proposed, none within 5 miles of a far campus, while filings name new substations for at least five.
+    - **OpenStreetMap's construction tags** don't help: only a few dozen US substations are tagged under
+      construction or proposed (the count is printed above), none within 5 miles of a far campus, while filings
+      name new substations for at least five.
     - **Distance is not capacity.** A substation next door may have no headroom; a far campus may already have a
       utility project under way. Straight-line distance also ignores routing.
     - **230 kV is a regional threshold.** Much of the Midwest and South transmits at 115-161 kV: with any

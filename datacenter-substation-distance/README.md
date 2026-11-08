@@ -111,5 +111,5 @@ publish that table. `data/far_campuses_private.csv` and the chips stay local.
   in the notebook.
 
 Looked at first: Malachi's own HIFLD-line distances (we reproduce and extend them to substations), OpenStreetMap
-construction tags (35 US substations tagged under construction or proposed, none within 5 mi of a far campus), and
+construction tags (about 35 US substations tagged under construction or proposed in recent builds, none within 5 mi of a far campus), and
 the Atlas's coordinates (used to test sensitivity to location).
