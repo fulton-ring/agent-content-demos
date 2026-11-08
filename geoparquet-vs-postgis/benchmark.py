@@ -146,7 +146,7 @@ def _(mo):
 
 
 @app.cell
-def _(COUNTY_ROW_GROUP_ROWS, DATA_DIR, ROW_GROUP_ROWS, duckdb, pd, published_paths, subprocess, time):
+def _(COUNTY_ROW_GROUP_ROWS, DATA_DIR, RESULTS_DIR, ROW_GROUP_ROWS, duckdb, pd, published_paths, subprocess, time):
     _con = duckdb.connect()
     _con.sql("install spatial; load spatial")
     layout_paths = {}
@@ -189,7 +189,9 @@ def _(COUNTY_ROW_GROUP_ROWS, DATA_DIR, ROW_GROUP_ROWS, duckdb, pd, published_pat
         for r in layouts.itertuples()
     ]
     layouts["MB"] = (layouts["bytes"] / 1e6).round(1)
+    print(layouts.drop(columns="bytes").to_string(index=False))
     layouts["write_seconds"] = layouts["write_seconds"].round(1)
+    layouts.to_csv(RESULTS_DIR / "layouts.csv", index=False)
     layouts
     return layout_paths, layouts
 
@@ -286,7 +288,7 @@ def _(mo):
 
 
 @app.cell
-def _(connect_duckdb, duckdb, pd, row_group_spans, run_duckdb, s3_urls):
+def _(RESULTS_DIR, connect_duckdb, duckdb, pd, row_group_spans, run_duckdb, s3_urls):
     _con = connect_duckdb()
     _box = "ST_MakeEnvelope(-74.1, 40.6, -73.9, 40.8)"
     _hint = "bbox.xmin <= -73.9 and bbox.xmax >= -74.1 and bbox.ymin <= 40.8 and bbox.ymax >= 40.6 and "
@@ -302,6 +304,8 @@ def _(connect_duckdb, duckdb, pd, row_group_spans, run_duckdb, s3_urls):
             _rows.append((_layout, _form, _r[0][0], round(_ms), round(_bytes / 1e6, 1), f"{_rg} of {_total}"))
     pruning = pd.DataFrame(_rows, columns=["layout", "query form", "facilities", "ms", "MB fetched", "row groups read"])
     pruning["duckdb_version"] = duckdb.__version__
+    pruning.to_csv(RESULTS_DIR / "pruning.csv", index=False)
+    print(pruning.to_string(index=False))
     pruning
     return (pruning,)
 
@@ -332,7 +336,7 @@ def _(mo):
 
 
 @app.cell
-def _(LAYERS, PG_DSN, layout_paths, pd, psycopg, time):
+def _(LAYERS, PG_DSN, RESULTS_DIR, layout_paths, pd, psycopg, time):
     # One table per layer: id and geometry only. DuckDB writes a CSV of id and hex WKB, PostgreSQL COPYs it in.
     import duckdb as _duckdb
 
@@ -367,6 +371,8 @@ def _(LAYERS, PG_DSN, layout_paths, pd, psycopg, time):
             _size = _pg.execute(f"select pg_total_relation_size('{_name}')").fetchall()[0][0]
             _rows.append((_name, _n, round(time.perf_counter() - _t, 1), round(_size / 1e6, 1)))
     postgis_load = pd.DataFrame(_rows, columns=["layer", "rows", "load_and_index_seconds", "table_and_index_MB"])
+    postgis_load.to_csv(RESULTS_DIR / "postgis_load.csv", index=False)
+    print(postgis_load.to_string(index=False))
     postgis_load
     return (postgis_load,)
 
@@ -453,18 +459,18 @@ def _(LAYERS, state_extent):
         state_env = state_extent[statefp]
         if engine == "postgis":
             return {
-                "bounding box": f"select id from {layer} where geom && ST_MakeEnvelope({', '.join(map(str, box))}, 4326)",
+                "bounding box": f"select id from {layer} where ST_Intersects(geom, "
+                f"ST_MakeEnvelope({', '.join(map(str, box))}, 4326))",
                 "point in county": f"select id from {layer} where ST_Intersects(geom, "
                 f"ST_GeomFromWKB(decode('{county_hex}', 'hex'), 4326))",
-                "nearest 5": f"select id from {layer} order by geom <-> ST_SetSRID(ST_Point({x}, {y}), 4326), id limit 5",
+                "nearest 5": f"select id from {layer} "
+                f"order by geom <-> ST_SetSRID(ST_Point({x}, {y}), 4326), id limit 5",
                 "county join": f"select c.id, count(*) from {layer} l join counties c on ST_Intersects(l.geom, c.geom) "
                 f"where c.statefp = '{statefp}' group by 1 order by 1",
             }[query]
-        pref = bbox_hint
-        if not hint:
 
-            def pref(env: list[float]) -> str:
-                return ""
+        def pref(env: list[float]) -> str:
+            return bbox_hint(env) if hint else ""
 
         return {
             "bounding box": f"select {layer_id}::varchar from '{src}' where {pref(box)} "
@@ -474,9 +480,13 @@ def _(LAYERS, state_extent):
             "nearest 5": f"select {layer_id}::varchar from '{src}' where {pref(window)} "
             f"ST_Intersects(geometry, {envelope_sql(window)}) "
             f"order by ST_Distance(geometry, ST_Point({x}, {y})), {layer_id}::varchar limit 5",
-            "county join": f"select c.GEOID, count(*) from '{src}' l join (select GEOID, ST_SetCRS(geometry, '{crs}') g "
-            f"from '{county_src}' where STATEFP = '{statefp}') c on ST_Intersects(l.geometry, c.g) "
-            f"where {pref(state_env)} ST_Intersects(l.geometry, {envelope_sql(state_env)}) group by 1 order by 1",
+            "county join": f"select c.GEOID, count(*) from '{src}' l "
+            f"join (select GEOID, ST_SetCRS(geometry, '{crs}') g "
+            f"from '{county_src}' where STATEFP = '{statefp}' and {pref(state_env)} "
+            f"ST_Intersects(geometry, {envelope_sql(state_env)})) "
+            f"c on ST_Intersects(l.geometry, c.g) "
+            f"where {pref(state_env)} ST_Intersects(l.geometry, {envelope_sql(state_env)}) "
+            "group by 1 order by 1",
         }[query]
 
     QUERIES = ["bounding box", "point in county", "nearest 5", "county join"]
@@ -697,6 +707,57 @@ def _(RESULTS_DIR, summary):
     print(f"PostGIS on an e2-medium: ${VM_PER_MONTH:.0f}/month, so per 1,000 queries:", postgis_per_1k)
     costs
     return (postgis_per_1k,)
+
+
+@app.cell
+def _(RESULTS_DIR, pd, summary):
+    # For each layer and query: PostGIS against the fastest DuckDB variant on the local store and against the
+    # published file read the plain way, which is what a researcher gets today.
+    _pg = summary[summary["engine"] == "postgis"].set_index(["layer", "query"])["median_ms"]
+    _local = summary[summary["engine"] == "duckdb, local S3"]
+    _best = _local.loc[_local.groupby(["layer", "query"], sort=False)["median_ms"].idxmin()].set_index(
+        ["layer", "query"]
+    )
+    _plain = _local[(_local["layout"] == "published") & (_local["query_form"] == "spatial only")].set_index(
+        ["layer", "query"]
+    )
+    headline = pd.DataFrame(
+        {
+            "postgis_ms": _pg,
+            "published_plain_ms": _plain["median_ms"],
+            "best_duckdb_ms": _best["median_ms"],
+            "best_variant": _best["layout"] + ", " + _best["query_form"],
+            "best_MB_fetched": _best["median_MB"],
+        }
+    ).reset_index()
+    headline["best_vs_postgis"] = (headline["best_duckdb_ms"] / headline["postgis_ms"]).round(0)
+    headline["published_vs_best"] = (headline["published_plain_ms"] / headline["best_duckdb_ms"]).round(1)
+    headline.to_csv(RESULTS_DIR / "headline.csv", index=False)
+    print(headline.to_string(index=False))
+    headline
+    return
+
+
+@app.cell
+def _(mo, timings):
+    _wrong = timings[~timings["matches_postgis"]]
+    mo.md(f"""
+    ## What didn't work, and what this doesn't show
+
+    - **{len(_wrong)} of {len(timings)}** DuckDB answers differed from PostGIS in this run.
+    - MinIO, which the issue suggested, no longer publishes pullable Docker images (Docker Hub refuses the pull,
+      quay.io asks for a login), so the object store is SeaweedFS. Any S3-compatible store serves the same range reads.
+    - geoparquet-io 1.2.0 crashes on DuckDB 2.0 (it calls a connection method 2.0 removed), so we pin 0.4.0.
+    - DuckDB 2.0 ignores GeoParquet 1.1's `bbox` covering metadata. The published files already have the column, but a
+      query only benefits if it filters on `bbox` by hand.
+    - DuckDB has no spatial index, so nearest-neighbour search is a widening window, and the county join stays slow
+      because it has to test every candidate point against detailed county polygons.
+    - The local store has almost no latency. The public-bucket run shows what distance adds, but it went through this
+      machine's egress proxy, so treat those numbers as an upper bound for a researcher on a good connection.
+    - We ran on one cloud container, not on a laptop and a separate cloud VM, and with one query at a time. PostGIS
+      under many concurrent users, or DuckDB from a VM next to the bucket, would each look different.
+    """)
+    return
 
 
 if __name__ == "__main__":
