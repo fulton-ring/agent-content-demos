@@ -23,7 +23,7 @@ confirming the published one.
 
 It runs the notebook [`gic_rerun.py`](gic_rerun.py) as a script and writes `outputs/`. To read it with each step's
 output beside it: `uv run marimo edit gic_rerun.py`. The first run downloads C-SWIM's 11 GB data release once,
-keeps about 1.5 GB of it in `data/` and deletes the rest. **Run time:** RUNTIME_TBD. It costs nothing.
+keeps about 1.5 GB of it in `data/` and deletes the rest. **Run time:** 3,772 s (63 minutes) from a clean checkout on 4 CPUs and 16 GB of memory, 2026-11-08: about 25 minutes of downloads, 11 minutes of storms, 10 of fitting, 3 of Monte Carlo. Later runs reuse `data/` and take about 4 minutes. It costs nothing.
 
 ## Data (all public, downloaded at run time, nothing downloaded is committed)
 
