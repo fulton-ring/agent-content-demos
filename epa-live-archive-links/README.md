@@ -19,7 +19,7 @@ sitemap pages politely: 6 requests at a time, a 0.5 s pause per worker after eac
 respected, at most 3 tries per page. It took 2 h 28 min (18:14 to 20:42 UTC, 2026-11-08) and
 downloaded 4.6 GB, none of it kept. Pages are recorded in `cache/pages.jsonl`, so a stopped run
 resumes, and reruns take under a minute. To try it quickly on a seeded sample, run
-`EPA_PAGE_CAP=2000 ./run.sh` (about 5 minutes). Counts then cover the sample, not the site.
+`EPA_PAGE_CAP=2000 ./run.sh` (about 3 minutes; small samples may find no data files). Counts then cover the sample, not the site.
 To read the walkthrough with its tables, run `uv run marimo edit epa_live_archive_links.py`.
 
 Settings come from environment variables: `EPA_PAGE_CAP` (default 80000, above the sitemap's size),
