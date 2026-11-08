@@ -529,7 +529,9 @@ def _(PARENT_URL, ThreadPoolExecutor, data_links, get, io_module, json, pd):
             response = get(url)
         return response.status_code if response is not None else 0
 
-    targets = pd.DataFrame({"address": sorted(data_links["address"].unique())})
+    targets = pd.DataFrame(
+        {"address": pd.Series(sorted(data_links["address"].unique()), dtype=str)}
+    )
     with ThreadPoolExecutor(max_workers=4) as status_pool:
         targets["status_today"] = list(
             status_pool.map(lambda a: status_of(f"https://{a}"), targets["address"])
@@ -631,7 +633,7 @@ def _(ThreadPoolExecutor, get, json, quote, status_of, targets, unquote, urlenco
 @app.cell
 def _(OUT, copies, pd, targets):
     copy_columns = ["address", "www.epa.gov", "EPA snapshots", "data.gov"]
-    files = targets.merge(pd.DataFrame(copies, columns=copy_columns), on="address")
+    files = targets.merge(pd.DataFrame(copies, columns=copy_columns, dtype=str), on="address")
     assert (files["data.gov"] != "error").all(), "data.gov search failed for some files; rerun"
     files["origin"] = (
         files["address"]
