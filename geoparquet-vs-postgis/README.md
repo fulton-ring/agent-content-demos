@@ -146,5 +146,4 @@ the `bbox` column and document the explicit filter.
 - The internet run went through this container's egress proxy, so its times are an upper bound.
 - PostGIS ran on the same machine with warm caches. A remote database adds a network round trip to every query.
 - It covers three layers and four query shapes. Polygon-heavy layers like flood zones may behave differently.
-
-Tools used instead of our own code: DuckDB's Parquet writer, geoparquet-io, and DuckDB's HTTP log for bytes fetched.
+- Tools used instead of our own code: DuckDB's Parquet writer, geoparquet-io, and DuckDB's HTTP log for bytes fetched.
