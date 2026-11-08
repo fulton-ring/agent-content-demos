@@ -107,6 +107,32 @@ def _(flags, items, rate):
 @app.cell(hide_code=True)
 def _():
     mo.md(r"""
+    The dreaming checker answered fewer claims, so here are all three on only the claims it answered: the same
+    claims, scored the same way. And when a checker catches an error, does it name the type our log gave it?
+    """)
+    return
+
+
+@app.cell
+def _(answers, flags, items, rate):
+    both = flags.dropna().index
+    same_claims = {}
+    for _kind, _label in [("error", "recall"), ("pass", "false alarms")]:
+        _ids = both[items.loc[both, "kind"] == _kind]
+        same_claims[_label] = {c: rate(int(flags.loc[_ids, c].sum()), len(_ids)) for c in CHECKERS}
+    print(pd.DataFrame(same_claims).T.to_markdown(), "\n")
+    type_match = {}
+    for _checker in CHECKERS:
+        _caught = [i for i in items.index[items["kind"] == "error"] if flags.loc[i, _checker] == True]  # noqa: E712
+        _same = sum(answers[(_checker, i)]["verdict"]["problem"] == items.loc[i, "error_type"] for i in _caught)
+        type_match[_checker] = rate(_same, len(_caught))
+    print("Catches that named the logged type:\n" + pd.Series(type_match).to_markdown())
+    return
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
     ## Does how we recovered the wording matter?
 
     Quoted claims keep the note's own words; reconstructed ones were rewritten from the correction by an agent that
@@ -143,12 +169,10 @@ def _(flags, items):
     only_gpt = errs.index[(errs["gpt_passage"] == True) & (errs["claude_passage"] == False)]  # noqa: E712
     only_claude = errs.index[(errs["claude_passage"] == True) & (errs["gpt_passage"] == False)]  # noqa: E712
     neither = errs.index[(errs["claude_passage"] == False) & (errs["gpt_passage"] == False)]  # noqa: E712
-    missed_by_all = errs.index[(errs == False).sum(axis=1) == errs.notna().sum(axis=1)]  # noqa: E712
     print(f"Caught only by GPT: {len(only_gpt)}; only by Claude: {len(only_claude)}; by neither: {len(neither)}")
-    print(f"Missed by every checker that answered: {len(missed_by_all)}")
     print("\nBy type, missed by both passage checkers:")
     print(items.loc[neither, "error_type"].value_counts().to_markdown())
-    return missed_by_all, only_claude, only_gpt
+    return only_claude, only_gpt
 
 
 @app.cell
@@ -176,25 +200,56 @@ def _(answers, items, only_claude, only_gpt):
 @app.cell(hide_code=True)
 def _():
     mo.md(r"""
-    ## The errors no checker caught
+    ## The errors a checker let through
 
-    These are the claims a human still has to read for. Each row shows what the Claude passage checker said.
+    Every logged error at least one checker called supported, with what the Claude passage checker said.
     """)
     return
 
 
 @app.cell
-def _(answers, items, missed_by_all):
+def _(answers, flags, items):
+    errors = flags[items["kind"] == "error"]
+    let_through = errors.index[(errors == False).any(axis=1)]  # noqa: E712
     missed = pd.DataFrame(
         {
-            "type": items.loc[missed_by_all, "error_type"],
-            "wording": items.loc[missed_by_all, "wording"],
-            "claim": items.loc[missed_by_all, "claim"],
-            "claude said": [answers[("claude_passage", i)]["verdict"]["reason"] for i in missed_by_all],
+            "type": items.loc[let_through, "error_type"],
+            "missed by": [", ".join(c for c in CHECKERS if errors.loc[i, c] == False) for i in let_through],  # noqa: E712
+            "claim": items.loc[let_through, "claim"],
+            "claude_passage said": [answers[("claude_passage", i)]["verdict"]["reason"] for i in let_through],
         }
-    ).sort_values("type")
-    (HERE / "results/missed_by_every_checker.md").write_text(missed.to_markdown() + "\n")
+    )
+    print(missed[["type", "missed by"]].to_markdown())
+    (HERE / "results/let_through.md").write_text(missed.to_markdown() + "\n")
     mo.ui.table(missed)
+    return
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ## Are the false alarms false?
+
+    A passing claim is one our reviewer accepted, not one known to be right. So we read every passing claim the
+    dreaming checker flagged (it saw the whole source, so its flags aren't caused by a short passage) and judged
+    each one: **real** (a careful editor would change the claim), **nit** (true in substance; the flag is about
+    emphasis, or about a detail like a date that's on the page but not in the text we extracted) or **checker
+    wrong**. One reader made these calls; they're in `data/false_alarm_review.jsonl` with a reason each.
+    """)
+    return
+
+
+@app.cell
+def _(flags, items, rate):
+    review = pd.read_json(HERE / "data/false_alarm_review.jsonl", lines=True).set_index("id")
+    flagged_passes = items.index[(items["kind"] == "pass") & (flags["claude_dreaming"] == True)]  # noqa: E712
+    assert set(review.index) == set(flagged_passes), "every flagged passing claim needs a judgement"
+    answered_passes = int(flags.loc[items["kind"] == "pass", "claude_dreaming"].notna().sum())
+    counts = review["judgement"].value_counts()
+    print(counts.to_markdown(), "\n")
+    print(f"Passing claims with a real problem review missed: {rate(int(counts['real']), answered_passes)}")
+    wrong = int(counts.drop("real").sum())
+    print(f"Passing claims the dreaming checker flagged without a real problem: {rate(wrong, answered_passes)}")
     return
 
 

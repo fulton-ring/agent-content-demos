@@ -128,13 +128,18 @@ def _(test_set):
         return text
 
     def squash(text: str) -> str:
+        for fancy, plain in [("’", "'"), ("‘", "'"), ("“", '"'), ("”", '"'), ("–", "-"), ("—", "-"), ("\xa0", " ")]:
+            text = text.replace(fancy, plain)
         return " ".join(text.split())
 
     full_sources = {}
     found = {}
     for _item in test_set:
         _text = squash(fetch(_item["source_url"]))
-        _at = _text.lower().find(squash(_item["passage"].split("…")[0])[:80].lower())
+        # The passage was copied by a subagent, sometimes through a different reader, so we look for any of its
+        # sentences rather than its exact opening.
+        _sentences = [x for x in squash(_item["passage"]).replace("…", ". ").split(". ") if len(x) >= 40]
+        _at = next((i for x in _sentences if (i := _text.lower().find(x[:60].lower())) >= 0), -1)
         found[_item["id"]] = _at >= 0 if _text else None
         if len(_text) > LIMIT:  # a window around the passage, or the start of the page if it can't be found
             _begin = max(0, min(_at - LIMIT // 2, len(_text) - LIMIT)) if _at >= 0 else 0
