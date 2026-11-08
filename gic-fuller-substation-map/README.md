@@ -18,7 +18,7 @@ confirming the published one.
 ## Run it
 
 ```bash
-./run.sh     # needs uv and about 15 GB of free disk on the first run
+./run.sh     # needs uv, curl and about 15 GB of free disk on the first run
 ```
 
 It runs the notebook [`gic_rerun.py`](gic_rerun.py) as a script and writes `outputs/`. To read it with each step's

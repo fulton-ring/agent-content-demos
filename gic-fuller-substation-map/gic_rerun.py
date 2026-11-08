@@ -7,6 +7,7 @@ app = marimo.App(width="medium")
 @app.cell
 def _():
     import os
+    import subprocess
     import tarfile
     import time
     import warnings
@@ -20,7 +21,6 @@ def _():
     import matplotlib.pyplot as plt
     import numpy as np
     import pandas as pd
-    import requests
     import scipy.sparse as sp
     import xarray as xr
     import zstandard
@@ -48,7 +48,7 @@ def _():
         os,
         pd,
         plt,
-        requests,
+        subprocess,
         sp,
         spsolve,
         started,
@@ -88,36 +88,26 @@ def _(mo):
 
 
 @app.cell
-def _(Path, mo, os, requests, time):
+def _(Path, mo, os, subprocess, time):
     DATA = Path(os.environ.get("DATA_DIR", mo.notebook_dir() / "data"))
     OUT = Path(os.environ.get("OUTPUT_DIR", mo.notebook_dir() / "outputs"))
     DATA.mkdir(parents=True, exist_ok=True)
     OUT.mkdir(parents=True, exist_ok=True)
 
     def download(url: str, name: str) -> Path:
-        """Download url to DATA/name once, resuming after dropped connections (at most 8 tries)."""
+        """Download url to DATA/name once with curl, resuming after dropped connections (at most 8 tries)."""
         path = DATA / name
         if path.exists():
             return path
         part = path.with_suffix(path.suffix + ".part")
         for attempt in range(8):
-            have = part.stat().st_size if part.exists() else 0
-            try:
-                with requests.get(url, stream=True, timeout=120, headers={"Range": f"bytes={have}-"}) as r:
-                    if r.status_code == 416:
-                        break
-                    r.raise_for_status()
-                    with open(part, "ab" if r.status_code == 206 else "wb") as f:
-                        for chunk in r.iter_content(1 << 20):
-                            f.write(chunk)
-                break
-            except requests.RequestException as e:
-                print(f"{name}: {e} (try {attempt + 1} of 8)")
-                time.sleep(2**attempt)
-        else:
-            raise RuntimeError(f"Could not download {url}")
-        part.rename(path)
-        return path
+            done = subprocess.run(["curl", "-fsSL", "-C", "-", "-o", str(part), url], check=False)
+            if done.returncode == 0:
+                part.rename(path)
+                return path
+            print(f"{name}: curl exit {done.returncode} (try {attempt + 1} of 8)")
+            time.sleep(2**attempt)
+        raise RuntimeError(f"Could not download {url}")
 
     return DATA, OUT, download
 
