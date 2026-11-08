@@ -186,8 +186,8 @@ async def _(INSTRUCTIONS, Verdict, found, full_sources, test_set):
     async def check(checker: str, item: dict, slots: asyncio.Semaphore) -> None:
         saved = ANSWERS / checker / f"{item['id']}.json"
         text = prompt(checker, item)
-        if saved.exists() or text is None:
-            return
+        if saved.exists() or text is None or not os.environ.get("OPENROUTER_API_KEY"):
+            return  # answered already, no matching source, or no key: leave it unanswered rather than fail
         agent = Agent(CHECKERS[checker], output_type=Verdict, instructions=INSTRUCTIONS, retries=2)
         answer = {"verdict": None, "usd": 0.0, "seconds": 0.0, "error": ""}
         async with slots:
