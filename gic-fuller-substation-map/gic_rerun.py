@@ -435,7 +435,7 @@ def _(C, CS, DATA, SECS, mt_sites, np, pd, site_latlon, time, xr):
     _secs_grid = np.column_stack([_lat.ravel(), _lon.ravel(), np.full(_lat.size, _R + 110e3)])
     _pred = np.column_stack([site_latlon, np.full(len(site_latlon), _R)])
 
-    def _observatories(t0, t1):
+    def _observatories(t0: pd.Timestamp, t1: pd.Timestamp) -> tuple[np.ndarray, np.ndarray]:
         """Observatories with no gaps in the window (build_common_stack_from_obsdict), less GUA and HON."""
         w = _mag.sel(time=slice(t0, t1))
         keep = [s for s in w.site.values if s.upper() not in ("GUA", "HON") and not np.isnan(w["B"].sel(site=s)).any()]
