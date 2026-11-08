@@ -25,5 +25,5 @@ for _ in $(seq 1 60); do
 done
 sleep 5  # PostGIS restarts once after its init scripts run
 
-mkdir -p results
-uv run benchmark.py 2>&1 | tee results/run_log.txt
+mkdir -p "${RESULTS_DIR:-results}"
+uv run benchmark.py 2>&1 | tee "${RESULTS_DIR:-results}/run_log.txt"

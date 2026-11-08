@@ -336,11 +336,9 @@ def _(mo):
 
 
 @app.cell
-def _(LAYERS, PG_DSN, RESULTS_DIR, layout_paths, pd, psycopg, time):
+def _(LAYERS, PG_DSN, RESULTS_DIR, duckdb, layout_paths, pd, psycopg, time):
     # One table per layer: id and geometry only. DuckDB writes a CSV of id and hex WKB, PostgreSQL COPYs it in.
-    import duckdb as _duckdb
-
-    _src = _duckdb.connect()
+    _src = duckdb.connect()
     _src.sql("load spatial")
     _rows = []
     with psycopg.connect(PG_DSN, autocommit=True) as _pg:
@@ -399,10 +397,8 @@ def _(mo):
 
 
 @app.cell
-def _(N_LOCATIONS, layout_paths):
-    import duckdb as _duckdb
-
-    _con = _duckdb.connect()
+def _(N_LOCATIONS, duckdb, layout_paths):
+    _con = duckdb.connect()
     _con.sql("load spatial")
     _hospitals = layout_paths[("hospitals", "published")]
     _counties = layout_paths[("counties", "published")]
