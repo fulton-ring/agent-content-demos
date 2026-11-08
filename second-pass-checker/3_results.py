@@ -35,10 +35,10 @@ def _():
         [json.loads(line) for line in (HERE / "data/test_set.jsonl").read_text().splitlines() if line]
     ).set_index("id")
     answers = {}
-    for checker in CHECKERS:
-        for item_id in items.index:
-            path = HERE / "answers" / checker / f"{item_id}.json"
-            answers[(checker, item_id)] = json.loads(path.read_text()) if path.exists() else None
+    for _checker in CHECKERS:
+        for _item_id in items.index:
+            _path = HERE / "answers" / _checker / f"{_item_id}.json"
+            answers[(_checker, _item_id)] = json.loads(_path.read_text()) if _path.exists() else None
 
     def flagged(checker: str, item_id: str) -> bool | None:
         """True if the checker said 'not supported'; None if it never gave an answer for this claim."""
@@ -118,10 +118,10 @@ def _():
 @app.cell
 def _(flags, items, rate):
     by_wording = {}
-    for wording in ["quoted", "reconstructed"]:
-        ids = items.index[(items["kind"] == "error") & (items["wording"] == wording)]
-        by_wording[wording] = {
-            c: rate(int(flags.loc[ids, c].sum()), int(flags.loc[ids, c].notna().sum())) for c in CHECKERS
+    for _wording in ["quoted", "reconstructed"]:
+        _ids = items.index[(items["kind"] == "error") & (items["wording"] == _wording)]
+        by_wording[_wording] = {
+            c: rate(int(flags.loc[_ids, c].sum()), int(flags.loc[_ids, c].notna().sum())) for c in CHECKERS
         }
     print(pd.DataFrame(by_wording).T.to_markdown())
     return
@@ -209,13 +209,13 @@ def _():
 @app.cell
 def _(answers, items):
     cost = {}
-    for checker in CHECKERS:
-        done = [a for i in items.index if (a := answers[(checker, i)]) and a["verdict"]]
-        cost[checker] = {
-            "claims answered": len(done),
-            "total $": round(sum(a["usd"] for a in done), 3),
-            "$ per claim": round(sum(a["usd"] for a in done) / max(len(done), 1), 5),
-            "seconds per claim": round(sum(a["seconds"] for a in done) / max(len(done), 1), 1),
+    for _checker in CHECKERS:
+        _done = [a for i in items.index if (a := answers[(_checker, i)]) and a["verdict"]]
+        cost[_checker] = {
+            "claims answered": len(_done),
+            "total $": round(sum(a["usd"] for a in _done), 3),
+            "$ per claim": round(sum(a["usd"] for a in _done) / max(len(_done), 1), 5),
+            "seconds per claim": round(sum(a["seconds"] for a in _done) / max(len(_done), 1), 1),
         }
     print(pd.DataFrame(cost).T.to_markdown())
     return

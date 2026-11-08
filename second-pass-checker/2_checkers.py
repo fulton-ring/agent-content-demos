@@ -128,19 +128,18 @@ def _(test_set):
         return text
 
     def squash(text: str) -> str:
-        return " ".join(text.split()).lower()
+        return " ".join(text.split())
 
     full_sources = {}
     found = {}
-    for item in test_set:
-        text = fetch(item["source_url"])
-        flat, start = squash(text), squash(item["passage"].split("…")[0])[:80]
-        at = flat.find(start)
-        found[item["id"]] = at >= 0 if text else None
-        if len(flat) > LIMIT:  # a window around the passage, or the start of the page if it can't be found
-            begin = max(0, min(at - LIMIT // 2, len(flat) - LIMIT)) if at >= 0 else 0
-            text = flat[begin : begin + LIMIT]
-        full_sources[item["id"]] = text
+    for _item in test_set:
+        _text = squash(fetch(_item["source_url"]))
+        _at = _text.lower().find(squash(_item["passage"].split("…")[0])[:80].lower())
+        found[_item["id"]] = _at >= 0 if _text else None
+        if len(_text) > LIMIT:  # a window around the passage, or the start of the page if it can't be found
+            _begin = max(0, min(_at - LIMIT // 2, len(_text) - LIMIT)) if _at >= 0 else 0
+            _text = _text[_begin : _begin + LIMIT]
+        full_sources[_item["id"]] = _text
     fetch_report = pd.Series(found).map({True: "passage found", False: "passage not found", None: "fetch failed"})
     print(fetch_report.value_counts().to_markdown())
     return found, full_sources
@@ -216,16 +215,16 @@ async def _(INSTRUCTIONS, Verdict, found, full_sources, test_set):
 @app.cell
 def _(CHECKERS, test_set):
     rows = []
-    for checker in CHECKERS:
-        for item in test_set:
-            path = ANSWERS / checker / f"{item['id']}.json"
-            answer = json.loads(path.read_text()) if path.exists() else None
+    for _checker in CHECKERS:
+        for _item in test_set:
+            _path = ANSWERS / _checker / f"{_item['id']}.json"
+            _answer = json.loads(_path.read_text()) if _path.exists() else None
             rows.append(
                 {
-                    "checker": checker,
-                    "answered": bool(answer and answer["verdict"]),
-                    "usd": answer["usd"] if answer else 0.0,
-                    "seconds": answer["seconds"] if answer else 0.0,
+                    "checker": _checker,
+                    "answered": bool(_answer and _answer["verdict"]),
+                    "usd": _answer["usd"] if _answer else 0.0,
+                    "seconds": _answer["seconds"] if _answer else 0.0,
                 }
             )
     spend = (

@@ -67,11 +67,14 @@ def _(errors):
         errors.groupby("error_type")["replayable"].agg(logged="size", replayable="sum").sort_values("logged")[::-1]
     )
     replay_by_type.loc["all"] = replay_by_type.sum()
-    reasons = errors.loc[~errors["replayable"], "not_replayable_reason"].str.split(":").str[0].value_counts()
+    reasons = errors.loc[~errors["replayable"]].set_index("id")[["error_type", "not_replayable_reason"]]
     wording = errors.loc[errors["replayable"], "wording"].value_counts()
     print(replay_by_type.to_markdown(), "\n")
     print("Why the others can't be replayed:\n" + reasons.to_markdown(), "\n")
-    print("How the replayable claims' wording was recovered:\n" + wording.to_markdown())
+    print("How the replayable claims' wording was recovered:\n" + wording.to_markdown(), "\n")
+    disputed = errors[errors["replayable"] & errors["disputed"]]
+    for _, row in disputed.iterrows():
+        print(f"Left out because the correction itself looks wrong: {row['id']}: {row['notes']}")
     return
 
 
@@ -82,8 +85,9 @@ def _():
 
     A failure log has no passes, and a checker that flags everything would score perfect recall on it. So we add an
     equal number of claims that passed. `random.Random(227)` drew 36 of the 72 cards our reviewer accepted
-    (Draft requested, Drafted or Published, leaving out this card and its parent); a subagent took the first six
-    claims on each card's Evidence sections that cite one outside public source, with the passage they draw on.
+    (Draft requested, Drafted or Published, leaving out this card's parent and two promotion cards); a subagent
+    took the first six claims in each card's Evidence sections that cite one outside public source, with the
+    passage they draw on.
     That gives `data/passing_candidates.jsonl`. Below we draw as many as there are replayable errors, with the
     same seed.
 
@@ -96,7 +100,7 @@ def _():
 @app.cell
 def _(candidates, errors):
     usable = candidates[candidates["replayable"]].sort_values("id")
-    n_errors = int(errors["replayable"].sum())
+    n_errors = int((errors["replayable"] & ~errors["disputed"]).sum())
     assert len(usable) >= n_errors, f"only {len(usable)} usable passing claims for {n_errors} errors"
     drawn = random.Random(227).sample(list(usable["id"]), n_errors)
     passes = usable[usable["id"].isin(drawn)]
@@ -110,7 +114,7 @@ def _(candidates, errors):
 @app.cell
 def _(errors, passes):
     columns = ["id", "kind", "error_type", "claim", "source_url", "source_title", "passage", "wording", "doubt"]
-    test_set = pd.concat([errors[errors["replayable"]], passes])[columns]
+    test_set = pd.concat([errors[errors["replayable"] & ~errors["disputed"]], passes])[columns]
     test_set["error_type"] = test_set["error_type"].fillna("pass")
     test_set["doubt"] = test_set["doubt"].fillna(False).astype(bool)
     (DATA / "test_set.jsonl").write_text(
