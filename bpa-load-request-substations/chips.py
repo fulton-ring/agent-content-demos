@@ -74,14 +74,24 @@ def draw_points(ax: plt.Axes, points: gpd.GeoDataFrame, extent: list[float], mar
     inside = points.cx[left:right, bottom:top]
     ax.scatter(inside.geometry.x, inside.geometry.y, marker=marker, s=90, c=color, linewidths=2)
     for row in inside.itertuples():
-        ax.annotate(str(row.name)[:22], (row.geometry.x, row.geometry.y), color=color, fontsize=7,
-                    xytext=(4, 4), textcoords="offset points")
+        ax.annotate(
+            str(row.name)[:22],
+            (row.geometry.x, row.geometry.y),
+            color=color,
+            fontsize=7,
+            xytext=(4, 4),
+            textcoords="offset points",
+        )
 
 
 def main() -> None:
     checks = pd.read_csv(HAND_CHECK).dropna(subset=["lat", "lon"]).drop_duplicates("key")
-    hifld = pd.read_csv(DATA / "us_substations_hifld_only.csv")
-    hifld = gpd.GeoDataFrame(hifld, geometry=gpd.points_from_xy(hifld.lon, hifld.lat), crs=4326).to_crs(3857)
+    # GDAL's CSV driver builds the points from the lon/lat columns.
+    hifld = (
+        gpd.read_file(DATA / "us_substations_hifld_only.csv", X_POSSIBLE_NAMES="lon", Y_POSSIBLE_NAMES="lat")
+        .set_crs(4326)
+        .to_crs(3857)
+    )
     verified = gpd.read_parquet(DATA / "us_substations.parquet")
     osm_only = verified[verified["source"] == "osm"].to_crs(3857)
     chips = DATA / "chips"
@@ -97,7 +107,7 @@ def main() -> None:
             ax.imshow(image, extent=extent)
             draw_points(ax, hifld, extent, "x", "red")
             draw_points(ax, osm_only, extent, "+", "cyan")
-            centre = gpd.GeoSeries(gpd.points_from_xy([row["lon"]], [row["lat"]]), crs=4326).to_crs(3857).iloc[0]
+            centre = gpd.GeoSeries.from_xy([row["lon"]], [row["lat"]], crs=4326).to_crs(3857).iloc[0]
             ax.scatter([centre.x], [centre.y], marker="o", s=200, facecolors="none", edgecolors="yellow")
             ax.set_title(row["key"], fontsize=11)
             ax.set_axis_off()
