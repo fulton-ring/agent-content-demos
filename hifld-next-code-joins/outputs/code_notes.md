@@ -1,7 +1,7 @@
 CODE NOTES for HIFLD Next identifier fields (generated from a scan of every layer).
 Most layers store: STATE as a 2-letter postal code; COUNTYFIPS/FIPS/FIPS_CODE as the 5-character Census county code with leading zeros (FEMA NRI calls it STCOFIPS); COUNTY as a county name, which repeats across states and, in Virginia, Maryland, Missouri and Nevada, inside one state (Richmond city vs Richmond County); ZIP as a 5-digit string. Exceptions by layer:
 - biodiesel-plants-1.State (string): full state name (Texas); e.g. Iowa, Missouri, California
-- border-crossings-natural-gas.State (string): full state name (Texas); e.g. Texas, Minnesota, Montana
+- border-crossings-natural-gas.State (string): full state name (Texas); e.g. Texas, Minnesota, New York
 - census-block-groups-3.STATE (string): state FIPS number (48); e.g. 06, 48, 12
 - census-block-groups-3.COUNTY (string): 3-digit county FIPS (029); e.g. 037, 031, 003
 - census-designated-places.STATE (string): state FIPS number (48); e.g. 06, 42, 36
@@ -10,17 +10,17 @@ Most layers store: STATE as a 2-letter postal code; COUNTYFIPS/FIPS/FIPS_CODE as
 - child-care-centers.COUNTY (string): county name (Bexar); e.g. LOS ANGELES, ORANGE, KINGS
 - child-care-centers.COUNTYFIPS (string): 5-digit county FIPS (48029); meaning: valid county 98.8%, Connecticut legacy county 1.2%; e.g. 06037, 36047, 48201
 - colleges-and-universities.COUNTYFIPS (string): 5-digit county FIPS (48029); meaning: valid county 98.9%, Connecticut legacy county 1.1%; e.g. 06037, 17031, 36061
-- consolidated-cities.STATE (string): state FIPS number (48); e.g. 13, 20, 18
+- consolidated-cities.STATE (string): state FIPS number (48); e.g. 13, 47, 21
 - control-areas.ZIP (string): 5-digit ZIP; e.g. 85072, 94133, 97256
 - county-subdivisions-1.COUNTY (string): 3-digit county FIPS (029); e.g. 003, 005, 019
 - county-subdivisions-1.STATE (string): state FIPS number (48); e.g. 27, 42, 55
-- dialysis-centers.State (string): other; e.g. HOUSTON, CHICAGO, Philadelphia
-- dialysis-centers.Zip (integer): 5-digit ZIP; e.g. 14227, 13905, 10016
+- dialysis-centers.State (string): other; e.g. HOUSTON, CHICAGO, SAN ANTONIO
+- dialysis-centers.Zip (integer): 5-digit ZIP; e.g. 14227, 13905, 14120
 - electric-holding-company-areas-1.ZIP (string): 5-digit ZIP; e.g. 73083, 82435, 68602
 - elementary-school-districts.STATE (string): state FIPS number (48); e.g. 06, 17, 30
-- epa-disaster-debris-recovery-data.Zip (string): 5-digit ZIP; e.g. 87105, 30263, 30071
+- epa-disaster-debris-recovery-data.Zip (string): 5-digit ZIP; e.g. 87105, 30263, 10474
 - epa-emergency-response-rmp-facilities.FIPS_CODE (string): 5-digit county FIPS (48029); meaning: valid county 96.8%, not a county 2.8%, Connecticut legacy county 0.4%; e.g. 48201, 06037, 06029
-- epa-facilities.Zip (string): mixed: 5-digit ZIP 77%, ZIP+4 23%; e.g. 20005, 20004, 22202-3553
+- epa-facilities.Zip (string): mixed: 5-digit ZIP 77%, ZIP+4 23%; e.g. 20005, 20004, 45216
 - epa-facility-registry-service-frs-interests.FIPS_CODE (string): 5-digit county FIPS (48029); meaning: valid county 96.0%, not a county 4.0%, county and state reversed 0.1%; e.g. 27053, 27123, 27137
 - epa-facility-registry-service-frs-power-plants-2.FIPS_CODE (string): 5-digit county FIPS (48029); meaning: valid county 97.5%, Connecticut legacy county 1.4%, not a county 0.7%, county and state reversed 0.3%; e.g. 06037, 06065, 06029
 - epa-frs-eia-860-power-generation-facilities-by-source.FIPS_CODE (string): 5-digit county FIPS (48029); meaning: valid county 97.5%, Connecticut legacy county 1.4%, not a county 0.7%, county and state reversed 0.3%; e.g. 06037, 06065, 06029
@@ -38,16 +38,16 @@ Most layers store: STATE as a 2-letter postal code; COUNTYFIPS/FIPS/FIPS_CODE as
 - formerly-used-defense-sites-public-properties.STATE (string): lowercase postal code (tx); e.g. ca, fl, tx
 - frs-interests.FIPS_CODE (string): 5-digit county FIPS (48029); meaning: valid county 96.0%, not a county 3.9%, county and state reversed 0.1%; e.g. 27053, 27123, 27003
 - incorporated-places.STATE (string): state FIPS number (48); e.g. 17, 48, 42
-- liquified-natural-gas-lng-import-and-export-terminals-1.State (string): full state name (Texas); e.g. Louisiana, Texas, Georgia
+- liquified-natural-gas-lng-import-and-export-terminals-1.State (string): full state name (Texas); e.g. Louisiana, Texas, Maryland
 - local-emergency-operations-center-eoc.FIPS (string): 5-digit county FIPS (48029); meaning: valid county 97.0%, Connecticut legacy county 3.0%, not a county 0.0%; e.g. 25017, 25027, 25009
 - mines-and-mineral-resources.STATE (string): other; e.g. APPALACHIA, BIM, PIKEVILLE
 - mines-and-mineral-resources.ZIP (string): state code; e.g. KY, WV, PA
-- mines-and-mineral-resources.COUNTY (string): other number; e.g. 9747, 9793, 8538
+- mines-and-mineral-resources.COUNTY (string): other number; e.g. 9793, 9747, 9536
 - mines-and-mineral-resources.FIPS (string): county name; meaning: not a county 99.7%, valid county 0.3%; e.g. PIKE, HARLAN, MCDOWELL
 - miscellaneous-industrial-mineral-operations.STATE (string): full state name (Texas); e.g. Texas, Georgia, Louisiana
 - national-inventory-of-dams-nid-1.STATE (string): full state name (Texas); e.g. Texas, Kansas, Mississippi
 - natural-gas-service-territories.ZIP (string): mixed: 5-digit ZIP + trailing space 83%, 5-digit ZIP 17%; e.g. 75265, 57701, 42087
-- natural-gas-service-territories.COUNTY (string): mixed: county name (Bexar) 50%, county name + trailing spaces 50%; e.g. JACKSON, WASHINGTON, JEFFERSON
+- natural-gas-service-territories.COUNTY (string): mixed: county name (Bexar) 50%, county name + trailing spaces 50%; e.g. JACKSON, WASHINGTON, MONROE
 - natural-gas-service-territories.COUNTYFIPS (string): mixed: 5-digit county FIPS (48029) 89%, 5-digit FIPS + trailing space 11%; meaning: valid county 99.6%, Connecticut legacy county 0.3%, not a county 0.1%; e.g. 48201, 22097, 48113
 - navigable-waterway-network-lines.FIPS (string): 2-digit state FIPS (48); meaning: not a county 100.0%; e.g. 99, 48, 12
 - navigable-waterway-network-node-locations-1.FIPS (string): 2-digit state FIPS (48); meaning: not a county 100.0%; e.g. 99, 23, 48
@@ -56,7 +56,7 @@ Most layers store: STATE as a 2-letter postal code; COUNTYFIPS/FIPS/FIPS_CODE as
 - nerc-reliability-coordinators-1.ZIP (string): 5-digit ZIP; e.g. 72223, 78744, 19403
 - nfip-community-boundaries/no-overlaps-whole.county (string): county name (Bexar); e.g. Washington, Jefferson, Franklin
 - nonferrous-metal-mines.STATE (string): full state name (Texas); e.g. Nevada, Missouri, Arizona
-- northeast-petroleum-reserves.State (string): full state name (Texas); e.g. Massachusetts, Maine, New Jersey
+- northeast-petroleum-reserves.State (string): full state name (Texas); e.g. Massachusetts, Maine, Connecticut
 - nursing-homes.COUNTY (string): county name (Bexar); e.g. MARICOPA, HENNEPIN, MIAMI-DADE
 - peak-shaving-facilities.COUNTYFIPS (string): 5-digit county FIPS (48029); meaning: valid county 95.5%, Connecticut legacy county 4.5%; e.g. 25009, 27037, 25005
 - petroleum-product-terminals.State (string): full state name (Texas); e.g. TEXAS, CALIFORNIA, NEW YORK
@@ -68,10 +68,10 @@ Most layers store: STATE as a 2-letter postal code; COUNTYFIPS/FIPS/FIPS_CODE as
 - sand-and-gravel-operations-1.FIPS (string): 5-digit county FIPS (48029); meaning: valid county 98.7%, Connecticut legacy county 1.3%, not a county 0.0%; e.g. 04013, 32003, 26125
 - school-district-administrative-areas.STATE (string): state FIPS number (48); e.g. 50
 - secondary-school-districts.STATE (string): state FIPS number (48); e.g. 06, 17, 30
-- strategic-petroleum-reserves.State (string): full state name (Texas); e.g. Texas, Louisiana
+- strategic-petroleum-reserves.State (string): full state name (Texas); e.g. Louisiana, Texas
 - unified-school-districts.STATE (string): state FIPS number (48); e.g. 48, 36, 39
-- uranium-and-vanadium-deposits.STATE (string): full state name (Texas); e.g. Utah, Vermont, Colorado
-- us-district-court-jurisdictions.STATE (string): full state name (Texas); e.g. California, Texas, New York
+- uranium-and-vanadium-deposits.STATE (string): full state name (Texas); e.g. Utah, Vermont, Wyoming
+- us-district-court-jurisdictions.STATE (string): full state name (Texas); e.g. New York, California, Texas
 - us-virgin-islands-estates.COUNTY (string): 3-digit county FIPS (029); e.g. 010, 030, 020
 - us-virgin-islands-estates.STATE (string): state FIPS number (48); e.g. 78
 - veterans-health-administration-medical-facilities.FIPS (string): 5-digit county FIPS (48029); meaning: valid county 98.9%, Connecticut legacy county 1.1%, not a county 0.1%; e.g. 06037, 17031, 48029

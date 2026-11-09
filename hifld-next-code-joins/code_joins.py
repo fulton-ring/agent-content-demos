@@ -1166,7 +1166,24 @@ def _(OUT, answers, key_out, pl):
 
 
 @app.cell
-def _(pl, scored):
+def _(OUT, pl, re, scored):
+    # The agent's own join_method label is a claim. The transcript says what it ran: a spatial
+    # join needs a spatial predicate in a query_parquet SQL string.
+    def ran_spatial_sql(r: dict) -> bool:
+        path = OUT / "transcripts" / f"{r['condition']}-{r['repeat']}-{r['qid']}.json"
+        text = path.read_text() if path.exists() else ""
+        return bool(re.search(r"ST_(Intersects|Contains|Within|DWithin)", text))
+
+    scored_spatial = scored.with_columns(
+        spatial_sql=pl.struct("condition", "repeat", "qid").map_elements(
+            ran_spatial_sql, return_dtype=pl.Boolean
+        )
+    )
+    return (scored_spatial,)
+
+
+@app.cell
+def _(pl, scored_spatial):
     def shares(frame: pl.DataFrame, by: list[str]) -> pl.DataFrame:
         return (
             frame.group_by(by)
@@ -1175,14 +1192,15 @@ def _(pl, scored):
                 correct=(pl.col("outcome") == "correct").mean(),
                 no_match=(pl.col("outcome") == "no match").mean(),
                 wrong_match=(pl.col("outcome") == "wrong match").mean(),
-                spatial=(pl.col("join_method") == "spatial").sum(),
+                said_spatial=(pl.col("join_method") == "spatial").sum(),
+                ran_spatial_sql=pl.col("spatial_sql").sum(),
                 errors=pl.col("error").is_not_null().sum(),
             )
             .sort(by)
         )
 
-    by_condition = shares(scored, ["condition"])
-    by_family = shares(scored, ["condition", "family"])
+    by_condition = shares(scored_spatial, ["condition"])
+    by_family = shares(scored_spatial, ["condition", "family"])
     by_condition
     return by_condition, by_family
 
