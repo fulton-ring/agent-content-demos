@@ -694,7 +694,8 @@ def _(mo):
     joined into one detection. A detection is **correct** if an OSM substation lies within
     300 m of it, and an OSM substation in the tile is **found** if a detection lies within
     300 m. OSM is incomplete, so precision against it is a floor; section 9 checks a sample
-    of the "wrong" detections on aerial photos.
+    of the "wrong" detections on aerial photos. Detections outside the two states (a border
+    tile reaches into Canada or a neighbouring state, where we have no answer key) are dropped.
     """)
     return
 
@@ -769,7 +770,7 @@ def _(DATA_DIR, YEAR, cnn_map, np, probe_map, read_tile, scan_tiles, tiles, time
 
 
 @app.cell
-def _(ALBERS, STRIDE, gpd, ndimage, np, osm, pd, scan_maps):
+def _(ALBERS, STRIDE, gpd, ndimage, np, osm, pd, scan_maps, states):
     def detections(threshold: dict[str, float]) -> gpd.GeoDataFrame:
         """Join above-threshold neighbours into detections, one point at each one's peak."""
         rows = []
@@ -793,9 +794,11 @@ def _(ALBERS, STRIDE, gpd, ndimage, np, osm, pd, scan_maps):
                         }
                     )
         d = pd.DataFrame(rows, columns=["model", "tile", "region", "score", "lon", "lat"])
-        return gpd.GeoDataFrame(
-            d, geometry=gpd.points_from_xy(d["lon"], d["lat"]), crs=4326
-        ).to_crs(ALBERS)
+        g = gpd.GeoDataFrame(d, geometry=gpd.points_from_xy(d["lon"], d["lat"]), crs=4326).to_crs(
+            ALBERS
+        )
+        # A tile on a border reaches into Canada or a neighbouring state, where we have no OSM.
+        return g[g.within(states.union_all())].reset_index(drop=True)
 
     # OSM substations centred in a scanned tile, more than 160 m (half a window) from its edge.
     _c = osm.geometry.representative_point().to_crs(4326)
