@@ -12,7 +12,6 @@ def _():
     import re
     import time
     from dataclasses import replace
-    from typing import Literal
 
     import duckdb
     import httpx
@@ -28,7 +27,6 @@ def _():
         Agent,
         BaseModel,
         Field,
-        Literal,
         MCPToolset,
         ModelMessagesTypeAdapter,
         ModelResponse,
@@ -50,7 +48,7 @@ def _():
 @app.cell
 def _(mo):
     mo.md(r"""
-    # Do codes that mean different things in different HIFLD Next layers lead an AI agent to wrong joins?
+    # Do codes that differ between HIFLD Next layers lead an AI agent to wrong joins?
 
     [HIFLD Next](https://hifld.publicenvirodata.org) puts 500-plus layers from separate federal
     owners in one catalog with one MCP server. Many layers share field names such as `STATE`,
@@ -60,7 +58,7 @@ def _(mo):
 
     This notebook does four things, top to bottom:
 
-    1. **Inventory**: read every value of twelve shared identifier fields in every layer and
+    1. **Inventory**: read every value of nine shared identifier fields in every layer and
        classify its format and meaning.
     2. **Questions and answer key**: 24 questions that need a join between two layers, or between
        a layer and FEMA's National Risk Index (NRI). The key comes from a spatial join of each
@@ -86,7 +84,7 @@ def _(mo, os):
     BUDGET_USD = float(os.environ.get("AGENT_BUDGET_USD", "4.0"))
     # Call the models only when asked; otherwise score the saved answers in outputs/.
     RUN_AGENT = os.environ.get("RUN_AGENT", "0") == "1"
-    # The twelve shared identifier fields we check, matched case-insensitively.
+    # The nine shared identifier fields we check, matched case-insensitively.
     FIELDS = {
         "STATE": "state",
         "COUNTY": "county",
@@ -97,9 +95,6 @@ def _(mo, os):
         "NAICS_CODE": "naics",
         "STATUS": "status",
         "TYPE": "type",
-        "ID": "id",
-        "SOURCE_ID": "id",
-        "STATE_ID": "id",
     }
     MAX_ROWS_READ = 200_000  # per layer and field; the big layers are read up to this many rows
     HERE = mo.notebook_dir()
@@ -167,7 +162,9 @@ def _(BASE_URL, httpx, pl):
         [
             {
                 "layer": _layer,
-                "slug": _layer.split("/")[1],
+                "slug": _layer.split("/")[1]
+                if _layer.split("/")[1] == _layer.split("/")[2]
+                else "/".join(_layer.split("/")[1:]),
                 "title": _c.get("title"),
                 "rows": _c.get("hifld:feature_count"),
                 "parquet": next(
@@ -193,7 +190,7 @@ def _(mo):
     mo.md(r"""
     ## 2. Inventory of shared identifier fields
 
-    For each layer that has one of the twelve fields, we read the column's values from the
+    For each layer that has one of the nine fields, we read the column's values from the
     GeoParquet file (up to 200,000 rows) and count each distinct value. Reading real values, not
     the catalog's five example values, matters: several problems below sit in a minority of
     rows. The catalog sometimes lists a column twice in different case (`ID` and `id`) when the
@@ -209,14 +206,22 @@ def _(FIELDS, MAX_ROWS_READ, db, layers, pl):
     def read_values(job: tuple[str, str, str, str]) -> dict:
         layer, listed, catalog_type, href = job
         con = db.cursor()
-        file_cols = [r[0] for r in con.execute(
-            f"DESCRIBE SELECT * FROM read_parquet('{href}') LIMIT 0").fetchall()]  # fmt: skip
+        file_cols = [
+            r[0]
+            for r in con.execute(
+                f"DESCRIBE SELECT * FROM read_parquet('{href}') LIMIT 0"
+            ).fetchall()
+        ]
         column = next((c for c in file_cols if c.upper() == listed.upper()), None)
         if column is None:
-            return {"layer": layer, "column": listed, "type": catalog_type,
-                    "error": "listed in the catalog schema but not in the file"}  # fmt: skip
+            return {
+                "layer": layer,
+                "column": listed,
+                "type": catalog_type,
+                "error": "listed in the catalog schema but not in the file",
+            }
         sql = (
-            f'WITH s AS (SELECT CAST("{column}" AS VARCHAR) v FROM read_parquet(\'{href}\') '
+            f"WITH s AS (SELECT CAST(\"{column}\" AS VARCHAR) v FROM read_parquet('{href}') "
             f"LIMIT {MAX_ROWS_READ}) SELECT v, count(*) n FROM s GROUP BY v ORDER BY n DESC"
         )
         error = None
@@ -275,16 +280,63 @@ def _(db, layers, pl):
 @app.cell
 def _(CT_LEGACY, FIELDS, county_geoids, pl, raw_values, re):
     STATE_NAMES = {
-        "alabama", "alaska", "arizona", "arkansas", "california", "colorado", "connecticut",
-        "delaware", "district of columbia", "florida", "georgia", "hawaii", "idaho", "illinois",
-        "indiana", "iowa", "kansas", "kentucky", "louisiana", "maine", "maryland",
-        "massachusetts", "michigan", "minnesota", "mississippi", "missouri", "montana",
-        "nebraska", "nevada", "new hampshire", "new jersey", "new mexico", "new york",
-        "north carolina", "north dakota", "ohio", "oklahoma", "oregon", "pennsylvania",
-        "rhode island", "south carolina", "south dakota", "tennessee", "texas", "utah",
-        "vermont", "virginia", "washington", "west virginia", "wisconsin", "wyoming",
-        "puerto rico", "guam", "virgin islands", "american samoa", "northern mariana islands",
-    }  # fmt: skip
+        "alabama",
+        "alaska",
+        "arizona",
+        "arkansas",
+        "california",
+        "colorado",
+        "connecticut",
+        "delaware",
+        "district of columbia",
+        "florida",
+        "georgia",
+        "hawaii",
+        "idaho",
+        "illinois",
+        "indiana",
+        "iowa",
+        "kansas",
+        "kentucky",
+        "louisiana",
+        "maine",
+        "maryland",
+        "massachusetts",
+        "michigan",
+        "minnesota",
+        "mississippi",
+        "missouri",
+        "montana",
+        "nebraska",
+        "nevada",
+        "new hampshire",
+        "new jersey",
+        "new mexico",
+        "new york",
+        "north carolina",
+        "north dakota",
+        "ohio",
+        "oklahoma",
+        "oregon",
+        "pennsylvania",
+        "rhode island",
+        "south carolina",
+        "south dakota",
+        "tennessee",
+        "texas",
+        "utah",
+        "vermont",
+        "virginia",
+        "washington",
+        "west virginia",
+        "wisconsin",
+        "wyoming",
+        "puerto rico",
+        "guam",
+        "virgin islands",
+        "american samoa",
+        "northern mariana islands",
+    }
     # (pattern, label) in order; the first match wins.
     PATTERNS = {
         "state": [
@@ -314,11 +366,18 @@ def _(CT_LEGACY, FIELDS, county_geoids, pl, raw_values, re):
             (r"\d{3,4}", "leading zero lost (2110)"),
             (r"[A-Z]{2}", "state code"),
         ],
-        "naics": [(r"\d{2}", "2-digit NAICS"), (r"\d{4}", "4-digit NAICS"),
-                  (r"\d{6}", "6-digit NAICS"), (r"\d{3}|\d{5}", "3 or 5-digit NAICS")],
-        "id": [(r"\d+", "integer"), (r"\d+\.0", "float")],
-    }  # fmt: skip
+        "naics": [
+            (r"\d{2}", "2-digit NAICS"),
+            (r"\d{4}", "4-digit NAICS"),
+            (r"\d{6}", "6-digit NAICS"),
+            (r"\d{3}|\d{5}", "3 or 5-digit NAICS"),
+        ],
+    }
     BLANK = {"", "NOT AVAILABLE", "NONE", "NULL", "N/A", "NAN", "0"}
+
+    def short_name(layer: str) -> str:
+        _, dataset, file = layer.split("/")
+        return dataset if dataset == file else f"{dataset}/{file}"
 
     def classify(family: str, value: str) -> str:
         if family == "state" and value.strip().lower() in STATE_NAMES:
@@ -326,7 +385,7 @@ def _(CT_LEGACY, FIELDS, county_geoids, pl, raw_values, re):
         for pattern, label in PATTERNS[family]:
             if re.fullmatch(pattern, value):
                 return label
-        return "text" if family == "id" else "other"
+        return "other"
 
     def county_meaning(value: str) -> str:
         code = value.strip().removesuffix(".0").zfill(5)
@@ -343,11 +402,13 @@ def _(CT_LEGACY, FIELDS, county_geoids, pl, raw_values, re):
         if "error" in _r:
             continue
         _family = FIELDS[_r["column"].upper()]
-        _vals = [(v, n) for v, n in _r["values"] if v is not None and v.strip().upper() not in BLANK]
+        _vals = [
+            (v, n) for v, n in _r["values"] if v is not None and v.strip().upper() not in BLANK
+        ]
         _total = sum(n for _, n in _r["values"])
         _filled = sum(n for _, n in _vals)
         _row = {
-            "layer": _r["layer"].split("/")[1],
+            "layer": short_name(_r["layer"]),
             "field": _r["column"].upper(),
             "column": _r["column"],
             "family": _family,
@@ -380,7 +441,8 @@ def _(CT_LEGACY, FIELDS, county_geoids, pl, raw_values, re):
                     _m = county_meaning(_v)
                     _meanings[_m] = _meanings.get(_m, 0) + _n
                 _row["meaning"] = ", ".join(
-                    f"{k} {n / _filled:.1%}" for k, n in sorted(_meanings.items(), key=lambda kv: -kv[1])
+                    f"{k} {n / _filled:.1%}"
+                    for k, n in sorted(_meanings.items(), key=lambda kv: -kv[1])
                 )
         _rows.append(_row)
     inventory = pl.DataFrame(_rows)
@@ -401,14 +463,32 @@ def _(mo):
 
 @app.cell
 def _(inventory, pl):
-    _WORDS = {"OPEN", "CLOSED", "ACTIVE", "INACTIVE", "OPERATING", "IN SERVICE", "REMOVED",
-              "DISMANTLED", "NOT IN USE", "UNDER CONSTRUCTION", "PRODUCING WELL", "NON-ACTIVE WELL"}  # fmt: skip
+    _WORDS = {
+        "OPEN",
+        "CLOSED",
+        "ACTIVE",
+        "INACTIVE",
+        "OPERATING",
+        "IN SERVICE",
+        "REMOVED",
+        "DISMANTLED",
+        "NOT IN USE",
+        "UNDER CONSTRUCTION",
+        "PRODUCING WELL",
+        "NON-ACTIVE WELL",
+    }
     _CODES = {"OP", "SB", "OS", "OA", "RE", "A", "N", "G", "M", "D", "R", "C", "1", "2", "3"}
-    _OTHER = {"PRIVATE": "ownership (Public/Private)", "PUBLIC": "ownership (Public/Private)",
-              "HOLOCENE": "dating evidence (Holocene...)", "HISTORICAL": "dating evidence (Holocene...)",
-              "FINAL": "regulatory stage (Final, Effective)", "EFFECTIVE": "regulatory stage (Final, Effective)",
-              "PROPOSED": "regulatory stage (Final, Effective)", "COMPLETED": "regulatory stage (Final, Effective)",
-              "EXISTENCE DOUBTFUL": "chart reliability"}  # fmt: skip
+    _OTHER = {
+        "PRIVATE": "ownership (Public/Private)",
+        "PUBLIC": "ownership (Public/Private)",
+        "HOLOCENE": "dating evidence (Holocene...)",
+        "HISTORICAL": "dating evidence (Holocene...)",
+        "FINAL": "regulatory stage (Final, Effective)",
+        "EFFECTIVE": "regulatory stage (Final, Effective)",
+        "PROPOSED": "regulatory stage (Final, Effective)",
+        "COMPLETED": "regulatory stage (Final, Effective)",
+        "EXISTENCE DOUBTFUL": "chart reliability",
+    }
 
     def status_meaning(examples: str) -> str:
         vocab = {v.strip().upper() for v in examples.split(";") if v.strip()}
@@ -425,7 +505,9 @@ def _(inventory, pl):
 
     status = (
         inventory.filter(pl.col("field") == "STATUS")
-        .with_columns(meaning=pl.col("examples").map_elements(status_meaning, return_dtype=pl.String))
+        .with_columns(
+            meaning=pl.col("examples").map_elements(status_meaning, return_dtype=pl.String)
+        )
         .select("layer", "meaning", "examples", "filled")
         .sort("meaning", "layer")
     )
@@ -435,23 +517,41 @@ def _(inventory, pl):
 
 @app.cell
 def _(OUT, inventory, pl, status):
-    inventory_out = inventory.join(
-        status.select("layer", pl.col("meaning").alias("status_meaning")), on="layer", how="left"
-    ).with_columns(
-        meaning=pl.when(pl.col("field") == "STATUS")
-        .then(pl.col("status_meaning"))
-        .otherwise(pl.col("meaning"))
-    ).drop("status_meaning")
+    inventory_out = (
+        inventory.join(
+            status.select("layer", pl.col("meaning").alias("status_meaning")),
+            on="layer",
+            how="left",
+        )
+        .with_columns(
+            meaning=pl.when(pl.col("field") == "STATUS")
+            .then(pl.col("status_meaning"))
+            .otherwise(pl.col("meaning"))
+        )
+        .drop("status_meaning")
+    )
     inventory_out.write_csv(OUT / "inventory.csv")
+
+    def county_code_meaning(meaning: str) -> str:
+        # "valid county 96.8%, not a county 2.8%, ..." -> the main way the codes go wrong,
+        # or "current county codes" when at least 99% are current Census counties.
+        shares = dict(part.rsplit(" ", 1) for part in meaning.split(", "))
+        if float(shares.get("valid county", "0%").rstrip("%")) >= 99:
+            return "current county codes"
+        return next(kind for kind in shares if kind != "valid county")
 
     def field_summary(frame: pl.DataFrame) -> pl.DataFrame:
         checked = frame.filter(pl.col("format") != "all blank")
-        meaning_key = pl.when(pl.col("family") == "county code").then(
-            pl.col("meaning").str.extract(r"^([a-zA-Z ]+) ")
-        ).when(pl.col("field") == "STATUS").then(pl.col("meaning"))
+        meaning_key = (
+            pl.when(pl.col("family") == "county code")
+            .then(pl.col("meaning").map_elements(county_code_meaning, return_dtype=pl.String))
+            .when(pl.col("field") == "STATUS")
+            .then(pl.col("meaning"))
+        )
         return (
             checked.with_columns(
-                fmt=pl.when(pl.col("format").str.starts_with("mixed")).then(pl.lit("mixed"))
+                fmt=pl.when(pl.col("format").str.starts_with("mixed"))
+                .then(pl.lit("mixed"))
                 .otherwise(pl.col("format")),
                 mean=meaning_key,
             )
@@ -460,17 +560,17 @@ def _(OUT, inventory, pl, status):
                 layers=pl.len(),
                 formats=pl.col("fmt").n_unique(),
                 meanings=pl.col("mean").drop_nulls().n_unique(),
-                format_list=pl.col("fmt").value_counts(sort=True)
+                format_list=pl.col("fmt")
+                .value_counts(sort=True)
                 .map_elements(lambda s: f"{s['fmt']} ({s['count']})", return_dtype=pl.String)
                 .str.join("; "),
             )
-            .with_columns(
-                differs=(pl.col("formats") > 1) | (pl.col("meanings") > 1)
-            )
+            .with_columns(differs=(pl.col("formats") > 1) | (pl.col("meanings") > 1))
             .sort("layers", descending=True)
         )
 
     summary_by_field = field_summary(inventory_out.filter(pl.col("family") != "type"))
+    summary_by_field.write_csv(OUT / "field_summary.csv")
     summary_by_field
     return inventory_out, summary_by_field
 
@@ -503,17 +603,27 @@ def _(mo):
 
 @app.cell
 def _(inventory_out, pl):
-    county_problems = inventory_out.filter(
-        (pl.col("family").is_in(["county code", "county", "state", "zip"]))
-        & (pl.col("format") != "all blank")
-        & (
-            (pl.col("format_share") < 0.99)
-            | ~pl.col("format").is_in(
-                ["5-digit county FIPS (48029)", "county name (Bexar)", "postal code (TX)", "5-digit ZIP"]
-            )
-            | ~pl.col("meaning").fill_null("valid county 100").str.starts_with("valid county 9")
+    _typical = {
+        "county code": "5-digit county FIPS (48029)",
+        "county": "county name (Bexar)",
+        "state": "postal code (TX)",
+        "zip": "5-digit ZIP",
+    }
+    _valid = pl.col("meaning").str.extract(r"valid county ([\d.]+)%").cast(pl.Float64)
+    county_problems = (
+        inventory_out.filter(
+            pl.col("family").is_in(list(_typical)) & (pl.col("format") != "all blank")
         )
-    ).select("layer", "column", "catalog_type", "format", "meaning", "examples")
+        .with_columns(typical=pl.col("family").replace_strict(_typical))
+        .filter(
+            (pl.col("format") != pl.col("typical"))
+            | (pl.col("format_share") < 0.99)
+            | (pl.col("catalog_type").is_in(["integer", "float"]) & (pl.col("family") != "county"))
+            | ((pl.col("family") == "county code") & (_valid.fill_null(0) < 99))
+        )
+        .select("layer", "column", "catalog_type", "format", "meaning", "examples")
+        .sort("layer")
+    )
     county_problems
     return (county_problems,)
 
@@ -524,21 +634,32 @@ def _(db, inventory_out, layers, pl):
     _rows = []
     for _r in inventory_out.filter(pl.col("family") == "county code").iter_rows(named=True):
         _href = layers.filter(pl.col("slug") == _r["layer"])["parquet"][0]
+        _code = f"""lpad(regexp_replace(CAST("{_r["column"]}" AS VARCHAR), '\\.0$', ''), 5, '0')"""
         _codes = db.execute(
-            f"""SELECT DISTINCT lpad(regexp_replace(CAST("{_r['column']}" AS VARCHAR), '\\.0$', ''), 5, '0')
-            FROM read_parquet('{_href}') WHERE starts_with(lpad(regexp_replace(
-            CAST("{_r['column']}" AS VARCHAR), '\\.0$', ''), 5, '0'), '09')"""
+            f"SELECT DISTINCT {_code} FROM read_parquet('{_href}') WHERE starts_with({_code}, '09')"
         ).fetchall()
         _codes = {c[0] for c in _codes if c[0] and c[0][2:].isdigit()}
         if _codes:
             _legacy = sum(1 for c in _codes if int(c[2:]) < 100)
-            _rows.append({"layer": _r["layer"], "column": _r["column"],
-                          "legacy_counties": _legacy, "planning_regions": len(_codes) - _legacy})  # fmt: skip
-    connecticut = pl.DataFrame(_rows).with_columns(
-        uses=pl.when(pl.col("planning_regions") == 0).then(pl.lit("legacy counties only"))
-        .when(pl.col("legacy_counties") == 0).then(pl.lit("planning regions only"))
-        .otherwise(pl.lit("both"))
-    ).sort("uses", "layer")
+            _rows.append(
+                {
+                    "layer": _r["layer"],
+                    "column": _r["column"],
+                    "legacy_counties": _legacy,
+                    "planning_regions": len(_codes) - _legacy,
+                }
+            )
+    connecticut = (
+        pl.DataFrame(_rows)
+        .with_columns(
+            uses=pl.when(pl.col("planning_regions") == 0)
+            .then(pl.lit("legacy counties only"))
+            .when(pl.col("legacy_counties") == 0)
+            .then(pl.lit("planning regions only"))
+            .otherwise(pl.lit("both"))
+        )
+        .sort("uses", "layer")
+    )
     connecticut
     return (connecticut,)
 
@@ -558,15 +679,24 @@ def _(mo):
 
 @app.cell
 def _(NRI_URL, httpx, pl):
-    _fields = "STATE,STATEABBRV,STATEFIPS,COUNTY,COUNTYTYPE,COUNTYFIPS,STCOFIPS,RISK_SCORE,RISK_RATNG"
+    _fields = (
+        "STATE,STATEABBRV,STATEFIPS,COUNTY,COUNTYTYPE,COUNTYFIPS,STCOFIPS,RISK_SCORE,RISK_RATNG"
+    )
     _rows = []
     for _page in range(10):  # 3,232 counties at up to 2,000 per page
         _resp = httpx.get(
             NRI_URL,
-            params={"where": "1=1", "outFields": _fields, "returnGeometry": "false", "f": "json",
-                    "resultOffset": _page * 2000, "resultRecordCount": 2000, "orderByFields": "OBJECTID"},
+            params={
+                "where": "1=1",
+                "outFields": _fields,
+                "returnGeometry": "false",
+                "f": "json",
+                "resultOffset": _page * 2000,
+                "resultRecordCount": 2000,
+                "orderByFields": "OBJECTID",
+            },
             timeout=120,
-        )  # fmt: skip
+        )
         _resp.raise_for_status()
         _feats = _resp.json()["features"]
         _rows += [f["attributes"] for f in _feats]
@@ -595,9 +725,10 @@ def _(mo):
 
     The key: each facility's point is placed in a county polygon with a spatial join (each
     layer's own CRS transformed to the county layer's NAD83). For counts we count layer B's
-    points inside that polygon, and also what a careful code join would give (layer B's county
-    code, padded to 5 digits, equal to the key county). Either counts as correct, within
-    max(1, 5%).
+    points inside that polygon. An answer within max(1, 5%) of that count is correct, which
+    absorbs a few facilities geocoded across a county line. For comparison the key also shows
+    what a plain code join gets (layer B's county code, padded to 5 digits, equal to the key
+    county): where the codes are sound the two agree, and where they aren't, they don't.
     """)
     return
 
@@ -612,8 +743,9 @@ def _(HERE, db, layers, pl):
         href = layers.filter(pl.col("slug") == slug)["parquet"][0]
         geo = db.execute(
             f"SELECT value FROM parquet_kv_metadata('{href}') WHERE key = 'geo'"
-        ).fetchone()
+        ).fetchall()
         assert geo, f"{slug} has no GeoParquet metadata"
+        geo = geo[0]
         meta = _json.loads(geo[0])
         crs = meta["columns"][meta["primary_column"]].get("crs") or {}
         code = crs.get("id", {}).get("code") if isinstance(crs, dict) else None
@@ -640,14 +772,18 @@ def _(HERE, db, layers, pl):
         return db.execute(
             f"SELECT count(*) FROM (SELECT {expr} AS pt FROM {src} {cond}) f "
             f"JOIN counties c ON c.GEOID = '{geoid}' AND ST_Intersects(c.geometry, f.pt)"
-        ).fetchone()[0]
+        ).fetchall()[0][0]
 
     COUNTY_CODE_COLUMN = {
-        "ncua-insured-credit-unions": "COUNTYFIPS", "hospitals-3": "COUNTYFIPS",
-        "nursing-homes": "COUNTYFIPS", "mobile-home-parks": "COUNTYFIPS",
-        "private-schools": "COUNTYFIPS", "public-schools": "COUNTYFIPS",
-        "power-plants-1": "COUNTYFIPS", "colleges-and-universities": "COUNTYFIPS",
-    }  # fmt: skip
+        "ncua-insured-credit-unions": "COUNTYFIPS",
+        "hospitals-3": "COUNTYFIPS",
+        "nursing-homes": "COUNTYFIPS",
+        "mobile-home-parks": "COUNTYFIPS",
+        "private-schools": "COUNTYFIPS",
+        "public-schools": "COUNTYFIPS",
+        "power-plants-1": "COUNTYFIPS",
+        "colleges-and-universities": "COUNTYFIPS",
+    }
 
     def count_by_code(slug: str, geoid: str, where: str | None) -> int | None:
         column = COUNTY_CODE_COLUMN.get(slug)
@@ -658,7 +794,7 @@ def _(HERE, db, layers, pl):
         return db.execute(
             f"""SELECT count(*) FROM read_parquet('{href}') WHERE lpad(regexp_replace(
             CAST("{column}" AS VARCHAR), '\\.0$', ''), 5, '0') = '{geoid}' {cond}"""
-        ).fetchone()[0]
+        ).fetchall()[0][0]
 
     _rows = []
     for _q in questions.iter_rows(named=True):
@@ -671,8 +807,10 @@ def _(HERE, db, layers, pl):
     key = (
         questions.join(pl.DataFrame(_rows), on="qid")
         .join(
-            db.execute("SELECT GEOID, NAMELSAD FROM counties").pl(),
-            left_on="key_geoid", right_on="GEOID", how="left",
+            db.sql("SELECT GEOID, NAMELSAD FROM counties").pl(),
+            left_on="key_geoid",
+            right_on="GEOID",
+            how="left",
         )
         .rename({"NAMELSAD": "key_county"})
     )
@@ -689,9 +827,15 @@ def _(OUT, key, nri, pl):
     assert key_out.filter(pl.col("family") == "nri")["key_rating"].null_count() == 0
     key_out.write_csv(OUT / "answer_key.csv")
     key_out.select(
-        "qid", "layer_a", "key_county", "key_geoid", "key_rating", "layer_b", "key_count",
+        "qid",
+        "layer_a",
+        "key_county",
+        "key_geoid",
+        "key_rating",
+        "layer_b",
+        "key_count",
         "key_count_by_code",
-    )  # fmt: skip
+    )
     return (key_out,)
 
 
@@ -703,7 +847,7 @@ def _(mo):
     The fix the argument proposes is cheap: say what each code means where the agent reads it.
     We generate a short note from the inventory above, listing for each shared identifier field
     the layers whose format or meaning departs from the common one, and add it to the
-    descriptions of the MCP tools the agent uses to read schemas and run SQL. The notes are
+    description of the MCP tool the agent uses to run SQL. The notes are
     written from the inventory, not from the questions; they cover every layer the inventory
     flagged. The full text is saved to `outputs/code_notes.md`.
     """)
@@ -741,7 +885,9 @@ def _(OUT, connecticut, county_problems, pl, status):
         "power plants STATUS OP = operating. Some layers' STATUS is not operating status at all: "
         + "; ".join(
             f"{r['layer']} ({r['meaning']})"
-            for r in status.filter(~pl.col("meaning").str.starts_with("operating")).iter_rows(named=True)
+            for r in status.filter(~pl.col("meaning").str.starts_with("operating")).iter_rows(
+                named=True
+            )
             if r["meaning"] != "all blank"
         )
         + ".",
@@ -765,14 +911,17 @@ def _(mo):
     spatial query).
 
     - **baseline**: the server's tool descriptions as published.
-    - **code notes**: the same, with the note from section 5 appended to the descriptions of
-      `get_dataset_file_schema`, `inspect_query_source` and `query_parquet`.
+    - **code notes**: the same, with the note from section 5 appended to the description of
+      `query_parquet`, the tool that runs joins. (The model sees every tool description on every
+      request, so one copy is enough.)
     """)
     return
 
 
 @app.cell
-def _(Agent, BaseModel, Field, Literal, MCPToolset, MCP_URL, db, nri, replace):
+def _(Agent, BaseModel, Field, MCPToolset, MCP_URL, db, nri, replace):
+    from typing import Literal
+
     db.register("nri_frame", nri.to_arrow())
     db.execute("CREATE OR REPLACE TABLE nri AS SELECT * FROM nri_frame")
 
@@ -792,11 +941,18 @@ def _(Agent, BaseModel, Field, Literal, MCPToolset, MCP_URL, db, nri, replace):
         answer: str = Field(description="One or two sentences answering the question.")
 
     QUERY_TOOLS = {
-        "list_collections", "get_collection", "search_datasets", "get_dataset",
-        "get_dataset_file", "get_dataset_file_schema", "read_geoparquet_rows",
-        "query_parquet", "inspect_query_source", "get_query_page",
-    }  # fmt: skip
-    NOTE_TOOLS = {"get_dataset_file_schema", "inspect_query_source", "query_parquet"}
+        "list_collections",
+        "get_collection",
+        "search_datasets",
+        "get_dataset",
+        "get_dataset_file",
+        "get_dataset_file_schema",
+        "read_geoparquet_rows",
+        "query_parquet",
+        "inspect_query_source",
+        "get_query_page",
+    }
+    NOTE_TOOLS = {"query_parquet"}  # every tool description is sent on every request anyway
     INSTRUCTIONS = (
         "You answer questions that join HIFLD Next infrastructure layers with each other or "
         "with FEMA's National Risk Index. Use the HIFLD Next MCP tools to find records and "
@@ -867,8 +1023,14 @@ async def _(
     TRANSCRIPTS = OUT / "transcripts"
 
     async def ask(agent, condition: str, repeat: int, q: dict, gate, spend: dict) -> dict:
-        row = {"condition": condition, "repeat": repeat, "qid": q["qid"], "model": MODEL,
-               "run_date": time.strftime("%Y-%m-%d"), "error": None}  # fmt: skip
+        row = {
+            "condition": condition,
+            "repeat": repeat,
+            "qid": q["qid"],
+            "model": MODEL,
+            "run_date": time.strftime("%Y-%m-%d"),
+            "error": None,
+        }
         async with gate:
             if spend["usd"] >= BUDGET_USD:
                 return row | {"error": "skipped: budget reached"}
@@ -889,18 +1051,27 @@ async def _(
                     (TRANSCRIPTS / f"{condition}-{repeat}-{q['qid']}.json").write_bytes(
                         ModelMessagesTypeAdapter.dump_json(messages, indent=1)
                     )
-                    return row | {"error": f"{type(exc).__name__}: {exc}"[:300],
-                                  "seconds": time.monotonic() - start, "cost_usd": cost}  # fmt: skip
+                    return row | {
+                        "error": f"{type(exc).__name__}: {exc}"[:300],
+                        "seconds": time.monotonic() - start,
+                        "cost_usd": cost,
+                    }
         usage = result.usage
         spend["usd"] += float(usage.cost or 0)
         (TRANSCRIPTS / f"{condition}-{repeat}-{q['qid']}.json").write_bytes(
             ModelMessagesTypeAdapter.dump_json(result.all_messages(), indent=1)
         )
-        return row | result.output.model_dump() | {
-            "seconds": time.monotonic() - start, "cost_usd": float(usage.cost or 0),
-            "input_tokens": usage.input_tokens, "output_tokens": usage.output_tokens,
-            "tool_calls": usage.tool_calls,
-        }  # fmt: skip
+        return (
+            row
+            | result.output.model_dump()
+            | {
+                "seconds": time.monotonic() - start,
+                "cost_usd": float(usage.cost or 0),
+                "input_tokens": usage.input_tokens,
+                "output_tokens": usage.output_tokens,
+                "tool_calls": usage.tool_calls,
+            }
+        )
 
     if RUN_AGENT:
         TRANSCRIPTS.mkdir(exist_ok=True)
@@ -912,9 +1083,11 @@ async def _(
                 for _repeat in range(1, REPEATS + 1):
                     _gate = asyncio.Semaphore(6)
                     _runs += await asyncio.gather(
-                        *(ask(_agent, _condition, _repeat, _q, _gate, _spend)
-                          for _q in key_out.iter_rows(named=True))
-                    )  # fmt: skip
+                        *(
+                            ask(_agent, _condition, _repeat, _q, _gate, _spend)
+                            for _q in key_out.iter_rows(named=True)
+                        )
+                    )
         ANSWERS.write_text("".join(json.dumps(r) + "\n" for r in _runs))
         print(f"ran {len(_runs)} agent queries, ${_spend['usd']:.2f}")
     assert ANSWERS.exists(), "no saved answers: run with RUN_AGENT=1 and OPENROUTER_API_KEY set"
@@ -932,8 +1105,8 @@ def _(mo):
       and its rating is that county's NRI rating; **no match** if it found nothing or reported
       no county; **wrong match** if it settled on another county, or the right county with a
       rating from another row.
-    - **count / status**: correct if the count equals the spatial count or the careful code-join
-      count, within max(1, 5%); **no match** if it found nothing or reported 0 where the key
+    - **count / status**: correct if the count is within max(1, 5%) of the spatial count;
+      **no match** if it found nothing or reported 0 where the key
       is above 0; **wrong match** for any other number.
 
     A run that errored or hit the request limit is scored as no match and counted separately.
@@ -954,20 +1127,41 @@ def _(OUT, answers, key_out, pl):
             return "correct" if fips == r["key_geoid"] and rating_ok else "wrong match"
         if r["count"] is None or (r["count"] == 0 and r["key_count"] > 0):
             return "no match"
-        for target in (r["key_count"], r["key_count_by_code"]):
-            if target is not None and abs(r["count"] - target) <= max(1, 0.05 * target):
-                return "correct"
-        return "wrong match"
+        ok = abs(r["count"] - r["key_count"]) <= max(1, 0.05 * r["key_count"])
+        return "correct" if ok else "wrong match"
 
-    _cols = [c for c in ["found", "county_fips", "county_name", "risk_rating", "count",
-                         "join_method", "codes_used", "answer", "error"] if c in answers.columns]  # fmt: skip
+    _cols = [
+        c
+        for c in [
+            "found",
+            "county_fips",
+            "county_name",
+            "risk_rating",
+            "count",
+            "join_method",
+            "codes_used",
+            "answer",
+            "error",
+        ]
+        if c in answers.columns
+    ]
     scored = answers.join(key_out, on="qid").with_columns(
         outcome=pl.struct(pl.all()).map_elements(outcome, return_dtype=pl.String)
     )
     scored.select(
-        "condition", "repeat", "qid", "family", "outcome", "key_geoid", "key_rating",
-        "key_count", "key_count_by_code", *_cols, "seconds", "cost_usd",
-    ).write_csv(OUT / "scored.csv")  # fmt: skip
+        "condition",
+        "repeat",
+        "qid",
+        "family",
+        "outcome",
+        "key_geoid",
+        "key_rating",
+        "key_count",
+        "key_count_by_code",
+        *_cols,
+        "seconds",
+        "cost_usd",
+    ).write_csv(OUT / "scored.csv")
     return (scored,)
 
 
@@ -1012,8 +1206,11 @@ def _(mo):
 def _(pl, scored):
     per_question = (
         scored.sort("repeat")
-        .with_columns(letter=pl.col("outcome").replace_strict(
-            {"correct": "C", "no match": "N", "wrong match": "W"}))
+        .with_columns(
+            letter=pl.col("outcome").replace_strict(
+                {"correct": "C", "no match": "N", "wrong match": "W"}
+            )
+        )
         .group_by("qid", "condition")
         .agg(pl.col("letter").str.join(""), pl.col("join_method").unique().sort().str.join("/"))
         .pivot(on="condition", index="qid", values=["letter", "join_method"])
@@ -1034,20 +1231,33 @@ def _(mo):
 @app.cell
 def _(pl, scored):
     scored.filter(pl.col("outcome") == "wrong match").select(
-        "condition", "repeat", "qid", "key_geoid", "key_rating", "key_count", "county_fips",
-        "risk_rating", "count", "join_method", "codes_used",
-    ).sort("qid", "condition")  # fmt: skip
+        "condition",
+        "repeat",
+        "qid",
+        "key_geoid",
+        "key_rating",
+        "key_count",
+        "county_fips",
+        "risk_rating",
+        "count",
+        "join_method",
+        "codes_used",
+    ).sort("qid", "condition")
     return
 
 
 @app.cell
 def _(MODEL, OUT, by_condition, inventory_numbers, json, pl, scored):
-    _cost = scored.group_by("condition").agg(
-        usd=pl.col("cost_usd").sum(),
-        usd_per_answer=pl.col("cost_usd").mean(),
-        median_s=pl.col("seconds").median(),
-        tool_calls=pl.col("tool_calls").mean(),
-    ).sort("condition")
+    _cost = (
+        scored.group_by("condition")
+        .agg(
+            usd=pl.col("cost_usd").sum(),
+            usd_per_answer=pl.col("cost_usd").mean(),
+            median_s=pl.col("seconds").median(),
+            tool_calls=pl.col("tool_calls").mean(),
+        )
+        .sort("condition")
+    )
     summary = {
         "inventory": inventory_numbers,
         "model": MODEL,
