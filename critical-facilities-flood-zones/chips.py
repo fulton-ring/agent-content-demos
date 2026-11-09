@@ -19,6 +19,7 @@ IMAGERY = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/Ma
 NFHL = "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/export"
 HALF_SIDE_M = 300
 SIZE = 800
+EARTH_R = 6_378_137
 
 
 def export(url: str, params: dict, attempts: int = 5) -> Image.Image:
@@ -29,6 +30,7 @@ def export(url: str, params: dict, attempts: int = 5) -> Image.Image:
             response.raise_for_status()
             if response.headers.get("content-type", "").startswith("image/"):
                 return Image.open(io.BytesIO(response.content)).convert("RGBA")
+            print(f"{url} attempt {attempt + 1}: {response.headers.get('content-type')}")
         except requests.RequestException as error:
             print(f"{url} attempt {attempt + 1}: {error}")
         time.sleep(2**attempt)
@@ -37,12 +39,14 @@ def export(url: str, params: dict, attempts: int = 5) -> Image.Image:
 
 def chip(lon: float, lat: float) -> Image.Image:
     """Imagery with the NFHL flood zones (layer 28) at 45% opacity and a ring on the point."""
-    dlat = HALF_SIDE_M / 111_320
-    dlon = dlat / math.cos(math.radians(lat))
+    # Web Mercator, so pixels are square and the point is the centre of both images.
+    x = math.radians(lon) * EARTH_R
+    y = math.log(math.tan(math.pi / 4 + math.radians(lat) / 2)) * EARTH_R
+    half = HALF_SIDE_M / math.cos(math.radians(lat))  # Mercator metres per ground metre
     common = {
-        "bbox": f"{lon - dlon},{lat - dlat},{lon + dlon},{lat + dlat}",
-        "bboxSR": "4326",
-        "imageSR": "4326",
+        "bbox": f"{x - half},{y - half},{x + half},{y + half}",
+        "bboxSR": "3857",
+        "imageSR": "3857",
         "size": f"{SIZE},{SIZE}",
         "f": "image",
     }
@@ -66,10 +70,12 @@ def main() -> None:
     out.mkdir(parents=True, exist_ok=True)
     sample = pd.read_csv(results / "spot_check_sample.csv")
     assert {"facility_id", "lon", "lat"} <= set(sample.columns)
-    for row in sample.itertuples():
-        path = out / f"{row.facility_id}.jpg"
+    for facility_id, lon, lat in zip(
+        sample.facility_id.astype(str), sample.lon.tolist(), sample.lat.tolist(), strict=True
+    ):
+        path = out / f"{facility_id}.jpg"
         if not path.exists():
-            chip(float(row.lon), float(row.lat)).save(path, quality=85)
+            chip(lon, lat).save(path, quality=85)
     print(f"{len(sample)} chips in {out} (600 m across, point at the centre)")
 
 

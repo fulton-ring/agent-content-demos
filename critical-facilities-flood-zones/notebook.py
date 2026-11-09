@@ -373,9 +373,9 @@ def _(facilities, nfhl_raw, pd):
             }
         )
     nfhl = pd.DataFrame(_rows)
-    nfhl["panel_effective"] = pd.to_datetime(
-        nfhl.panel_effective, format="%m/%d/%Y", errors="coerce"
-    )
+    _eff = pd.to_datetime(nfhl.panel_effective, format="%m/%d/%Y", errors="coerce")
+    # Some panels carry a placeholder date (12/31/9999); a date in the future is no date.
+    nfhl["panel_effective"] = _eff.where(_eff <= pd.Timestamp.now())
     nfhl["flood_class"] = pd.Categorical(nfhl.flood_class, categories=_order, ordered=True)
     flooded = facilities.merge(nfhl, on="facility_id", how="left", validate="one_to_one")
     assert flooded.flood_class.notna().all(), "every facility must get a flood class"
@@ -716,7 +716,7 @@ def _(hospitals, nri, pd, ranked):
                 "FEMA NFHL",
                 "live service, queried this run",
                 f"FIRM panel effective dates: median {int(_p.dt.year.median())}, "
-                f"{(_p.dt.year < 2000).mean():.0%} before 2000, "
+                f"{(_p.dt.year < 2000).mean():.1%} before 2000, "
                 f"{(_p.dt.year >= 2020).mean():.0%} 2020 or later",
             ],
             [
@@ -772,7 +772,7 @@ def _(here, pd, ranked, results):
     ]
     spot_sample = pd.concat(
         [g.sample(min(25, len(g)), random_state=193) for _, g in _pool.groupby("facility_type")]
-    )[["facility_id", "facility_type", "name", "city", "state", "fld_zone"]].assign(
+    )[["facility_id", "facility_type", "source", "name", "city", "state", "fld_zone"]].assign(
         lon=lambda t: ranked.loc[t.index].geometry.x.round(6),
         lat=lambda t: ranked.loc[t.index].geometry.y.round(6),
     )
