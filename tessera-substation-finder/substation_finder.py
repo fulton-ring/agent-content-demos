@@ -689,7 +689,7 @@ def _(mo):
 
     Recall on patches centred on known substations says nothing about how often the models
     fire on ordinary land. So we read whole 0.1° tiles (about 100 km² each) drawn at random
-    from the held-out blocks, 12 per state, and scan every 320 m window with the CNN (every
+    from the held-out blocks, 24 per state, and scan every 320 m window with the CNN (every
     4 pixels) and every pixel with the probe. Neighbouring windows above the threshold are
     joined into one detection. A detection is **correct** if an OSM substation lies within
     300 m of it, and an OSM substation in the tile is **found** if a detection lies within
@@ -711,7 +711,7 @@ def _(Point, SEED, block_of, np, states, test_blocks, tiles):
         ]
         _k = _k[np.isin(block_of(_k[:, 0], _k[:, 1]), list(test_blocks))]
         _k = np.array([k for k in _k if _shape.contains(Point(*k))])
-        _pick = _k[_rng.choice(len(_k), size=12, replace=False)]
+        _pick = _k[_rng.choice(len(_k), size=24, replace=False)]
         _cand += [(_region, (round(float(a), 2), round(float(b), 2))) for a, b in _pick]
     scan_tiles = _cand
     print(f"{len(scan_tiles)} held-out tiles to scan")
@@ -749,17 +749,18 @@ def _(DATA_DIR, YEAR, cnn_map, np, probe_map, read_tile, scan_tiles, tiles, time
     _t = time.time()
     scan_maps = {}
     for _region, _key in scan_tiles:
-        _cache = DATA_DIR / f"scan_{YEAR}_{_key[0]}_{_key[1]}.npz"
+        # The raw tile is cached, not the scores, so a rerun always scores with this run's models.
+        _cache = DATA_DIR / "tiles" / f"{YEAR}_{_key[0]}_{_key[1]}.npz"
         if not _cache.exists():
+            _cache.parent.mkdir(exist_ok=True)
             _c, _s = read_tile(_key)
-            np.savez_compressed(
-                _cache, cnn=cnn_map(_c, _s), probe=probe_map(_c, _s).astype(np.float16)
-            )
+            np.savez(_cache, codes=_c, scales=_s)
         _z = np.load(_cache)
+        _c, _s = _z["codes"], _z["scales"]
         scan_maps[_key] = {
             "region": _region,
-            "cnn": _z["cnn"],
-            "probe": _z["probe"].astype(np.float32),
+            "cnn": cnn_map(_c, _s),
+            "probe": probe_map(_c, _s),
             "transform": tiles.loc[[_key]].iloc[0]["transform"],
         }
     timings["scan"] = time.time() - _t
@@ -917,28 +918,25 @@ def _(ALBERS, DATA_DIR, downloaded, fetch, gpd, np, osm, states):
 
 
 @app.cell
-def _(DATA_DIR, STRIDE, YEAR, cnn_map, far_ends, np, read_patches, time, timings):
+def _(Affine, DATA_DIR, STRIDE, YEAR, cnn_map, far_ends, np, read_patches, time, timings):
     _t = time.time()
-    _cache = DATA_DIR / f"line_ends_{YEAR}.npy"
+    # The raw 64 x 64 windows are cached, not the scores, as for the scan tiles.
+    _cache = DATA_DIR / f"line_end_windows_{YEAR}.npz"
     if not _cache.exists():
         _ll = far_ends.to_crs(4326)
-        _pts = list(zip(_ll.geometry.x, _ll.geometry.y, strict=True))
-        _out = []
-        for _b in range(0, len(_pts), 200):  # batches keep memory bounded
-            _c, _s, _tf = read_patches(_pts[_b : _b + 200], size=64)
-            for _i in range(len(_c)):
-                _m = cnn_map(_c[_i], np.where(np.isfinite(_s[_i]), _s[_i], 0).astype(np.float32))
-                _r, _q = np.unravel_index(int(_m.argmax()), _m.shape)
-                _a = _tf[_i]
-                _out.append(
-                    (
-                        _m.max(),
-                        _a.c + (_q * STRIDE + 16.5) * _a.a,
-                        _a.f + (_r * STRIDE + 16.5) * _a.e,
-                    )
-                )
-        np.save(_cache, np.array(_out))
-    _best = np.load(_cache)
+        _c, _s, _tf = read_patches(list(zip(_ll.geometry.x, _ll.geometry.y, strict=True)), size=64)
+        np.savez(_cache, codes=_c, scales=_s, transforms=np.array([a[:6] for a in _tf]))
+    _z = np.load(_cache)
+    _out = []
+    for _i in range(len(_z["codes"])):
+        _sc = _z["scales"][_i]
+        _m = cnn_map(_z["codes"][_i], np.where(np.isfinite(_sc), _sc, 0).astype(np.float32))
+        _r, _q = np.unravel_index(int(_m.argmax()), _m.shape)
+        _a = Affine(*_z["transforms"][_i])
+        _out.append(
+            (_m.max(), _a.c + (_q * STRIDE + 16.5) * _a.a, _a.f + (_r * STRIDE + 16.5) * _a.e)
+        )
+    _best = np.array(_out)
     far_ends["cnn"], far_ends["peak_lon"], far_ends["peak_lat"] = (
         _best[:, 0],
         _best[:, 1],
