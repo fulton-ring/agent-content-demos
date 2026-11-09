@@ -101,7 +101,7 @@ def _(mo, os):
     MODEL = os.environ.get("AGENT_MODEL", "anthropic/claude-haiku-5.5")
     REPEATS = int(os.environ.get("AGENT_REPEATS", "2"))
     BUDGET_USD = float(os.environ.get("AGENT_BUDGET_USD", "4.0"))
-    # RESCORE=1 scores the committed runs in outputs/runs.jsonl without calling any model.
+    # RESCORE=1 scores the committed runs in outputs/runs_*.jsonl without calling any model.
     RESCORE = os.environ.get("RESCORE", "") == "1"
     HERE = mo.notebook_dir()
     OUT = HERE / "outputs"
@@ -308,7 +308,7 @@ def _(mo):
     ## 4. Run every question through its server
 
     Four questions run at a time per server. Each run's full transcript is saved to
-    `outputs/transcripts/` and its usage to `outputs/runs.jsonl`, so the scoring below can be
+    `outputs/transcripts/` and its usage to `outputs/runs_*.jsonl`, so the scoring below can be
     rerun or changed without paying for model calls (`RESCORE=1 ./run.sh`).
     """)
     return
@@ -330,7 +330,7 @@ async def _(
 ):
     spend = {"usd": 0.0}
     if RESCORE:
-        runs = pl.read_ndjson(OUT / "runs.jsonl").filter(pl.col("variant") == "shipped")
+        runs = pl.read_ndjson(OUT / "runs_shipped.jsonl")
     else:
         _rows = []
         for _name, _server in SERVERS.items():
@@ -349,6 +349,7 @@ async def _(
                         )
                     )
         runs = pl.DataFrame(_rows, infer_schema_length=None)
+        runs.write_ndjson(OUT / "runs_shipped.jsonl")
     print(f"{runs.height} runs, ${spend['usd']:.4f} spent in this section")
     return runs, spend
 
@@ -387,7 +388,7 @@ async def _(SERVERS, httpx, pl, questions, runs, urlparse):
             try:
                 async with _http.stream("GET", _url) as _resp:
                     _status[_url] = _resp.status_code
-            except httpx.HTTPError:
+            except (httpx.HTTPError, httpx.InvalidURL):
                 _status[_url] = 0
 
     def is_checkable(row: dict) -> bool:
@@ -572,7 +573,7 @@ async def _(
         return "ui" not in ((tool.metadata or {}).get("meta") or {})
 
     if RESCORE:
-        changed_runs = pl.read_ndjson(OUT / "runs.jsonl").filter(pl.col("variant") != "shipped")
+        changed_runs = pl.read_ndjson(OUT / "runs_no_map_tools.jsonl")
     else:
         _toolset = MCPToolset(
             SERVERS["HIFLD Next"]["url"], max_retries=3, include_instructions=True
@@ -590,6 +591,7 @@ async def _(
                     )
                 )
         changed_runs = pl.DataFrame(_rows, infer_schema_length=None)
+        changed_runs.write_ndjson(OUT / "runs_no_map_tools.jsonl")
     print(f"{changed_runs.height} runs, ${spend['usd']:.4f} spent so far")
     return (changed_runs,)
 
@@ -609,10 +611,6 @@ def _(
     scored,
     summarize,
 ):
-    if not RESCORE:
-        with (OUT / "runs.jsonl").open("w") as _f:
-            for _r in pl.concat([runs, changed_runs], how="diagonal_relaxed").iter_rows(named=True):
-                _f.write(json.dumps(_r) + "\n")
     _key = questions.select(
         "server", "qid", "kind", "tolerance", "accept", pl.col("answer").alias("answer_key")
     )
