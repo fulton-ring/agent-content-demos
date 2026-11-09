@@ -83,8 +83,8 @@ not in its data release: its own archived Monte Carlo (a) is higher, so the pape
 | 250-year daily loss | 1.84 B USD | 2.57 B USD | +0.73 B |
 
 **Where it moves** (100-year storm): New York +2.08 M; all other states together −0.75 M. Counties: Nassau NY
-+1.02 M, Westchester NY +0.57 M, Western Connecticut −0.54 M, Passaic NJ −0.31 M, Dutchess NY +0.16 M, Kings NY
-+0.14 M. Washington 0 → 35,000. See `outputs/state_changes.csv` and the chart below.
++1.02 M, Westchester NY +0.57 M, Western Connecticut −0.54 M, Passaic NJ −0.31 M, Dutchess NY +0.16 M, Middlesex MA
++0.06 M (counties blanked in `county_changes.csv` left out). Washington 0 → 35,000. See `outputs/state_changes.csv` and the chart below.
 
 ![States whose 100-year exposure moves most](outputs/state_change.png)
 

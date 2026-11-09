@@ -884,7 +884,9 @@ def _(OUT, county, mo, np, pd, state):
     _vals = [c for c in county.columns if c not in ("state", "county")]
     published.loc[_few, _vals] = np.nan
     published.insert(2, "few_substations", _few)
-    published[_vals] = published[_vals].round(-2)
+    _people_cols = [c for c in _vals if not c.startswith("subs_")]
+    published[_people_cols] = published[_people_cols].round(-2)
+    published = published.astype({"subs_before": "Int64", "subs_after": "Int64"})
     published.to_csv(OUT / "county_changes.csv", index_label="fips")
     _people = [c for c in state.columns if not c.startswith("subs_")]
     state.assign(**{c: state[c].round(-2) for c in _people}).astype({"subs_before": int, "subs_after": int}).to_csv(
@@ -971,7 +973,7 @@ def _(
     time,
     totals,
     state,
-    county,
+    published,
     ours,
 ):
     _net = {
@@ -996,9 +998,9 @@ def _(
             f"{_p}-year change: {_change:,.0f} people; New York {_ny:+,.0f} ({_ny / _change:.0%} of it); "
             f"all other states together {_change - _ny:+,.0f}"
         )
-    _c = county.sort_values("change_100", key=np.abs, ascending=False)
+    _c = published[~published["few_substations"]].sort_values("change_100", key=np.abs, ascending=False)
     _lines.append(
-        "Counties that move most (100-year): "
+        "Counties that move most (100-year, blanked counties left out): "
         + "; ".join(f"{r.county}, {r.state} {r.change_100:+,.0f}" for r in _c.head(6).itertuples())
     )
     _lines.append(
