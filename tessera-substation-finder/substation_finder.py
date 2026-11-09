@@ -1222,5 +1222,60 @@ def _(
     return
 
 
+@app.cell
+def _(hand, line_end_table, mo, recall_table, scan_table):
+    _cnn = recall_table[(recall_table["model"] == "cnn") & (recall_table["region"] == "both")].iloc[
+        0
+    ]
+    _probe = recall_table[
+        (recall_table["model"] == "probe") & (recall_table["region"] == "both")
+    ].iloc[0]
+    _scan = scan_table[scan_table["model"] == "cnn"].iloc[0]
+    _le = hand[hand["set"] == "line end"]["verdict"].value_counts()
+    _fp = hand[hand["set"] == "scan detection"]["verdict"].value_counts()
+    _flagged = int(line_end_table.iloc[-1]["flagged"])
+    _places = int(line_end_table.iloc[-1]["places"])
+    mo.md(f"""
+    ## 11. What this shows, and what didn't work
+
+    **The embeddings know what a substation looks like, but not well enough to search for
+    new ones.** On patches centred on held-out OSM substations the CNN finds
+    {_cnn["recall all"]:.0%} of them ({_cnn["recall 230 kV+"]:.0%} of 230 kV+ and
+    {_cnn["recall 100-229 kV"]:.0%} of 100–229 kV, {_cnn["recall under 100 kV"]:.0%} under
+    100 kV) while passing about 1 in 100 random patches. The single-pixel probe finds
+    {_probe["recall all"]:.0%}: shape and context matter more than the colour of the gravel.
+
+    **Scanning land is where it breaks.** Over 48 held-out tiles only
+    {_scan["precision"]:.0%} of the CNN's {int(_scan["detections"])} detections are near an
+    OSM substation, and of 20 "wrong" ones checked on photos, {_fp.get("substation", 0)} were
+    substations OSM had missed. They were houses, farms, quarries, schools and factories:
+    the CNN learned "developed land with hard surfaces", because random negatives are mostly
+    forest and fields. One 1-in-100 false alarm per 320 m patch is about ten per 100 km².
+
+    **Line ends.** Of {_places} places where a HIFLD Next line ends more than 1 km from an
+    OSM substation, the CNN flags {_flagged}. Of the 20 highest-scoring places,
+    {_le.get("substation", 0)} was an unmapped switchyard, {_le.get("plant", 0)} were hydro
+    dams, {_le.get("unclear", 0)} unclear and {_le.get("other", 0)} something else (mostly
+    commercial and industrial land). Most far ends are taps on another line, as
+    `hifld-grid-gaps/` found, so there is usually nothing to find.
+
+    **What didn't work, or wasn't tried:**
+
+    - Precision. Random negatives are too easy; the model needs hard negatives (industrial
+      parks, quarries, parking lots, farmsteads) before a scan is worth a reviewer's time.
+    - Per-voltage precision. A detection has no voltage, so precision is overall only;
+      recall is per class.
+    - Small samples where it matters: the held-out set has only {int(_cnn["n 230 kV+"])}
+      substations of 230 kV+, and the scanned tiles hold {int(_scan["n all"])} OSM
+      substations, {int(_scan["n 230 kV+"])} of them 230 kV+.
+    - Column-window reads. A window needs one HTTP request per row, about 200 requests a
+      second through our connection, so we read whole rows instead and fetch 20 to 30 times
+      the bytes we keep.
+    - TESSERA v2: its beta store on Source Cooperative covers only part of both states, so
+      this uses v1 (2024).
+    """)
+    return
+
+
 if __name__ == "__main__":
     app.run()
