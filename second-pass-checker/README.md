@@ -75,7 +75,8 @@ answer "not in source".
 missed. On these errors that's no measurable difference.
 
 **Cost and time per claim.** Passage checkers $0.003 and 3–4 s. Full source $0.012 and 2.4 s. The whole run cost
-$2.12 of the $5 budget.
+$2.12 of the $5 budget. The times are wall-clock with 8 calls running at once, so they reflect provider load more than the
+checker; don't compare them across checkers.
 
 ## What it shows
 
