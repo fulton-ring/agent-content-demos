@@ -1,0 +1,71 @@
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+Using CPython 3.11.18 interpreter at: /usr/local/bin/python3
+Creating virtual environment at: .venv
+Installed 99 packages in 80ms
+Machine: Linux x86_64, 4 CPUs
+             layer         layout  write_seconds  row_groups    MB
+         hospitals      published       0.000000           1   1.1
+         hospitals        hilbert       0.063733           1   0.8
+         hospitals hilbert_native       0.052794           1   0.8
+         hospitals   hilbert_bbox       1.465791           1   1.1
+transmission_lines      published       0.000000           1  44.5
+transmission_lines        hilbert       0.629901          10  41.9
+transmission_lines hilbert_native       0.505786          10  41.9
+transmission_lines   hilbert_bbox       6.273167          10  44.4
+epa_frs_facilities      published       0.000000          64 439.0
+epa_frs_facilities        hilbert      15.587433         619 359.9
+epa_frs_facilities hilbert_native      12.592551         619 359.9
+epa_frs_facilities   hilbert_bbox     139.285772         634 474.5
+          counties      published       0.000000           1  43.9
+          counties        hilbert       1.398718           2  70.0
+          counties hilbert_native       1.388716           2  70.0
+          counties   hilbert_bbox      20.191816          33  48.0
+Uploaded 16 files to s3://hifld at localhost:8333
+        layout              query form  facilities   ms  MB fetched row groups read duckdb_version
+     published  spatial predicate only       73663  959        48.2        64 of 64          2.0.0
+     published plus bbox column filter       73663   65        12.3         7 of 64          2.0.0
+       hilbert  spatial predicate only       73663 1093        65.7      619 of 619          2.0.0
+  hilbert_bbox  spatial predicate only       73663 1113        66.6      634 of 634          2.0.0
+  hilbert_bbox plus bbox column filter       73663  190        21.5       19 of 634          2.0.0
+hilbert_native  spatial predicate only       73663  154        22.4       19 of 619          2.0.0
+             layer    rows  load_and_index_seconds  table_and_index_MB
+         hospitals    8340                     0.1                 2.1
+transmission_lines   94619                     4.3               211.3
+epa_frs_facilities 6335511                    35.6              1489.5
+          counties    3235                    17.2               325.3
+20 locations in 15 states
+195 PostGIS queries
+done hospitals published spatial only
+done hospitals published bbox filter
+done hospitals hilbert spatial only
+done hospitals hilbert_bbox spatial only
+done hospitals hilbert_bbox bbox filter
+done hospitals hilbert_native spatial only
+done transmission_lines published spatial only
+done transmission_lines published bbox filter
+done transmission_lines hilbert spatial only
+done transmission_lines hilbert_bbox spatial only
+done transmission_lines hilbert_bbox bbox filter
+done transmission_lines hilbert_native spatial only
+done epa_frs_facilities published spatial only
+done epa_frs_facilities published bbox filter
+done epa_frs_facilities hilbert spatial only
+done epa_frs_facilities hilbert_bbox spatial only
+done epa_frs_facilities hilbert_bbox bbox filter
+done epa_frs_facilities hilbert_native spatial only
+120 queries against the public bucket
+0 of 1485 DuckDB answers differ from PostGIS
+PostGIS on an e2-medium: $40/month, so per 1,000 queries: {'10,000 queries a month': 4.037, '100,000 queries a month': 0.404, '1,000,000 queries a month': 0.04}
+             layer           query  postgis_ms  published_plain_ms  best_duckdb_ms               best_variant  best_MB_fetched  best_vs_postgis  published_vs_best
+         hospitals    bounding box        0.51               23.08           16.56 hilbert_bbox, spatial only             1.08             32.0                1.4
+         hospitals point in county        1.35               24.73           19.43 hilbert_bbox, spatial only             1.08             14.0                1.3
+         hospitals       nearest 5        0.66               28.57           19.84 hilbert_bbox, spatial only             1.08             30.0                1.4
+         hospitals     county join        5.45              262.21           54.71  hilbert_bbox, bbox filter             8.16             10.0                4.8
+transmission_lines    bounding box        0.75              308.15           29.76  hilbert_bbox, bbox filter             8.16             40.0               10.4
+transmission_lines point in county        2.27              305.50           39.82  hilbert_bbox, bbox filter             9.62             18.0                7.7
+transmission_lines       nearest 5        0.60              310.09           31.61  hilbert_bbox, bbox filter             9.53             53.0                9.8
+transmission_lines     county join       54.05              645.29          128.04  hilbert_bbox, bbox filter            18.14              2.0                5.0
+epa_frs_facilities    bounding box        7.56              970.92           64.27     published, bbox filter            10.65              9.0               15.1
+epa_frs_facilities point in county       32.81              995.83           82.66     published, bbox filter            12.57              3.0               12.0
+epa_frs_facilities       nearest 5        0.61             1004.00           68.94     published, bbox filter            12.18            113.0               14.6
+epa_frs_facilities     county join      217.32             2858.48         1190.26  hilbert_bbox, bbox filter            33.43              5.0                2.4
