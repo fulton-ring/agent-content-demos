@@ -356,11 +356,15 @@ def _(facilities, nfhl_raw, pd):
             for d, z, s, t in _r["28"]
         ]
         if _zones:
-            _cls, _dfirm, _zone = min(_zones, key=lambda x: _order.index(x[0]))
+            # Ties (two studies' polygons of the same class overlap) go to the later DFIRM ID,
+            # so the result doesn't depend on the order the service returns them in.
+            _cls, _dfirm, _zone = min(
+                _zones, key=lambda x: (_order.index(x[0]), "~" if x[1] is None else x[1])
+            )
         else:
             _cls = "study area, no zone" if _r["0"] else "no NFHL"
             _dfirm, _zone = (_r["0"][0][0] if _r["0"] else None), None
-        _panels = [p for p in _r["3"] if p[0] == _dfirm] or _r["3"]
+        _panels = sorted([p for p in _r["3"] if p[0] == _dfirm] or _r["3"], key=str)
         _rows.append(
             {
                 "facility_id": _r["facility_id"],

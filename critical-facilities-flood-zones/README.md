@@ -8,7 +8,7 @@ every substation in our `us-substations-verified/` dataset to FEMA's National Fl
 [#193](https://github.com/fulton-ring/agent-content-demos/issues/193),
 [proposal card](https://app.notion.com/p/3fccc69045cb811eb27dcfe567e2e87e).
 
-**Short answer: it works nationally, in about 30 minutes, for free.** The answer has three parts:
+**Short answer: it works nationally, in 30 to 45 minutes, for free.** The answer has three parts:
 a flood zone where FEMA has mapped one, an "unknown" for about one facility in ten, and a tract
 risk score that says little about the building.
 
@@ -35,8 +35,8 @@ risk score that says little about the building.
 ./run.sh --chips    # also draws the 50 spot-check images (not committed: the imagery is Esri's)
 ```
 
-Needs [uv](https://docs.astral.sh/uv/). From an empty cache it takes **31 minutes** (2026-11-09),
-nearly all of it 79,591 calls to FEMA's NFHL service at about 40 a second. Answers are cached in
+Needs [uv](https://docs.astral.sh/uv/). From an empty cache it took **31 and 42 minutes** on two runs
+(2026-11-09), nearly all of it 79,591 calls to FEMA's NFHL service at 30 to 45 a second. Answers are cached in
 `~/.cache/critical-facilities-flood-zones` (or set `CFF_CACHE`), so a rerun takes under a minute.
 A rerun after a dropped connection only asks for what's missing. To read the notebook with its
 outputs: `uv run marimo edit notebook.py`. Cost: $0.
