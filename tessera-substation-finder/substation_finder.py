@@ -1057,8 +1057,12 @@ def _(ALBERS, DATA_DIR, Path, gpd, httpx, lines, np, osm, plt):
                 d.close()
         fig, ax = plt.subplots(figsize=(6, 6))
         ax.imshow(np.moveaxis(img, 0, -1), extent=(ext[0], ext[2], ext[1], ext[3]))
-        lines.cx[ext[0] : ext[2], ext[1] : ext[3]].plot(ax=ax, color="yellow", lw=1)
-        osm.cx[ext[0] : ext[2], ext[1] : ext[3]].boundary.plot(ax=ax, color="cyan", lw=1.5)
+        near_lines = lines.cx[ext[0] : ext[2], ext[1] : ext[3]]
+        near_osm = osm.cx[ext[0] : ext[2], ext[1] : ext[3]]
+        if len(near_lines):
+            near_lines.plot(ax=ax, color="yellow", lw=1)
+        if len(near_osm):
+            near_osm.boundary.plot(ax=ax, color="cyan", lw=1.5)
         ax.add_patch(plt.Rectangle((c.x - 160, c.y - 160), 320, 320, fill=False, ec="red", lw=1.5))
         if mark is not None:
             m = gpd.GeoSeries.from_xy([mark[0]], [mark[1]], crs=4326).to_crs(ALBERS).iloc[0]
@@ -1075,8 +1079,18 @@ def _(ALBERS, DATA_DIR, Path, gpd, httpx, lines, np, osm, plt):
 
 
 @app.cell
-def _(CHIP_DIR, MATCH_M, SEED, draw_chip, far_ends, pd, place_id, scan_det):
-    _top = far_ends.sort_values("cnn", ascending=False).head(20).copy()
+def _(ALBERS, CHIP_DIR, MATCH_M, SEED, draw_chip, far_ends, gpd, pd, place_id, scan_det):
+    # The 20 best peaks at least 500 m apart: nearby ends often share one peak.
+    _peaks = gpd.GeoSeries.from_xy(far_ends["peak_lon"], far_ends["peak_lat"], crs=4326).to_crs(
+        ALBERS
+    )
+    _keep: list[int] = []
+    for _i in far_ends["cnn"].sort_values(ascending=False).index:
+        if all(_peaks[_i].distance(_peaks[_j]) >= 500 for _j in _keep):
+            _keep.append(_i)
+        if len(_keep) == 20:
+            break
+    _top = far_ends.loc[_keep].copy()
     _top["set"] = "line end"
     _ll = _top.to_crs(4326).geometry
     _top["mark"] = list(zip(_ll.x, _ll.y, strict=True))
@@ -1145,6 +1159,12 @@ def _(
     osm_counts,
     overture_release,
     range_bytes,
+    READ,
+    far_ends,
+    samples,
+    scan_tiles,
+    tile_key,
+    tiles,
     recall_by_area,
     recall_table,
     run_start,
@@ -1155,7 +1175,23 @@ def _(
 ):
     timings["total"] = time.time() - run_start
     _disk = sum(f.stat().st_size for f in DATA_DIR.rglob("*") if f.is_file())
+
+    # What a run from an empty data/ fetches from TESSERA: every read takes whole rows of 128
+    # code bytes and 4 scale bytes a pixel (40 rows a patch, 64 a line end, all of a scan tile).
+    def _w(lo: float, la: float) -> int:
+        return int(tiles.loc[[tile_key(lo, la)]].iloc[0]["width"])
+
+    _ends = far_ends.to_crs(4326).geometry
+    _fresh = 132 * (
+        sum(READ * _w(lo, la) for lo, la in zip(samples["lon"], samples["lat"], strict=True))
+        + sum(64 * _w(p.x, p.y) for p in _ends)
+        + sum(
+            int(tiles.loc[[k]].iloc[0]["height"]) * int(tiles.loc[[k]].iloc[0]["width"])
+            for _r, k in scan_tiles
+        )
+    )
     cost = {
+        "tessera_GB_fetched_from_empty_data_dir": round(_fresh / 1e9, 1),
         "tessera_range_read_GB_this_run": round(range_bytes[0] / 1e9, 2),
         "other_downloads_MB_this_run": round(sum(downloaded.values()) / 1e6, 1),
         "data_dir_GB": round(_disk / 1e9, 2),
