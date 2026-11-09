@@ -403,7 +403,8 @@ def _(Affine, DATA_DIR, READ, YEAR, np, read_patches, samples, time, timings):
     scales = np.where(np.isfinite(scales), scales, 0).astype(np.float32)
     timings["read_patches"] = time.time() - _t
     print(
-        f"{len(codes):,} patches, {codes.nbytes / 1e9:.1f} GB of codes, {timings['read_patches']:.0f} s"
+        f"{len(codes):,} patches, {codes.nbytes / 1e9:.1f} GB of codes, "
+        f"{timings['read_patches']:.0f} s"
     )
     return codes, patch_transforms, scales
 
@@ -462,7 +463,8 @@ def _(ALBERS, READ, SEED, codes, np, osm, patch_transforms, rasterize, samples, 
 
     probe_x, probe_y = pixels(np.flatnonzero(samples["split"].to_numpy() == "train"))
     print(
-        f"Probe training pixels: {int(probe_y.sum()):,} substation, {int((probe_y == 0).sum()):,} other"
+        f"Probe training pixels: {int(probe_y.sum()):,} substation, "
+        f"{int((probe_y == 0).sum()):,} other"
     )
     assert ALBERS
     return inside, probe_x, probe_y
@@ -732,7 +734,7 @@ def _(ThreadPoolExecutor, band_mean, band_std, cnn, np, probe_map, read_rows, ti
     STRIDE = 4
 
     def cnn_map(c: np.ndarray, s: np.ndarray) -> np.ndarray:
-        """CNN score of every 32 x 32 window at a 4-pixel stride; window (i, j) starts at (4i, 4j)."""
+        """CNN score of every 32 x 32 window at a 4-pixel stride, window (i, j) at (4i, 4j)."""
         with torch.no_grad():
             x = torch.from_numpy(c).float() * torch.from_numpy(s).unsqueeze(-1)
             x = (x.permute(2, 0, 1).unsqueeze(0) - band_mean) / band_std
@@ -794,7 +796,7 @@ def _(ALBERS, STRIDE, gpd, ndimage, np, osm, pd, scan_maps):
             d, geometry=gpd.points_from_xy(d["lon"], d["lat"]), crs=4326
         ).to_crs(ALBERS)
 
-    # OSM substations whose centre is in a scanned tile, more than 160 m (half a window) from its edge.
+    # OSM substations centred in a scanned tile, more than 160 m (half a window) from its edge.
     _c = osm.geometry.representative_point().to_crs(4326)
     _in = np.zeros(len(osm), bool)
     for _key in scan_maps:
@@ -907,7 +909,8 @@ def _(ALBERS, DATA_DIR, downloaded, fetch, gpd, np, osm, states):
     )
     print(
         f"HIFLD Next lines in the two states: {len(_lines):,}; ends: {len(ends):,}; "
-        f"more than 1 km from OSM: {len(far_ends):,} places ({int(far_ends['tap'].sum()):,} touch another line)"
+        f"more than 1 km from OSM: {len(far_ends):,} places "
+        f"({int(far_ends['tap'].sum()):,} touch another line)"
     )
     lines = _lines
     return ends, far_ends, lines
