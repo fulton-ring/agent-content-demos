@@ -369,7 +369,17 @@ def _(mo):
 
 
 @app.cell
-async def _(SERVERS, httpx, pl, questions, runs, urlparse):
+def _(
+    ModelMessagesTypeAdapter,
+    ModelRequest,
+    OUT,
+    SERVERS,
+    ToolReturnPart,
+    httpx,
+    pl,
+    questions,
+    urlparse,
+):
     def is_correct(row: dict) -> bool:
         if row["error"]:
             return False
@@ -381,38 +391,71 @@ async def _(SERVERS, httpx, pl, questions, runs, urlparse):
         said = f"{row['answer']} {row['value']}".lower()
         return any(term.strip() and term.strip() in said for term in row["accept"].split("|"))
 
-    _urls = {u for u in runs["source_url"].drop_nulls().to_list() if u.startswith("http")}
-    _status: dict[str, int] = {}
-    async with httpx.AsyncClient(follow_redirects=True, timeout=30) as _http:
-        for _url in sorted(_urls):
-            try:
-                async with _http.stream("GET", _url) as _resp:
-                    _status[_url] = _resp.status_code
-            except (httpx.HTTPError, httpx.InvalidURL):
-                _status[_url] = 0
+    def cited_url(row: dict) -> str:
+        # Agents sometimes put a note after the link; the link is the first token.
+        first = (row["source_url"] or "").split(" ")[0]
+        return first if first.startswith("http") else ""
 
-    def is_checkable(row: dict) -> bool:
-        url = row["source_url"] or ""
-        parsed = urlparse(url)
-        domains = SERVERS[row["server"]]["domains"]
-        on_domain = any((parsed.hostname or "").endswith(d) for d in domains)
-        deep = parsed.path.strip("/") != "" or parsed.query != ""
-        return on_domain and deep and 0 < _status.get(url, 0) < 400
+    def tool_text(transcript: str) -> str:
+        messages = ModelMessagesTypeAdapter.validate_json(
+            (OUT / "transcripts" / transcript).read_bytes()
+        )
+        return " ".join(
+            part.model_response_str()
+            for m in messages
+            if isinstance(m, ModelRequest)
+            for part in m.parts
+            if isinstance(part, ToolReturnPart)
+        )
 
-    _key = questions.select(
-        "server", "qid", "kind", "tolerance", "accept", pl.col("answer").alias("answer_key")
-    )
-    _joined = runs.join(_key, on=["server", "qid"], how="left").with_columns(
-        pl.col("accept").fill_null("")
-    )
-    scored = _joined.with_columns(
-        correct=pl.Series([is_correct(r) for r in _joined.iter_rows(named=True)]),
-        checkable=pl.Series([is_checkable(r) for r in _joined.iter_rows(named=True)]),
-        has_citation=pl.col("citation").fill_null("").str.len_chars() > 0,
-        total_tokens=pl.col("input_tokens") + pl.col("output_tokens"),
-    )
-    print(f"checked {len(_status)} cited URLs, {sum(0 < s < 400 for s in _status.values())} open")
-    return is_checkable, is_correct, scored
+    async def score(runs: pl.DataFrame) -> pl.DataFrame:
+        rows = runs.join(
+            questions.select(
+                "server", "qid", "kind", "tolerance", "accept", pl.col("answer").alias("answer_key")
+            ),
+            on=["server", "qid"],
+            how="left",
+        ).with_columns(pl.col("accept").fill_null(""))
+        urls = {cited_url(r) for r in rows.iter_rows(named=True)} - {""}
+        status: dict[str, int] = {}
+        async with httpx.AsyncClient(follow_redirects=True, timeout=30) as http:
+            for url in sorted(urls):
+                try:
+                    async with http.stream("GET", url) as resp:
+                        status[url] = resp.status_code
+                except (httpx.HTTPError, httpx.InvalidURL):
+                    status[url] = 0
+        out = []
+        for r in rows.iter_rows(named=True):
+            url = cited_url(r)
+            parsed = urlparse(url)
+            on_domain = any(
+                (parsed.hostname or "").endswith(d) for d in SERVERS[r["server"]]["domains"]
+            )
+            deep = parsed.path.strip("/") != "" or parsed.query != ""
+            link = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+            out.append(
+                {
+                    "correct": is_correct(r),
+                    "checkable": on_domain and deep and 0 < status.get(url, 0) < 400,
+                    "url_from_tools": bool(url)
+                    and r["requests"] > 0
+                    and link in tool_text(r["transcript"]),
+                }
+            )
+        print(f"checked {len(status)} cited URLs, {sum(0 < v < 400 for v in status.values())} open")
+        return pl.concat([rows, pl.DataFrame(out)], how="horizontal").with_columns(
+            has_citation=pl.col("citation").fill_null("").str.len_chars() > 0,
+            total_tokens=pl.col("input_tokens") + pl.col("output_tokens"),
+        )
+
+    return (score,)
+
+
+@app.cell
+async def _(runs, score):
+    scored = await score(runs)
+    return (scored,)
 
 
 @app.cell
@@ -425,6 +468,7 @@ def _(pl):
                 answers=pl.len(),
                 correct=pl.col("correct").mean(),
                 checkable_source=pl.col("checkable").mean(),
+                link_from_tools=pl.col("url_from_tools").mean(),
                 correct_and_checkable=(pl.col("correct") & pl.col("checkable")).mean(),
                 errors=pl.col("error").is_not_null().sum(),
                 median_tokens=pl.col("total_tokens").median(),
@@ -435,6 +479,8 @@ def _(pl):
                 p90_seconds=pl.col("seconds").quantile(0.9, "nearest"),
                 usd_per_answer=pl.col("cost_usd").mean(),
                 usd_per_correct=pl.col("cost_usd").sum() / pl.col("correct").sum(),
+                usd_per_correct_checkable=pl.col("cost_usd").sum()
+                / (pl.col("correct") & pl.col("checkable")).sum(),
                 total_usd=pl.col("cost_usd").sum(),
             )
             .sort(by)
@@ -597,32 +643,8 @@ async def _(
 
 
 @app.cell
-def _(
-    OUT,
-    RESCORE,
-    changed_runs,
-    first_request_tokens,
-    is_checkable,
-    is_correct,
-    json,
-    pl,
-    questions,
-    runs,
-    scored,
-    summarize,
-):
-    _key = questions.select(
-        "server", "qid", "kind", "tolerance", "accept", pl.col("answer").alias("answer_key")
-    )
-    _joined = changed_runs.join(_key, on=["server", "qid"], how="left").with_columns(
-        pl.col("accept").fill_null("")
-    )
-    changed = _joined.with_columns(
-        correct=pl.Series([is_correct(r) for r in _joined.iter_rows(named=True)]),
-        checkable=pl.Series([is_checkable(r) for r in _joined.iter_rows(named=True)]),
-        has_citation=pl.col("citation").fill_null("").str.len_chars() > 0,
-        total_tokens=pl.col("input_tokens") + pl.col("output_tokens"),
-    )
+async def _(changed_runs, first_request_tokens, pl, score, scored, summarize):
+    changed = await score(changed_runs)
     _both = pl.concat(
         [scored.filter(pl.col("server") == "HIFLD Next"), changed], how="diagonal_relaxed"
     )
@@ -652,21 +674,61 @@ def _(OUT, before_after, by_server, drivers, json, mo, shipped, spend):
     }
     (OUT / "summary.json").write_text(json.dumps(summary, indent=1, default=str))
     _saving = 1 - _ba["no-map-tools"]["usd_per_answer"] / _ba["shipped"]["usd_per_answer"]
+    _changed_cpc = _cpc | {"HIFLD Next": _ba["no-map-tools"]["usd_per_correct"]}
+    _link = dict(zip(by_server["server"], by_server["link_from_tools"], strict=True))
+    _fixed = dict(zip(drivers["server"], drivers["fixed_share"], strict=True))
     mo.md(
         f"""
     ## 8. Does it hold?
 
-    Cost per correct answer runs from **${min(_cpc.values()):.4f}** to
-    **${max(_cpc.values()):.4f}**, a **{spread:.1f}x** spread between the three servers.
-    Dropping the map tools from HIFLD Next's list changed its cost per answer by
-    **{-_saving:+.0%}** (fixed tokens per step
-    {_ba["shipped"]["fixed_tokens_per_step"]:,.0f} →
-    {_ba["no-map-tools"]["fixed_tokens_per_step"]:,.0f}),
-    with {_ba["shipped"]["correct"]:.0%} → {_ba["no-map-tools"]["correct"]:.0%} correct.
-    The README states the verdict and the reasoning behind it.
+    **On cost, it fails.** Cost per correct answer runs from
+    **{min(_cpc.values()) * 100:.2f}¢** to **{max(_cpc.values()) * 100:.2f}¢**, a **{spread:.1f}x**
+    spread, not an order of magnitude. All three servers answer for about a cent.
+
+    **On what drives the cost, it holds.** The most expensive server is not the one with the
+    most data or the biggest results. HIFLD Next costs most because of what it sends before any
+    data: its tool definitions are {_fixed["HIFLD Next"]:.0%} of its input tokens. Dropping
+    the map tools from its list cut its cost per answer by **{_saving:.0%}** (fixed
+    tokens per step {_ba["shipped"]["fixed_tokens_per_step"]:,.0f} →
+    {_ba["no-map-tools"]["fixed_tokens_per_step"]:,.0f}) with no loss of accuracy
+    ({_ba["shipped"]["correct"]:.0%} → {_ba["no-map-tools"]["correct"]:.0%} correct), and the
+    spread falls to {max(_changed_cpc.values()) / min(_changed_cpc.values()):.1f}x.
+
+    **The difference that is large is the citation.** Urban's results carry a link in every
+    result and {_link["Urban EDP"]:.0%} of its answers pass one on; HIFLD Next's carry file
+    URLs and {_link["HIFLD Next"]:.0%} do. MoSPI's results carry no link, so
+    {_link["MoSPI"]:.0%} of its answers cite one taken from a tool result. Its answers were
+    right, but a reader has no link to check them by.
     """
     )
     return spread, summary
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    ## 9. What this doesn't show
+
+    - **The questions were easy for this model.** Almost every answer was right, so cost per
+      correct answer is nearly cost per answer. Harder questions (the judgment calls Urban's
+      own study found agents get wrong) would separate the servers on accuracy, which this set
+      can't.
+    - **Questions differ by server**, because the data does. A MoSPI question needs a dataset,
+      an indicator and filter codes; an HIFLD question often needs SQL over a file. We pinned
+      every question to one answer, but not to equal difficulty.
+    - **One client and one model.** Pydantic AI sends every listed tool on every step and the
+      server's instructions verbatim. A client that defers tool definitions until needed would
+      erase most of HIFLD Next's fixed cost, and another model may take more or fewer steps.
+    - **Prices date.** Haiku 5.5 costs $0.10 per million input tokens on OpenRouter; tokens and
+      steps are the numbers that will hold up.
+    - **The link check is mechanical.** MoSPI's API host refuses modern TLS clients (it
+      needs legacy renegotiation), so links an agent built to it fail our check even when they
+      may open in some browsers. `link_from_tools` doesn't depend on that: it asks only whether
+      the link came from a tool result.
+    - **We built HIFLD Next**, so read its numbers knowing that. Its server costs most of the
+      three as shipped.
+    """)
+    return
 
 
 if __name__ == "__main__":

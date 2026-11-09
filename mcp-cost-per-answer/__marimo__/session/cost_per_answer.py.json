@@ -1,0 +1,388 @@
+{
+  "version": "1",
+  "metadata": {
+    "marimo_version": "0.25.2",
+    "script_metadata_hash": null
+  },
+  "cells": [
+    {
+      "id": "Hbol",
+      "code_hash": "496762ecad446911efe15ca64716b600",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "MJUe",
+      "code_hash": "1e03e6a8653b302201ee68e50b585a12",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/markdown": "<span class=\"markdown prose dark:prose-invert contents\"><h1 id=\"what-does-one-answer-cost-an-ai-agent-through-a-public-data-mcp-server\">What does one answer cost an AI agent through a public data MCP server?</h1>\n<span class=\"paragraph\">Public data publishers are putting <a href=\"https://modelcontextprotocol.io\" rel=\"noopener noreferrer\" target=\"_blank\">MCP</a> servers in front\nof their data so AI agents can query it. Each answer an agent gets costs its user tokens,\ntool calls, time and money. We expect that cost to differ by an order of magnitude between\nservers, and to depend less on the data than on how the tools are designed: how many calls\nit takes to get valid filter codes, how much each result returns, and whether results carry\ntheir own citation.</span>\n<span class=\"paragraph\">We ask about 20 questions with known answers through each of three public servers, with the\nsame client and model, and count what every answer costs and whether it is right:</span>\n<ul>\n<li><a href=\"https://hifld.publicenvirodata.org\" rel=\"noopener noreferrer\" target=\"_blank\">HIFLD Next</a> (<code>/mcp</code>): US infrastructure, 400+\n  datasets, run by Public Environmental Data Partners. We built it.</li>\n<li><a href=\"https://github.com/nso-india/esankhyiki-mcp\" rel=\"noopener noreferrer\" target=\"_blank\">mcp.mospi.gov.in</a>: Indian official\n  statistics from India's Ministry of Statistics (MoSPI).</li>\n<li><a href=\"https://educationdata.urban.org/mcp/edp\" rel=\"noopener noreferrer\" target=\"_blank\">Education Data Portal</a>: US schools, districts\n  and colleges, from the Urban Institute.</li>\n</ul>\n<span class=\"paragraph\">Then we make one design change to HIFLD Next, on our side of the wire, and rerun it.</span></span>"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "vblA",
+      "code_hash": "d1bc5236a76c138c814f82b9124536b0",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "bkHC",
+      "code_hash": "f6bd21a39530d3509ea48570bb8d2265",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/markdown": "<span class=\"markdown prose dark:prose-invert contents\"><h2 id=\"1-what-each-server-sends-before-the-first-question\">1. What each server sends before the first question</h2>\n<span class=\"paragraph\">An MCP client sends every tool's name, description and input schema to the model on\n<strong>every</strong> request, plus the server's instructions if it has any. That is a fixed cost per\nstep, paid before any data comes back. Here is what each server ships, read straight from\nthe servers.</span></span>"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "lEQa",
+      "code_hash": "f4c12266294cdb2cec0adb16d853aef0",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/html": "<marimo-ui-element object-id='lEQa-0' random-id='11106e8c-950e-3d63-1d9c-4b374b5a8904'><marimo-table data-initial-value='[]' data-label='null' data-data='&quot;[{&#92;&quot;server&#92;&quot;:&#92;&quot;HIFLD Next&#92;&quot;,&#92;&quot;tools&#92;&quot;:16,&#92;&quot;tool_definition_chars&#92;&quot;:62883,&#92;&quot;instruction_chars&#92;&quot;:0,&#92;&quot;largest_tool&#92;&quot;:&#92;&quot;view_map&#92;&quot;},{&#92;&quot;server&#92;&quot;:&#92;&quot;MoSPI&#92;&quot;,&#92;&quot;tools&#92;&quot;:4,&#92;&quot;tool_definition_chars&#92;&quot;:9279,&#92;&quot;instruction_chars&#92;&quot;:0,&#92;&quot;largest_tool&#92;&quot;:&#92;&quot;get_metadata&#92;&quot;},{&#92;&quot;server&#92;&quot;:&#92;&quot;Urban EDP&#92;&quot;,&#92;&quot;tools&#92;&quot;:6,&#92;&quot;tool_definition_chars&#92;&quot;:9469,&#92;&quot;instruction_chars&#92;&quot;:1859,&#92;&quot;largest_tool&#92;&quot;:&#92;&quot;get_data&#92;&quot;}]&quot;' data-total-rows='3' data-total-columns='5' data-max-columns='50' data-banner-text='&quot;&quot;' data-pagination='false' data-page-size='10' data-field-types='[[&quot;server&quot;,[&quot;string&quot;,&quot;str&quot;]],[&quot;tools&quot;,[&quot;integer&quot;,&quot;i64&quot;]],[&quot;tool_definition_chars&quot;,[&quot;integer&quot;,&quot;i64&quot;]],[&quot;instruction_chars&quot;,[&quot;integer&quot;,&quot;i64&quot;]],[&quot;largest_tool&quot;,[&quot;string&quot;,&quot;str&quot;]]]' data-show-filters='true' data-show-download='true' data-show-search='true' data-show-column-summaries='false' data-show-data-types='true' data-show-page-size-selector='false' data-show-column-explorer='true' data-show-chart-builder='true' data-row-headers='[]' data-hidden-columns='[]' data-has-stable-row-id='false' data-lazy='false' data-preload='false'></marimo-table></marimo-ui-element>"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "PKri",
+      "code_hash": "94c490ff7520e14f4cab6b8cb6540161",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/markdown": "<span class=\"markdown prose dark:prose-invert contents\"><h2 id=\"2-the-questions\">2. The questions</h2>\n<span class=\"paragraph\">One set per server, written the way that server's users would ask, each with one answer we\nlooked up ourselves from the publisher's own API (the <code>how_found</code> column has the exact call,\nso anyone can check the key). Numbers carry a tolerance for honest rounding; names carry the\nstrings we accept. The questions differ by server because the data does; section 7 comes\nback to what that does to the comparison.</span></span>"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "Xref",
+      "code_hash": "8e9ad6918bb6e8378bcd8f032368aace",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/html": "<marimo-ui-element object-id='Xref-0' random-id='81ce8729-cd94-1526-242f-9f82427ff392'><marimo-table data-initial-value='[]' data-label='null' data-data='&quot;[{&#92;&quot;server&#92;&quot;:&#92;&quot;HIFLD Next&#92;&quot;,&#92;&quot;questions&#92;&quot;:20},{&#92;&quot;server&#92;&quot;:&#92;&quot;MoSPI&#92;&quot;,&#92;&quot;questions&#92;&quot;:20},{&#92;&quot;server&#92;&quot;:&#92;&quot;Urban EDP&#92;&quot;,&#92;&quot;questions&#92;&quot;:20}]&quot;' data-total-rows='3' data-total-columns='2' data-max-columns='50' data-banner-text='&quot;&quot;' data-pagination='false' data-page-size='10' data-field-types='[[&quot;server&quot;,[&quot;string&quot;,&quot;str&quot;]],[&quot;questions&quot;,[&quot;integer&quot;,&quot;u32&quot;]]]' data-show-filters='true' data-show-download='true' data-show-search='true' data-show-column-summaries='false' data-show-data-types='true' data-show-page-size-selector='false' data-show-column-explorer='true' data-show-chart-builder='true' data-row-headers='[]' data-hidden-columns='[]' data-has-stable-row-id='false' data-lazy='false' data-preload='false'></marimo-table></marimo-ui-element>"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "SFPL",
+      "code_hash": "11b84fa6f32d4ed20fbe41355cfdfa43",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/markdown": "<span class=\"markdown prose dark:prose-invert contents\"><h2 id=\"3-one-client-one-model\">3. One client, one model</h2>\n<span class=\"paragraph\">A <a href=\"https://ai.pydantic.dev\" rel=\"noopener noreferrer\" target=\"_blank\">Pydantic AI</a> agent connects to each server as shipped: every\ntool it lists, and its instructions if it sends any (Urban's server does; the other two\ndon't). The model is Claude Haiku 5.5 on OpenRouter, which reports the dollar cost of each\nrequest. The agent must return a typed answer: a sentence, the number if there is one, and\nthe source a reader could use to check it. Our instructions say nothing about any server,\nso the only guidance it gets is what the server itself provides. A run stops at 25 model\nrequests or 5 minutes.</span></span>"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "BYtC",
+      "code_hash": "c9603e45fe8adbb6e0d0ab56debc2a61",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "RGSE",
+      "code_hash": "fbe9566f6c992d8a0fee45b99f37777f",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "Kclp",
+      "code_hash": "8003e82f300c1fceb5fc775235dbabd9",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/markdown": "<span class=\"markdown prose dark:prose-invert contents\"><h2 id=\"4-run-every-question-through-its-server\">4. Run every question through its server</h2>\n<span class=\"paragraph\">Four questions run at a time per server. Each run's full transcript is saved to\n<code>outputs/transcripts/</code> and its usage to <code>outputs/runs_*.jsonl</code>, so the scoring below can be\nrerun or changed without paying for model calls (<code>RESCORE=1 ./run.sh</code>).</span></span>"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "emfo",
+      "code_hash": "f193360181e20014580813f71d5dc7fe",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": [
+        {
+          "type": "stream",
+          "name": "stdout",
+          "text": "120 runs, $0.0000 spent in this section\n",
+          "mimetype": "text/plain"
+        }
+      ]
+    },
+    {
+      "id": "Hstk",
+      "code_hash": "a272fe451f69bfd32f11cedfd5e63c90",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/markdown": "<span class=\"markdown prose dark:prose-invert contents\"><h2 id=\"5-score-every-answer\">5. Score every answer</h2>\n<span class=\"paragraph\"><strong>Correct</strong>: a number within the key's tolerance, or a name containing one of the strings\nthe key accepts. <strong>Checkable source</strong>: the answer gives a URL on the publisher's own domain\nthat opens (HTTP status below 400) and is more than the home page. A named dataset with no\nlink doesn't count, because a reader can't click it; we report it separately as\n<code>has_citation</code>. Failed runs count as wrong and their cost counts.</span></span>"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "nWHF",
+      "code_hash": "037e8fa84030cf1e322b6aefd70f4085",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "iLit",
+      "code_hash": "75acac689307f4a543be2ad616653a44",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": [
+        {
+          "type": "stream",
+          "name": "stdout",
+          "text": "checked 79 cited URLs, 55 open\n",
+          "mimetype": "text/plain"
+        }
+      ]
+    },
+    {
+      "id": "ZHCJ",
+      "code_hash": "7f7608a5e8005b25546a93b8fd70f530",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "ROlb",
+      "code_hash": "5dba2037f2762fbc063b59c4eeeb92f1",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/markdown": "<span class=\"markdown prose dark:prose-invert contents\"><h2 id=\"6-cost-per-correct-answer-by-server\">6. Cost per correct answer, by server</h2></span>"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "qnkX",
+      "code_hash": "a893b697cf181400cd65a0ac1692e432",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/html": "<marimo-ui-element object-id='qnkX-0' random-id='ddf61920-13e3-aea0-4073-f597883df43b'><marimo-table data-initial-value='[]' data-label='null' data-data='&quot;[{&#92;&quot;server&#92;&quot;:&#92;&quot;HIFLD Next&#92;&quot;,&#92;&quot;answers&#92;&quot;:40,&#92;&quot;correct&#92;&quot;:1.0,&#92;&quot;checkable_source&#92;&quot;:0.975,&#92;&quot;link_from_tools&#92;&quot;:0.975,&#92;&quot;correct_and_checkable&#92;&quot;:0.975,&#92;&quot;errors&#92;&quot;:0,&#92;&quot;median_tokens&#92;&quot;:140251.0,&#92;&quot;p90_tokens&#92;&quot;:181210.0,&#92;&quot;median_tool_calls&#92;&quot;:5.0,&#92;&quot;p90_tool_calls&#92;&quot;:7.0,&#92;&quot;median_seconds&#92;&quot;:11.475,&#92;&quot;p90_seconds&#92;&quot;:14.55,&#92;&quot;usd_per_answer&#92;&quot;:0.01548813,&#92;&quot;usd_per_correct&#92;&quot;:0.01548813,&#92;&quot;usd_per_correct_checkable&#92;&quot;:0.015885261538461537,&#92;&quot;total_usd&#92;&quot;:0.6195252},{&#92;&quot;server&#92;&quot;:&#92;&quot;MoSPI&#92;&quot;,&#92;&quot;answers&#92;&quot;:40,&#92;&quot;correct&#92;&quot;:1.0,&#92;&quot;checkable_source&#92;&quot;:0.025,&#92;&quot;link_from_tools&#92;&quot;:0.0,&#92;&quot;correct_and_checkable&#92;&quot;:0.025,&#92;&quot;errors&#92;&quot;:0,&#92;&quot;median_tokens&#92;&quot;:61498.0,&#92;&quot;p90_tokens&#92;&quot;:112786.0,&#92;&quot;median_tool_calls&#92;&quot;:3.5,&#92;&quot;p90_tool_calls&#92;&quot;:4.0,&#92;&quot;median_seconds&#92;&quot;:11.07,&#92;&quot;p90_seconds&#92;&quot;:14.7,&#92;&quot;usd_per_answer&#92;&quot;:0.006832670000000001,&#92;&quot;usd_per_correct&#92;&quot;:0.006832670000000001,&#92;&quot;usd_per_correct_checkable&#92;&quot;:0.2733068,&#92;&quot;total_usd&#92;&quot;:0.2733068},{&#92;&quot;server&#92;&quot;:&#92;&quot;Urban EDP&#92;&quot;,&#92;&quot;answers&#92;&quot;:40,&#92;&quot;correct&#92;&quot;:0.975,&#92;&quot;checkable_source&#92;&quot;:1.0,&#92;&quot;link_from_tools&#92;&quot;:1.0,&#92;&quot;correct_and_checkable&#92;&quot;:0.975,&#92;&quot;errors&#92;&quot;:0,&#92;&quot;median_tokens&#92;&quot;:58581.0,&#92;&quot;p90_tokens&#92;&quot;:103572.0,&#92;&quot;median_tool_calls&#92;&quot;:5.0,&#92;&quot;p90_tool_calls&#92;&quot;:7.0,&#92;&quot;median_seconds&#92;&quot;:12.295,&#92;&quot;p90_seconds&#92;&quot;:77.89,&#92;&quot;usd_per_answer&#92;&quot;:0.007136829999999999,&#92;&quot;usd_per_correct&#92;&quot;:0.007319825641025641,&#92;&quot;usd_per_correct_checkable&#92;&quot;:0.007319825641025641,&#92;&quot;total_usd&#92;&quot;:0.2854732}]&quot;' data-total-rows='3' data-total-columns='17' data-max-columns='50' data-banner-text='&quot;&quot;' data-pagination='false' data-page-size='10' data-field-types='[[&quot;server&quot;,[&quot;string&quot;,&quot;str&quot;]],[&quot;answers&quot;,[&quot;integer&quot;,&quot;u32&quot;]],[&quot;correct&quot;,[&quot;number&quot;,&quot;f64&quot;]],[&quot;checkable_source&quot;,[&quot;number&quot;,&quot;f64&quot;]],[&quot;link_from_tools&quot;,[&quot;number&quot;,&quot;f64&quot;]],[&quot;correct_and_checkable&quot;,[&quot;number&quot;,&quot;f64&quot;]],[&quot;errors&quot;,[&quot;integer&quot;,&quot;u32&quot;]],[&quot;median_tokens&quot;,[&quot;number&quot;,&quot;f64&quot;]],[&quot;p90_tokens&quot;,[&quot;number&quot;,&quot;f64&quot;]],[&quot;median_tool_calls&quot;,[&quot;number&quot;,&quot;f64&quot;]],[&quot;p90_tool_calls&quot;,[&quot;number&quot;,&quot;f64&quot;]],[&quot;median_seconds&quot;,[&quot;number&quot;,&quot;f64&quot;]],[&quot;p90_seconds&quot;,[&quot;number&quot;,&quot;f64&quot;]],[&quot;usd_per_answer&quot;,[&quot;number&quot;,&quot;f64&quot;]],[&quot;usd_per_correct&quot;,[&quot;number&quot;,&quot;f64&quot;]],[&quot;usd_per_correct_checkable&quot;,[&quot;number&quot;,&quot;f64&quot;]],[&quot;total_usd&quot;,[&quot;number&quot;,&quot;f64&quot;]]]' data-show-filters='true' data-show-download='true' data-show-search='true' data-show-column-summaries='false' data-show-data-types='true' data-show-page-size-selector='false' data-show-column-explorer='true' data-show-chart-builder='true' data-row-headers='[]' data-hidden-columns='[]' data-has-stable-row-id='false' data-lazy='false' data-preload='false'></marimo-table></marimo-ui-element>"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "TqIu",
+      "code_hash": "2e09f99cc0a01f3279bcc451a134084d",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/markdown": "<span class=\"markdown prose dark:prose-invert contents\"><h3 id=\"where-the-tokens-go\">Where the tokens go</h3>\n<span class=\"paragraph\">The first request of a run holds only the instructions, the tool definitions and the\nquestion, so its input tokens are the fixed price of one step on that server. Every later\nstep resends that, plus everything the tools have returned so far. So two things drive\ntokens: the fixed price times the number of steps, and how much data the tools return.\n<code>fixed_share</code> is the fixed price times the steps, as a share of all input tokens.</span></span>"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "Vxnm",
+      "code_hash": "2e717e18277b3a1087059a975224165c",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/html": "<marimo-ui-element object-id='Vxnm-0' random-id='8f3a9464-8b22-6c20-c481-300dceda61b2'><marimo-table data-initial-value='[]' data-label='null' data-data='&quot;[{&#92;&quot;server&#92;&quot;:&#92;&quot;HIFLD Next&#92;&quot;,&#92;&quot;fixed_tokens_per_step&#92;&quot;:17023.0,&#92;&quot;median_steps&#92;&quot;:6.0,&#92;&quot;median_tool_result_chars&#92;&quot;:36624.0,&#92;&quot;fixed_share&#92;&quot;:0.7050003755193567},{&#92;&quot;server&#92;&quot;:&#92;&quot;MoSPI&#92;&quot;,&#92;&quot;fixed_tokens_per_step&#92;&quot;:5002.0,&#92;&quot;median_steps&#92;&quot;:4.0,&#92;&quot;median_tool_result_chars&#92;&quot;:35036.5,&#92;&quot;fixed_share&#92;&quot;:0.34829079075043473},{&#92;&quot;server&#92;&quot;:&#92;&quot;Urban EDP&#92;&quot;,&#92;&quot;fixed_tokens_per_step&#92;&quot;:5125.0,&#92;&quot;median_steps&#92;&quot;:6.0,&#92;&quot;median_tool_result_chars&#92;&quot;:17493.0,&#92;&quot;fixed_share&#92;&quot;:0.47873786920690203}]&quot;' data-total-rows='3' data-total-columns='5' data-max-columns='50' data-banner-text='&quot;&quot;' data-pagination='false' data-page-size='10' data-field-types='[[&quot;server&quot;,[&quot;string&quot;,&quot;str&quot;]],[&quot;fixed_tokens_per_step&quot;,[&quot;number&quot;,&quot;f64&quot;]],[&quot;median_steps&quot;,[&quot;number&quot;,&quot;f64&quot;]],[&quot;median_tool_result_chars&quot;,[&quot;number&quot;,&quot;f64&quot;]],[&quot;fixed_share&quot;,[&quot;number&quot;,&quot;f64&quot;]]]' data-show-filters='true' data-show-download='true' data-show-search='true' data-show-column-summaries='false' data-show-data-types='true' data-show-page-size-selector='false' data-show-column-explorer='true' data-show-chart-builder='true' data-row-headers='[]' data-hidden-columns='[]' data-has-stable-row-id='false' data-lazy='false' data-preload='false'></marimo-table></marimo-ui-element>"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "DnEU",
+      "code_hash": "3d2870c3d2c0c199c1657ae5d661ed2f",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/markdown": "<span class=\"markdown prose dark:prose-invert contents\"><h3 id=\"which-tool-calls-return-the-most\">Which tool calls return the most</h3>\n<span class=\"paragraph\">Characters each tool sent back to the model, summed over all runs on a server. A large\nresult is paid for again on every later step of that run.</span></span>"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "ulZA",
+      "code_hash": "6cba09a339a3fdcd268c357d50e94804",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/html": "<marimo-ui-element object-id='ulZA-0' random-id='5f1f35d0-f7f4-29e3-6e0d-f8456b7045f6'><marimo-table data-initial-value='[]' data-label='null' data-data='&quot;[{&#92;&quot;server&#92;&quot;:&#92;&quot;HIFLD Next&#92;&quot;,&#92;&quot;tool&#92;&quot;:&#92;&quot;get_dataset_file&#92;&quot;,&#92;&quot;calls&#92;&quot;:44,&#92;&quot;median_chars&#92;&quot;:19292.0,&#92;&quot;total_chars&#92;&quot;:847033},{&#92;&quot;server&#92;&quot;:&#92;&quot;HIFLD Next&#92;&quot;,&#92;&quot;tool&#92;&quot;:&#92;&quot;search_datasets&#92;&quot;,&#92;&quot;calls&#92;&quot;:54,&#92;&quot;median_chars&#92;&quot;:6143.0,&#92;&quot;total_chars&#92;&quot;:486914},{&#92;&quot;server&#92;&quot;:&#92;&quot;HIFLD Next&#92;&quot;,&#92;&quot;tool&#92;&quot;:&#92;&quot;get_dataset&#92;&quot;,&#92;&quot;calls&#92;&quot;:46,&#92;&quot;median_chars&#92;&quot;:1459.0,&#92;&quot;total_chars&#92;&quot;:88026},{&#92;&quot;server&#92;&quot;:&#92;&quot;HIFLD Next&#92;&quot;,&#92;&quot;tool&#92;&quot;:&#92;&quot;query_parquet&#92;&quot;,&#92;&quot;calls&#92;&quot;:47,&#92;&quot;median_chars&#92;&quot;:1268.0,&#92;&quot;total_chars&#92;&quot;:83328},{&#92;&quot;server&#92;&quot;:&#92;&quot;HIFLD Next&#92;&quot;,&#92;&quot;tool&#92;&quot;:&#92;&quot;list_collections&#92;&quot;,&#92;&quot;calls&#92;&quot;:40,&#92;&quot;median_chars&#92;&quot;:351.0,&#92;&quot;total_chars&#92;&quot;:14040},{&#92;&quot;server&#92;&quot;:&#92;&quot;HIFLD Next&#92;&quot;,&#92;&quot;tool&#92;&quot;:&#92;&quot;read_geoparquet_rows&#92;&quot;,&#92;&quot;calls&#92;&quot;:1,&#92;&quot;median_chars&#92;&quot;:7607.0,&#92;&quot;total_chars&#92;&quot;:7607},{&#92;&quot;server&#92;&quot;:&#92;&quot;HIFLD Next&#92;&quot;,&#92;&quot;tool&#92;&quot;:&#92;&quot;inspect_query_source&#92;&quot;,&#92;&quot;calls&#92;&quot;:1,&#92;&quot;median_chars&#92;&quot;:2998.0,&#92;&quot;total_chars&#92;&quot;:2998},{&#92;&quot;server&#92;&quot;:&#92;&quot;MoSPI&#92;&quot;,&#92;&quot;tool&#92;&quot;:&#92;&quot;get_metadata&#92;&quot;,&#92;&quot;calls&#92;&quot;:40,&#92;&quot;median_chars&#92;&quot;:7960.0,&#92;&quot;total_chars&#92;&quot;:744308},{&#92;&quot;server&#92;&quot;:&#92;&quot;MoSPI&#92;&quot;,&#92;&quot;tool&#92;&quot;:&#92;&quot;get_indicators&#92;&quot;,&#92;&quot;calls&#92;&quot;:40,&#92;&quot;median_chars&#92;&quot;:5636.0,&#92;&quot;total_chars&#92;&quot;:389210},{&#92;&quot;server&#92;&quot;:&#92;&quot;MoSPI&#92;&quot;,&#92;&quot;tool&#92;&quot;:&#92;&quot;list_datasets&#92;&quot;,&#92;&quot;calls&#92;&quot;:12,&#92;&quot;median_chars&#92;&quot;:25707.0,&#92;&quot;total_chars&#92;&quot;:308484}]&quot;' data-total-rows='17' data-total-columns='5' data-max-columns='50' data-banner-text='&quot;&quot;' data-pagination='true' data-page-size='10' data-field-types='[[&quot;server&quot;,[&quot;string&quot;,&quot;str&quot;]],[&quot;tool&quot;,[&quot;string&quot;,&quot;str&quot;]],[&quot;calls&quot;,[&quot;integer&quot;,&quot;u32&quot;]],[&quot;median_chars&quot;,[&quot;number&quot;,&quot;f64&quot;]],[&quot;total_chars&quot;,[&quot;integer&quot;,&quot;i64&quot;]]]' data-show-filters='true' data-show-download='true' data-show-search='true' data-show-column-summaries='true' data-show-data-types='true' data-show-page-size-selector='true' data-show-column-explorer='true' data-show-chart-builder='true' data-row-headers='[]' data-hidden-columns='[]' data-has-stable-row-id='false' data-lazy='false' data-preload='false'></marimo-table></marimo-ui-element>"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "ecfG",
+      "code_hash": "fd3d0fa617845b116964ec6f0f4e7ac7",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/markdown": "<span class=\"markdown prose dark:prose-invert contents\"><h2 id=\"7-one-design-change-on-hifld-next\">7. One design change on HIFLD Next</h2>\n<span class=\"paragraph\">HIFLD Next's MCP server ships map-widget tools for clients that can show an\n<a href=\"https://modelcontextprotocol.io/docs/extensions/apps\" rel=\"noopener noreferrer\" target=\"_blank\">MCP Apps</a> map. Their definitions are\nlong, and a client sends them to the model on every step whether or not it can draw a map.\nThe change: list those tools only to clients that render MCP Apps UI. A client declares that\nwhen it connects, so the server can do this itself; here we do it on our side, by dropping\nevery tool the server marks with a UI resource, and leave the production server alone.\nEverything else is the same: same questions, model and instructions.</span></span>"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "Pvdt",
+      "code_hash": "971008f9524b548e0ecba4bc14ab5eb0",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": [
+        {
+          "type": "stream",
+          "name": "stdout",
+          "text": "40 runs, $0.0000 spent so far\n",
+          "mimetype": "text/plain"
+        }
+      ]
+    },
+    {
+      "id": "ZBYS",
+      "code_hash": "fa8e03332d6e1fae2b0e31b645235348",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/html": "<marimo-ui-element object-id='ZBYS-0' random-id='e906d6f6-b8fe-c35c-bca2-0830fbe9c78f'><marimo-table data-initial-value='[]' data-label='null' data-data='&quot;[{&#92;&quot;variant&#92;&quot;:&#92;&quot;no-map-tools&#92;&quot;,&#92;&quot;answers&#92;&quot;:40,&#92;&quot;correct&#92;&quot;:1.0,&#92;&quot;checkable_source&#92;&quot;:1.0,&#92;&quot;link_from_tools&#92;&quot;:0.95,&#92;&quot;correct_and_checkable&#92;&quot;:1.0,&#92;&quot;errors&#92;&quot;:0,&#92;&quot;median_tokens&#92;&quot;:83233.0,&#92;&quot;p90_tokens&#92;&quot;:114374.0,&#92;&quot;median_tool_calls&#92;&quot;:6.0,&#92;&quot;p90_tool_calls&#92;&quot;:7.0,&#92;&quot;median_seconds&#92;&quot;:11.125,&#92;&quot;p90_seconds&#92;&quot;:14.96,&#92;&quot;usd_per_answer&#92;&quot;:0.0094846725,&#92;&quot;usd_per_correct&#92;&quot;:0.0094846725,&#92;&quot;usd_per_correct_checkable&#92;&quot;:0.0094846725,&#92;&quot;total_usd&#92;&quot;:0.37938689999999997,&#92;&quot;fixed_tokens_per_step&#92;&quot;:6886.0},{&#92;&quot;variant&#92;&quot;:&#92;&quot;shipped&#92;&quot;,&#92;&quot;answers&#92;&quot;:40,&#92;&quot;correct&#92;&quot;:1.0,&#92;&quot;checkable_source&#92;&quot;:0.975,&#92;&quot;link_from_tools&#92;&quot;:0.975,&#92;&quot;correct_and_checkable&#92;&quot;:0.975,&#92;&quot;errors&#92;&quot;:0,&#92;&quot;median_tokens&#92;&quot;:140251.0,&#92;&quot;p90_tokens&#92;&quot;:181210.0,&#92;&quot;median_tool_calls&#92;&quot;:5.0,&#92;&quot;p90_tool_calls&#92;&quot;:7.0,&#92;&quot;median_seconds&#92;&quot;:11.475,&#92;&quot;p90_seconds&#92;&quot;:14.55,&#92;&quot;usd_per_answer&#92;&quot;:0.01548813,&#92;&quot;usd_per_correct&#92;&quot;:0.01548813,&#92;&quot;usd_per_correct_checkable&#92;&quot;:0.015885261538461537,&#92;&quot;total_usd&#92;&quot;:0.6195252,&#92;&quot;fixed_tokens_per_step&#92;&quot;:17023.0}]&quot;' data-total-rows='2' data-total-columns='18' data-max-columns='50' data-banner-text='&quot;&quot;' data-pagination='false' data-page-size='10' data-field-types='[[&quot;variant&quot;,[&quot;string&quot;,&quot;str&quot;]],[&quot;answers&quot;,[&quot;integer&quot;,&quot;u32&quot;]],[&quot;correct&quot;,[&quot;number&quot;,&quot;f64&quot;]],[&quot;checkable_source&quot;,[&quot;number&quot;,&quot;f64&quot;]],[&quot;link_from_tools&quot;,[&quot;number&quot;,&quot;f64&quot;]],[&quot;correct_and_checkable&quot;,[&quot;number&quot;,&quot;f64&quot;]],[&quot;errors&quot;,[&quot;integer&quot;,&quot;u32&quot;]],[&quot;median_tokens&quot;,[&quot;number&quot;,&quot;f64&quot;]],[&quot;p90_tokens&quot;,[&quot;number&quot;,&quot;f64&quot;]],[&quot;median_tool_calls&quot;,[&quot;number&quot;,&quot;f64&quot;]],[&quot;p90_tool_calls&quot;,[&quot;number&quot;,&quot;f64&quot;]],[&quot;median_seconds&quot;,[&quot;number&quot;,&quot;f64&quot;]],[&quot;p90_seconds&quot;,[&quot;number&quot;,&quot;f64&quot;]],[&quot;usd_per_answer&quot;,[&quot;number&quot;,&quot;f64&quot;]],[&quot;usd_per_correct&quot;,[&quot;number&quot;,&quot;f64&quot;]],[&quot;usd_per_correct_checkable&quot;,[&quot;number&quot;,&quot;f64&quot;]],[&quot;total_usd&quot;,[&quot;number&quot;,&quot;f64&quot;]],[&quot;fixed_tokens_per_step&quot;,[&quot;number&quot;,&quot;f64&quot;]]]' data-show-filters='true' data-show-download='true' data-show-search='true' data-show-column-summaries='false' data-show-data-types='true' data-show-page-size-selector='false' data-show-column-explorer='true' data-show-chart-builder='true' data-row-headers='[]' data-hidden-columns='[]' data-has-stable-row-id='false' data-lazy='false' data-preload='false'></marimo-table></marimo-ui-element>"
+          }
+        }
+      ],
+      "console": [
+        {
+          "type": "stream",
+          "name": "stdout",
+          "text": "checked 14 cited URLs, 14 open\n",
+          "mimetype": "text/plain"
+        }
+      ]
+    },
+    {
+      "id": "aLJB",
+      "code_hash": "5fae68c832ec9e53436637cdd29092a5",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/markdown": "<span class=\"markdown prose dark:prose-invert contents\"><h2 id=\"8-does-it-hold\">8. Does it hold?</h2>\n<span class=\"paragraph\"><strong>On cost, it fails.</strong> Cost per correct answer runs from\n<strong><marimo-tex class=\"arithmatex\">||(0.0068** to **||)</marimo-tex>0.0155</strong>, a <strong>2.3x</strong>\nspread, not an order of magnitude. All three servers answer for about a cent.</span>\n<span class=\"paragraph\"><strong>On what drives the cost, it holds.</strong> The most expensive server is not the one with the\nmost data or the biggest results. HIFLD Next costs most because of what it sends before any\ndata: its tool definitions are 71% of its input tokens. Dropping\nthe map tools from its list changed its cost per answer by <strong>-39%</strong> (fixed\ntokens per step 17,023 \u2192\n6,886) with no loss of accuracy\n(100% \u2192 100% correct), and the\nspread falls to 1.4x.</span>\n<span class=\"paragraph\"><strong>The difference that is large is the citation.</strong> Urban's results carry a link in every\nresult and 100% of its answers pass one on; HIFLD Next's carry file\nURLs and 98% do. MoSPI's results carry no link, so\n0% of its answers cite one taken from a tool result. Its answers were\nright, but a reader has no link to check them by.</span></span>"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "nHfw",
+      "code_hash": "a34c6e0ce3957e758311e7d27870f123",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/markdown": "<span class=\"markdown prose dark:prose-invert contents\"><h2 id=\"9-what-this-doesnt-show\">9. What this doesn't show</h2>\n<ul>\n<li><strong>The questions were easy for this model.</strong> Almost every answer was right, so cost per\n  correct answer is nearly cost per answer. Harder questions (the judgment calls Urban's\n  own study found agents get wrong) would separate the servers on accuracy, which this set\n  can't.</li>\n<li><strong>Questions differ by server</strong>, because the data does. A MoSPI question needs a dataset,\n  an indicator and filter codes; an HIFLD question often needs SQL over a file. We pinned\n  every question to one answer, but not to equal difficulty.</li>\n<li><strong>One client and one model.</strong> Pydantic AI sends every listed tool on every step and the\n  server's instructions verbatim. A client that defers tool definitions until needed would\n  erase most of HIFLD Next's fixed cost, and another model may take more or fewer steps.</li>\n<li><strong>Prices date.</strong> Haiku 5.5 costs $0.10 per million input tokens on OpenRouter; tokens and\n  steps are the numbers that will hold up.</li>\n<li><strong>The link check is mechanical.</strong> MoSPI's API host refuses modern TLS clients (it\n  needs legacy renegotiation), so links an agent built to it fail our check even when they\n  may open in some browsers. <code>link_from_tools</code> doesn't depend on that: it asks only whether\n  the link came from a tool result.</li>\n<li><strong>We built HIFLD Next</strong>, so read its numbers knowing that. Its server costs most of the\n  three as shipped.</li>\n</ul></span>"
+          }
+        }
+      ],
+      "console": []
+    }
+  ]
+}
