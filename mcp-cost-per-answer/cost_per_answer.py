@@ -99,7 +99,7 @@ def _(mo, os):
         },
     }
     MODEL = os.environ.get("AGENT_MODEL", "anthropic/claude-haiku-5.5")
-    REPEATS = int(os.environ.get("AGENT_REPEATS", "1"))
+    REPEATS = int(os.environ.get("AGENT_REPEATS", "2"))
     BUDGET_USD = float(os.environ.get("AGENT_BUDGET_USD", "4.0"))
     # RESCORE=1 scores the committed runs in outputs/runs.jsonl without calling any model.
     RESCORE = os.environ.get("RESCORE", "") == "1"
@@ -134,7 +134,7 @@ async def _(ClientSession, OUT, SERVERS, json, pl, streamable_http_client):
             _init = await _session.initialize()
             _tools = (await _session.list_tools()).tools
         _defs = [
-            {"name": t.name, "description": t.description, "input_schema": t.inputSchema}
+            {"name": t.name, "description": t.description, "input_schema": t.input_schema}
             for t in _tools
         ]
         _shipped[_name] = {"instructions": _init.instructions, "tools": _defs}
