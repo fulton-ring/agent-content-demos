@@ -180,7 +180,7 @@ def _(mo):
         The crawl is polite: `EPA_WORKERS` requests at a time (default 6), each worker waits
         `EPA_DELAY` seconds (default 0.5) after every request, and failed requests are retried
         at most three times. Each fetched page is appended to `cache/pages.jsonl`, so a crawl
-        that stops can resume where it left off. The full sitemap takes about three hours.
+        that stops can resume where it left off. The full sitemap takes about two and a half hours.
         """
     )
     return
