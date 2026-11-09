@@ -67,11 +67,12 @@ def _(mo):
     We ask about 20 questions with known answers through each of three public servers, with the
     same client and model, and count what every answer costs and whether it is right:
 
-    | server | publisher | data |
-    |---|---|---|
-    | [HIFLD Next](https://hifld.publicenvirodata.org) `/mcp` | Public Environmental Data Partners and Fulton Ring (we built it) | US infrastructure, 400+ datasets |
-    | [mcp.mospi.gov.in](https://github.com/nso-india/esankhyiki-mcp) | India's Ministry of Statistics (MoSPI) | Indian official statistics |
-    | [Education Data Portal](https://educationdata.urban.org/mcp/edp) | Urban Institute | US schools, districts and colleges |
+    - [HIFLD Next](https://hifld.publicenvirodata.org) (`/mcp`): US infrastructure, 400+
+      datasets, run by Public Environmental Data Partners. We built it.
+    - [mcp.mospi.gov.in](https://github.com/nso-india/esankhyiki-mcp): Indian official
+      statistics from India's Ministry of Statistics (MoSPI).
+    - [Education Data Portal](https://educationdata.urban.org/mcp/edp): US schools, districts
+      and colleges, from the Urban Institute.
 
     Then we make one design change to HIFLD Next, on our side of the wire, and rerun it.
     """)
@@ -661,7 +662,8 @@ def _(OUT, before_after, by_server, drivers, json, mo, shipped, spend):
     **${max(_cpc.values()):.4f}**, a **{spread:.1f}x** spread between the three servers.
     Dropping the map tools from HIFLD Next's list changed its cost per answer by
     **{-_saving:+.0%}** (fixed tokens per step
-    {_ba["shipped"]["fixed_tokens_per_step"]:,.0f} → {_ba["no-map-tools"]["fixed_tokens_per_step"]:,.0f}),
+    {_ba["shipped"]["fixed_tokens_per_step"]:,.0f} →
+    {_ba["no-map-tools"]["fixed_tokens_per_step"]:,.0f}),
     with {_ba["shipped"]["correct"]:.0%} → {_ba["no-map-tools"]["correct"]:.0%} correct.
     The README states the verdict and the reasoning behind it.
     """
