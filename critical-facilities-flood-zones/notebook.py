@@ -587,7 +587,7 @@ def _(mo):
     **Top facilities by NRI flood risk.** Many facilities share a tract, so the top of each list
     is a handful of tracts; ties are broken by name. Substations here are 100 kV and up, because
     small distribution substations crowd the list otherwise (the full ranking of every facility is
-    in `results/facilities.csv`). The NRI ranks the tract, not the building: see the next table.
+    in `results/facilities.csv.gz`). The NRI ranks the tract, not the building: see the next table.
     """)
     return
 
@@ -858,7 +858,7 @@ def _(
         "CFLD_RISKR",
         "nri_join",
     ]
-    _out[_cols].to_csv(results / "facilities.csv", index=False)
+    _out[_cols].to_csv(results / "facilities.csv.gz", index=False)
     counts.to_csv(results / "counts.csv")
     nfhl_gaps.to_csv(results / "nfhl_gaps_by_state.csv")
     top_facilities.to_csv(results / "top_facilities.csv", index=False)
