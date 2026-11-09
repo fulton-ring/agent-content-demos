@@ -629,7 +629,8 @@ def _(RESULTS_DIR, duckdb_rows, pd, postgis_rows, remote_rows):
         .reset_index()
     )
     summary.to_csv(RESULTS_DIR / "summary.csv", index=False)
-    print(f"{(~timings['matches_postgis']).sum()} of {len(timings)} DuckDB answers differ from PostGIS")
+    _duck = timings[timings["engine"] != "postgis"]
+    print(f"{(~_duck['matches_postgis']).sum()} of {len(_duck)} DuckDB answers differ from PostGIS")
     summary
     return summary, timings
 
@@ -736,11 +737,12 @@ def _(RESULTS_DIR, pd, summary):
 
 @app.cell
 def _(mo, timings):
-    _wrong = timings[~timings["matches_postgis"]]
+    _duck = timings[timings["engine"] != "postgis"]
+    _wrong = _duck[~_duck["matches_postgis"]]
     mo.md(f"""
     ## What didn't work, and what this doesn't show
 
-    - **{len(_wrong)} of {len(timings)}** DuckDB answers differed from PostGIS in this run.
+    - **{len(_wrong)} of {len(_duck)}** DuckDB answers differed from PostGIS in this run.
     - MinIO, which the issue suggested, no longer publishes pullable Docker images (Docker Hub refuses the pull,
       quay.io asks for a login), so the object store is SeaweedFS. Any S3-compatible store serves the same range reads.
     - geoparquet-io 1.2.0 crashes on DuckDB 2.0 (it calls a connection method 2.0 removed), so we pin 0.4.0.

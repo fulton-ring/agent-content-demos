@@ -45,7 +45,7 @@ tables into PostGIS and building GiST indexes took 57 s and 2.0 GB
 
 ## Results
 
-The answers matched: **all 1,485 DuckDB answers returned the same ids as PostGIS.** Each query ran at 20 random
+The answers matched: **all 1,290 DuckDB answers returned the same ids as PostGIS.** Each query ran at 20 random
 hospital locations (5 for the county join). Times are medians from a local object store, on a 4-CPU Linux cloud
 container. Full medians, p95s, bytes and row groups for every variant are in
 [`results/summary.csv`](results/summary.csv), and every query is in [`results/timings.csv`](results/timings.csv).
@@ -84,7 +84,7 @@ What the numbers say:
   layout without `bbox` or native geometry read all 619 row groups, in 646 requests.
 - **On the best layout, point, box and nearest queries come back in 17 to 83 ms**, and a county join for a whole
   state in 0.05 to 1.2 s.
-- **PostGIS is still 2 to 113 times faster** on every query. Everything but the joins and the FRS county polygon
+- **PostGIS is still 2 to over 100 times faster** on every query. Everything but the joins and the FRS county polygon
   (33 ms) runs under 10 ms. DuckDB has a
   floor of about 17 ms per query, for reading the footer and making several requests. It has no spatial index, so
   nearest-5 is a widening window: 0.6 ms in PostGIS, about 70 ms in DuckDB.
