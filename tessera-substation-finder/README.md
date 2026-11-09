@@ -21,9 +21,9 @@ Everything is in one marimo notebook, [`substation_finder.py`](substation_finder
 ```
 
 It needs [uv](https://docs.astral.sh/uv/), about 10 GB of free disk and 8 GB of memory. With an empty `data/` it
-range-reads about 46 GB from Source Cooperative. On a 4-CPU cloud machine the patch reads took 24 minutes and the
-whole run about 50 minutes. Reruns reuse `data/` and take about 10 minutes, most of it CNN training and scanning on the
-CPU. To read the notebook with its outputs: `uv run marimo edit substation_finder.py`.
+range-reads 45.9 GB from Source Cooperative. From a clean checkout on a 4-CPU cloud machine it took 43 minutes: 11 for
+the patch reads, 7.5 to read and scan the 48 tiles, 3 for the line ends and 3 for training. Reruns reuse `data/` and
+take about 10 minutes. To read the notebook with its outputs: `uv run marimo edit substation_finder.py`.
 
 ## Data
 
@@ -92,9 +92,8 @@ real precision. Of the 20 top line-end places, **1 was a substation** (a large s
 **2 were hydro dams**, 1 was unclear and 16 were something else. Most of those were commercial or industrial land.
 In total the CNN flags 139 of the 502 line-end places (`outputs/line_end_flags.csv`).
 
-**Cost:** $0, with no account or key. About 46 GB of range reads from an empty `data/`, 8.2 GB kept in `data/`, and
-about 10 minutes of CPU per rerun on 4 cores (CNN training 2.5 minutes, tile scan 3 minutes). See
-`outputs/summary.json`.
+**Cost:** $0, with no account or key. 45.9 GB of range reads and 82 MB of other downloads from an empty `data/`,
+8.2 GB kept in `data/`, and 43 minutes on 4 cores from a clean checkout. See `outputs/summary.json`.
 
 ## What didn't work
 
