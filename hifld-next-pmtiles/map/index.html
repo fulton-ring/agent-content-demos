@@ -35,7 +35,7 @@ async function start() {
     style: { version: 8, sources: {}, layers: [{ id: "bg", type: "background", paint: { "background-color": "#f4f1ea" } }] },
   });
   window.map = map;
-  map.on("error", (e) => window.mapErrors.push(String(e.error && e.error.message || e.error)));
+  map.on("error", (e) => window.mapErrors.push(`${e.sourceId || "map"}: ${e.error && e.error.message || e.error}`));
   await new Promise((resolve) => map.on("load", resolve));
   for (const layer of layers) {
     // HIFLD Next's files name their tile layer after a temporary build file, so read it from the archive.

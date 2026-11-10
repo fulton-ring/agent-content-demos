@@ -46,10 +46,11 @@ def _():
     # Can HIFLD Next's most-used layers live on a public map as single PMTiles files?
 
     A PMTiles file is one archive of map tiles. A browser reads the tiles it needs with HTTP range
-    requests, so the file can sit on plain object storage with no tile server. The catch is that the
-    file is read-only: any data change means rewriting and re-uploading the whole file. This notebook
-    checks what HIFLD Next already publishes, rebuilds the most-used layers, puts a map on them, and
-    tests what happens to people with the map open when a file changes, with and without a CDN.
+    requests, so the file can sit on plain object storage with no tile server. The catch is that
+    the file is read-only: any data change means rewriting and re-uploading the whole file. This
+    notebook checks what HIFLD Next already publishes, rebuilds the most-used layers, puts a map
+    on them, and tests what happens to people with the map open when a file changes, with and
+    without a CDN.
     """)
     return
 
@@ -85,7 +86,11 @@ def _():
     )
 
     def file_record(key: tuple[str, str]) -> dict:
-        response = http.get(f"{API}/{key[0]}/files/{key[1]}")
+        for attempt in range(6):  # the API rate-limits bursts; back off and retry a bounded number
+            response = http.get(f"{API}/{key[0]}/files/{key[1]}")
+            if response.status_code != 429:
+                break
+            time.sleep(float(response.headers.get("retry-after", 2**attempt)))
         response.raise_for_status()
         record = response.json()
         assets = record.get("assets", {}).values()
@@ -103,7 +108,7 @@ def _():
             ),
         }
 
-    with ThreadPoolExecutor(8) as pool:
+    with ThreadPoolExecutor(4) as pool:
         catalog = pd.DataFrame(list(pool.map(file_record, file_keys)))
     catalog.to_csv(OUT / "catalog_pmtiles.csv", index=False)
     no_pmtiles = catalog[catalog.pmtiles_url.isna()]
@@ -227,13 +232,15 @@ def _():
 
 @app.cell
 def _(chosen):
-    def tippecanoe(frame: gpd.GeoDataFrame, target: Path) -> None:
+    def tippecanoe(frame: gpd.GeoDataFrame, target: Path, layer: str) -> None:
+        """Build like HIFLD Next does, but with a fixed tile layer name: a map's style refers to it,
+        so a name that changes between builds (ours did at first) blanks the layer on update."""
         source = target.with_suffix(".fgb")
         pyogrio.write_dataframe(frame, source, driver="FlatGeobuf")
         command = [
             "tippecanoe", "-zg", "--read-parallel", "--drop-densest-as-needed",
             "--extend-zooms-if-still-dropping", "--force", "--maximum-zoom=14", "--quiet",
-            "-l", target.stem, "-o", str(target), str(source),
+            "-l", layer, "-o", str(target), str(source),
         ]  # fmt: skip
         subprocess.run(command, check=True)
         source.unlink()
@@ -256,7 +263,7 @@ def _(chosen):
                         handle.write(chunk)
         _started = time.perf_counter()
         frame = gpd.read_parquet(parquet).to_crs(4326)
-        tippecanoe(frame, SITE / f"{_row.dataset}.pmtiles")
+        tippecanoe(frame, SITE / f"{_row.dataset}.pmtiles", _row.dataset)
         tippecanoe_seconds = time.perf_counter() - _started
         max_zoom = header(SITE / f"{_row.dataset}.pmtiles")["max_zoom"]
 
@@ -338,7 +345,7 @@ def _(build_table, chosen):
         "#6c4ab6",
         "#e36397",
         "#8a6f3e",
-        "#2e4057",
+        "#b7c3d3",
     ]
     states_url = (
         "https://hifld.publicenvirodata.org/storage/hifld/us-state-boundaries-1/"
@@ -498,14 +505,14 @@ def _():
 def _(tippecanoe):
     hospitals = gpd.read_parquet(DATA / "hospitals-3.parquet").to_crs(4326)
     version_one = hospitals.assign(layer_version="v1")
-    tippecanoe(version_one, DATA / "hospitals-v1.pmtiles")
+    tippecanoe(version_one, DATA / "hospitals-v1.pmtiles", "hospitals-3")
 
     _started = time.perf_counter()
     edited = gpd.read_parquet(DATA / "hospitals-3.parquet").to_crs(4326)
     edited = edited.drop(index=edited.index[0])
     edited.loc[edited.index[0], "BEDS"] = edited.loc[edited.index[0], "BEDS"] + 10
     edited = edited.assign(layer_version="v2")
-    tippecanoe(edited, DATA / "hospitals-v2.pmtiles")
+    tippecanoe(edited, DATA / "hospitals-v2.pmtiles", "hospitals-3")
     rebuild_seconds = time.perf_counter() - _started
     _started = time.perf_counter()
     shutil.copy(DATA / "hospitals-v2.pmtiles", SITE / "hospitals.staged")
@@ -515,10 +522,11 @@ def _(tippecanoe):
     uplink_mbit = 50  # stated assumption for an upload from an office connection
     upload_estimate = v2_mb * 8 / uplink_mbit
     mo.md(
-        f"Rebuilding hospitals ({len(edited):,} features) took **{rebuild_seconds:.1f} s**; copying "
-        f"it into the local bucket took {publish_seconds:.2f} s. The new file is {v2_mb:.1f} MB, "
-        f"which at an assumed {uplink_mbit} Mbit/s uplink is about **{upload_estimate:.1f} s** to "
-        "upload to a real bucket (not measured: we had no bucket we could write to)."
+        f"Rebuilding hospitals ({len(edited):,} features) took **{rebuild_seconds:.1f} s**; "
+        f"copying it into the local bucket took {publish_seconds:.2f} s. The new file is "
+        f"{v2_mb:.1f} MB, which at an assumed {uplink_mbit} Mbit/s uplink is about "
+        f"**{upload_estimate:.1f} s** to upload to a real bucket (not measured: we had no "
+        "bucket we could write to)."
     )
     return publish_seconds, rebuild_seconds, upload_estimate
 
@@ -538,12 +546,14 @@ def _(browser, nginx, open_map, rebuild_seconds, start_nginx):
         _result["versions"] = _result["page"].evaluate("window.versionsSeen('hospitals-3')")
         return _result
 
-    def summary(step: str, _result: dict) -> dict:
+    def summary(step: str, outcome: dict) -> dict:
+        changed = [e for e in outcome["errors"] if e.startswith("hospitals-3")]
         return {
             "step": step,
-            "versions_drawn": "+".join(_result["versions"]) or "none",
-            "map_errors": len(_result["errors"]),
-            "first_error": (_result["errors"] or [""])[0][:90],
+            "versions_drawn": "+".join(outcome["versions"]) or "none",
+            "hospital_errors": len(changed),
+            "first_error": (changed or [""])[0][:100],
+            "other_layer_errors": len(outcome["errors"]) - len(changed),
         }
 
     _rows = []
@@ -675,7 +685,16 @@ def _(build_table, first_view_summary):
 
 
 @app.cell
-def _(build_table, cost_table, first_view_summary, hifld_headers, publish_seconds, rebuild_seconds, update_table, upload_estimate):  # fmt: skip
+def _(
+    build_table,
+    cost_table,
+    first_view_summary,
+    hifld_headers,
+    publish_seconds,
+    rebuild_seconds,
+    update_table,
+    upload_estimate,
+):
     results = {
         "run_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "layers": build_table.to_dict(orient="records"),
@@ -688,7 +707,17 @@ def _(build_table, cost_table, first_view_summary, hifld_headers, publish_second
         "costs": cost_table.to_dict(orient="records"),
     }
     (OUT / "results.json").write_text(json.dumps(results, indent=1, default=str))
+    results_written = True
     mo.md(f"Wrote `outputs/results.json` at {results['run_at']}.")
+    return (results_written,)
+
+
+@app.cell
+def _(browser, nginx, results_written):
+    assert results_written
+    browser.close()
+    nginx["server"].terminate()
+    nginx["server"].wait(timeout=10)
     return
 
 
