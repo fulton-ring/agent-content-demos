@@ -1,0 +1,4203 @@
+{
+ "HIFLD Next": {
+  "instructions": null,
+  "tools": [
+   {
+    "name": "list_collections",
+    "description": "List catalog collections as the starting point for dataset discovery.",
+    "input_schema": {
+     "additionalProperties": false,
+     "properties": {},
+     "type": "object"
+    }
+   },
+   {
+    "name": "get_collection",
+    "description": "Get collection metadata by numeric ID or slug.",
+    "input_schema": {
+     "additionalProperties": false,
+     "properties": {
+      "identity": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "identity"
+     ],
+     "type": "object"
+    }
+   },
+   {
+    "name": "search_datasets",
+    "description": "Search one collection; tags use key=value and results are paginated.",
+    "input_schema": {
+     "additionalProperties": false,
+     "properties": {
+      "collection": {
+       "type": "string"
+      },
+      "search": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      },
+      "tags": {
+       "anyOf": [
+        {
+         "items": {
+          "type": "string"
+         },
+         "type": "array"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      },
+      "limit": {
+       "default": 100,
+       "type": "integer"
+      },
+      "offset": {
+       "default": 0,
+       "type": "integer"
+      }
+     },
+     "required": [
+      "collection"
+     ],
+     "type": "object"
+    }
+   },
+   {
+    "name": "get_dataset",
+    "description": "Get dataset metadata and compact file summaries by ID or slug.",
+    "input_schema": {
+     "additionalProperties": false,
+     "properties": {
+      "collection": {
+       "type": "string"
+      },
+      "identity": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "collection",
+      "identity"
+     ],
+     "type": "object"
+    }
+   },
+   {
+    "name": "get_dataset_file",
+    "description": "Get all available file formats and ready-to-copy source references.\n\nPrefer map_sources (published PMTiles) for displaying existing data in\nview_map without SQL. Use query_sources for filtering, joins, aggregation,\ncalculations, or exact analysis. Choose sources independently per layer;\na map can combine prebuilt tiles with query results. Inspect schema and\navailable formats rather than assuming a dataset has prebuilt tiles.\nquery_hints summarizes observed Hive partition fields and values from\ncatalog paths, not an exhaustive inventory. References are deduplicated;\nrename aliases when combining sources or self-joining. Before spatial\nSQL, call inspect_query_source for actual Parquet columns and geometry CRS.",
+    "input_schema": {
+     "additionalProperties": false,
+     "properties": {
+      "collection": {
+       "type": "string"
+      },
+      "dataset": {
+       "type": "string"
+      },
+      "identity": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "collection",
+      "dataset",
+      "identity"
+     ],
+     "type": "object"
+    }
+   },
+   {
+    "name": "get_dataset_file_schema",
+    "description": "Get a bounded page of catalog schema columns and their provenance.\n\nThese may predate generated Parquet fields or reflect only a sample.\nUse inspect_query_source for actual Parquet columns and typed geometry CRS.",
+    "input_schema": {
+     "additionalProperties": false,
+     "properties": {
+      "collection": {
+       "type": "string"
+      },
+      "dataset": {
+       "type": "string"
+      },
+      "identity": {
+       "type": "string"
+      },
+      "version": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      },
+      "column_offset": {
+       "default": 0,
+       "type": "integer"
+      },
+      "column_limit": {
+       "default": 100,
+       "type": "integer"
+      }
+     },
+     "required": [
+      "collection",
+      "dataset",
+      "identity"
+     ],
+     "type": "object"
+    }
+   },
+   {
+    "name": "read_geoparquet_rows",
+    "description": "Read rows using a source reference copied from get_dataset_file.query_sources.\n\nThe source object contains alias, collection_slug, dataset_slug,\nfile_slug, version, asset_key, and optionally storage_location_slug.\nThe server resolves its storage location; callers cannot provide an\nobject-store URL.",
+    "input_schema": {
+     "additionalProperties": false,
+     "properties": {
+      "source": {
+       "additionalProperties": false,
+       "properties": {
+        "alias": {
+         "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,62}$",
+         "type": "string"
+        },
+        "collection_slug": {
+         "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+         "type": "string"
+        },
+        "dataset_slug": {
+         "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+         "type": "string"
+        },
+        "file_slug": {
+         "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+         "type": "string"
+        },
+        "version": {
+         "maxLength": 128,
+         "minLength": 1,
+         "type": "string"
+        },
+        "asset_key": {
+         "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+         "type": "string"
+        },
+        "storage_location_slug": {
+         "anyOf": [
+          {
+           "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+           "type": "string"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null
+        }
+       },
+       "required": [
+        "alias",
+        "collection_slug",
+        "dataset_slug",
+        "file_slug",
+        "version",
+        "asset_key"
+       ],
+       "type": "object"
+      },
+      "columns": {
+       "anyOf": [
+        {
+         "items": {
+          "type": "string"
+         },
+         "type": "array"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      },
+      "limit": {
+       "default": 100,
+       "type": "integer"
+      },
+      "offset": {
+       "default": 0,
+       "type": "integer"
+      }
+     },
+     "required": [
+      "source"
+     ],
+     "type": "object"
+    }
+   },
+   {
+    "name": "query_parquet",
+    "description": "Run one safe read-only SELECT over up to eight catalog sources.\n\n        Copy source objects from get_dataset_file.query_sources and reference\n        their aliases as SQL tables. SELECTs, joins, CTEs, aggregates, and the\n        allowlisted spatial functions are supported. The limit bounds the\n        returned first page, not the relational meaning of SQL LIMIT clauses.\n        Raw GEOMETRY values are not returned as GeoJSON. Use ST_AsHexWKB for a\n        serialized representation or generate_mvt_tile_url for scalable maps.\n\n        Before view_map, test new or revised query-layer SQL here with a small\n        returned-page limit, identical sources and result_crs. Inspect errors,\n        empty results, geometry, and styling columns; reuse the validated SQL.\n        A small returned page does not bound the work of joins or aggregates.\n        \n\nBefore writing spatial SQL, call inspect_query_source for each input and consult\nget_dataset_file.query_hints. Catalog statistics may predate generated Parquet\nbbox or Hive fields. Use verified columns and CRS, never guessed names.\n\nFor large sources, restrict relevant Hive partitions and apply scalar bbox\noverlap filters in the source CRS before exact spatial predicates and joins.\nThe pattern is xmin <= east AND xmax >= west AND ymin <= north AND ymax >= south;\nuse discovered field paths, quote identifiers, and a conservative query envelope\nin the bbox CRS. Missing metadata does not justify inventing bbox fields.\nPreserve string partition values including leading zeroes; select all partitions\nintersecting the area. Camera bounds do not filter SQL.\n\nSpatial query sources are normalized into the requested result_crs before SQL;\nmap preparation defaults that working CRS to EPSG:4326. Native bbox columns stay\nin the source CRS, while coordinate literals and geometry expressions are in the\nworking CRS. Unknown source CRS is not EPSG:4326 and cannot be guessed.\nST_Intersects, ST_AsHexWKB, ST_GeomFromHexWKB, and constant ST_MakeEnvelope expressions\nare supported. ST_Transform is not currently supported by the SQL compiler.\nLIMIT and CTE names do not make a full-source spatial join cheap.\n\nFor multiple polygon matches, MAX on a categorical zone label is lexicographic,\nnot a risk ranking. Use a documented domain rule or return distinct categories;\ndo not independently aggregate related attributes into a fictitious matched row.\nAn unmatched LEFT JOIN is unknown coverage, not proof of safety. Prebuilt tiles\nare for display, not exact exposure calculations.\n",
+    "input_schema": {
+     "additionalProperties": false,
+     "properties": {
+      "sources": {
+       "items": {
+        "additionalProperties": false,
+        "properties": {
+         "alias": {
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,62}$",
+          "type": "string"
+         },
+         "collection_slug": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+          "type": "string"
+         },
+         "dataset_slug": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+          "type": "string"
+         },
+         "file_slug": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+          "type": "string"
+         },
+         "version": {
+          "maxLength": 128,
+          "minLength": 1,
+          "type": "string"
+         },
+         "asset_key": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+          "type": "string"
+         },
+         "storage_location_slug": {
+          "anyOf": [
+           {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+            "type": "string"
+           },
+           {
+            "type": "null"
+           }
+          ],
+          "default": null
+         }
+        },
+        "required": [
+         "alias",
+         "collection_slug",
+         "dataset_slug",
+         "file_slug",
+         "version",
+         "asset_key"
+        ],
+        "type": "object"
+       },
+       "type": "array"
+      },
+      "sql": {
+       "type": "string"
+      },
+      "limit": {
+       "default": 100,
+       "type": "integer"
+      },
+      "geometry_column": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      },
+      "result_crs": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      }
+     },
+     "required": [
+      "sources",
+      "sql"
+     ],
+     "type": "object"
+    }
+   },
+   {
+    "name": "inspect_query_source",
+    "description": "Inspect actual Parquet columns and geometry CRS using a zero-row query.\n\nCopy one query_sources reference from get_dataset_file. Uses the existing\nbounded query service with SELECT * LIMIT 0: may list objects/read metadata but\ndoes not scan feature rows. Returns columns, geometry_fields with CRS\nwhen available, and numeric bbox_candidates. Candidates alone do not\nprove bbox CRS or geometry association. Combine with query_hints to find\nusable Hive partitions. Unknown CRS stays null; do not guess it.\nNo query tokens, tile URLs, or feature rows are returned.",
+    "input_schema": {
+     "additionalProperties": false,
+     "properties": {
+      "source": {
+       "additionalProperties": false,
+       "properties": {
+        "alias": {
+         "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,62}$",
+         "type": "string"
+        },
+        "collection_slug": {
+         "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+         "type": "string"
+        },
+        "dataset_slug": {
+         "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+         "type": "string"
+        },
+        "file_slug": {
+         "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+         "type": "string"
+        },
+        "version": {
+         "maxLength": 128,
+         "minLength": 1,
+         "type": "string"
+        },
+        "asset_key": {
+         "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+         "type": "string"
+        },
+        "storage_location_slug": {
+         "anyOf": [
+          {
+           "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+           "type": "string"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null
+        }
+       },
+       "required": [
+        "alias",
+        "collection_slug",
+        "dataset_slug",
+        "file_slug",
+        "version",
+        "asset_key"
+       ],
+       "type": "object"
+      }
+     },
+     "required": [
+      "source"
+     ],
+     "type": "object"
+    }
+   },
+   {
+    "name": "generate_mvt_tile_url",
+    "description": "Generate an MVT tile URL template for a geometry-returning SQL query.\n\n        Use this when SQL-derived tiles are needed. For displaying existing data,\n        prefer prebuilt map_sources from get_dataset_file with view_map; do not\n        regenerate tiles merely to display or style an existing tiled dataset.\n\n        Copy catalog source references from get_dataset_file.query_sources.\n        SQL must SELECT a GEOMETRY column, not ST_AsGeoJSON or geometry text.\n        Set geometry_column when more than one geometry is returned. Set\n        result_crs to choose the CRS in which sources and coordinate literals\n        are evaluated. Map queries default to EPSG:4326. Tiles clip geometry\n        server-side from that working CRS.\n\n        Returns tile_url with {z}/{x}/{y}, required headers, expires_at,\n        source_layer, geometry_column, and result_crs. Send the returned headers\n        on each tile GET. Regenerate after expiry. No features or map UI are\n        returned. The initial one-row probe does not limit the tiled result;\n        each tile retains existing query time, memory, and density limits.\n        \n\nBefore writing spatial SQL, call inspect_query_source for each input and consult\nget_dataset_file.query_hints. Catalog statistics may predate generated Parquet\nbbox or Hive fields. Use verified columns and CRS, never guessed names.\n\nFor large sources, restrict relevant Hive partitions and apply scalar bbox\noverlap filters in the source CRS before exact spatial predicates and joins.\nThe pattern is xmin <= east AND xmax >= west AND ymin <= north AND ymax >= south;\nuse discovered field paths, quote identifiers, and a conservative query envelope\nin the bbox CRS. Missing metadata does not justify inventing bbox fields.\nPreserve string partition values including leading zeroes; select all partitions\nintersecting the area. Camera bounds do not filter SQL.\n\nSpatial query sources are normalized into the requested result_crs before SQL;\nmap preparation defaults that working CRS to EPSG:4326. Native bbox columns stay\nin the source CRS, while coordinate literals and geometry expressions are in the\nworking CRS. Unknown source CRS is not EPSG:4326 and cannot be guessed.\nST_Intersects, ST_AsHexWKB, ST_GeomFromHexWKB, and constant ST_MakeEnvelope expressions\nare supported. ST_Transform is not currently supported by the SQL compiler.\nLIMIT and CTE names do not make a full-source spatial join cheap.\n\nFor multiple polygon matches, MAX on a categorical zone label is lexicographic,\nnot a risk ranking. Use a documented domain rule or return distinct categories;\ndo not independently aggregate related attributes into a fictitious matched row.\nAn unmatched LEFT JOIN is unknown coverage, not proof of safety. Prebuilt tiles\nare for display, not exact exposure calculations.\n",
+    "input_schema": {
+     "additionalProperties": false,
+     "properties": {
+      "sources": {
+       "items": {
+        "additionalProperties": false,
+        "properties": {
+         "alias": {
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,62}$",
+          "type": "string"
+         },
+         "collection_slug": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+          "type": "string"
+         },
+         "dataset_slug": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+          "type": "string"
+         },
+         "file_slug": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+          "type": "string"
+         },
+         "version": {
+          "maxLength": 128,
+          "minLength": 1,
+          "type": "string"
+         },
+         "asset_key": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+          "type": "string"
+         },
+         "storage_location_slug": {
+          "anyOf": [
+           {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+            "type": "string"
+           },
+           {
+            "type": "null"
+           }
+          ],
+          "default": null
+         }
+        },
+        "required": [
+         "alias",
+         "collection_slug",
+         "dataset_slug",
+         "file_slug",
+         "version",
+         "asset_key"
+        ],
+        "type": "object"
+       },
+       "type": "array"
+      },
+      "sql": {
+       "type": "string"
+      },
+      "geometry_column": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      },
+      "result_crs": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      }
+     },
+     "required": [
+      "sources",
+      "sql"
+     ],
+     "type": "object"
+    }
+   },
+   {
+    "name": "get_query_page",
+    "description": "Re-run a signed query and return a bounded page at the requested offset.",
+    "input_schema": {
+     "additionalProperties": false,
+     "properties": {
+      "query_token": {
+       "type": "string"
+      },
+      "offset": {
+       "type": "integer"
+      },
+      "page_size": {
+       "default": 100,
+       "type": "integer"
+      }
+     },
+     "required": [
+      "query_token",
+      "offset"
+     ],
+     "type": "object"
+    }
+   },
+   {
+    "name": "view_query_map",
+    "description": "Execute and map up to eight named spatial GeoParquet queries.\n\n        Prefer view_map for ordinary visualization or mixed prebuilt/query maps.\n        Check get_dataset_file.map_sources before querying only to display data.\n        This legacy tool always executes SQL for every layer.\n\n        The widget sends asynchronous map_status model-context updates when the\n        host supports them: loading, loaded, partial, or failed, with per-layer\n        status and sanitized errors. Loaded applies only to the current viewport,\n        not the entire dataset or proof that features are present. Use these\n        updates to report failures and partial success. Missing feedback is not\n        success; ask the user for the widget error if updates are unavailable.\n\n        Success prepares a map configuration; it does not confirm that the host\n        rendered it or loaded every layer. Do not claim visual success without\n        confirmation from the widget or user. For an invalid map result, report\n        the widget's validation field paths as a configuration/host problem.\n        Do not change SQL or switch to expensive query layers to fix validation\n        errors. Tile-fetch errors are separate and require their own diagnosis.\n\n        Copy source objects from get_dataset_file.query_sources into each\n        layer and provide its safe read-only SQL. Always supply a meaningful\n        map title and unique layer names. For data-driven styling, select the\n        styled columns in SQL and set color_property directly on that layer,\n        with optional breaks and color_scheme. Numeric columns can also drive\n        point_radius_property or line_width_property. The server creates query\n        tokens internally, so callers never copy opaque tokens into this tool.\n        \n\nBefore writing spatial SQL, call inspect_query_source for each input and consult\nget_dataset_file.query_hints. Catalog statistics may predate generated Parquet\nbbox or Hive fields. Use verified columns and CRS, never guessed names.\n\nFor large sources, restrict relevant Hive partitions and apply scalar bbox\noverlap filters in the source CRS before exact spatial predicates and joins.\nThe pattern is xmin <= east AND xmax >= west AND ymin <= north AND ymax >= south;\nuse discovered field paths, quote identifiers, and a conservative query envelope\nin the bbox CRS. Missing metadata does not justify inventing bbox fields.\nPreserve string partition values including leading zeroes; select all partitions\nintersecting the area. Camera bounds do not filter SQL.\n\nSpatial query sources are normalized into the requested result_crs before SQL;\nmap preparation defaults that working CRS to EPSG:4326. Native bbox columns stay\nin the source CRS, while coordinate literals and geometry expressions are in the\nworking CRS. Unknown source CRS is not EPSG:4326 and cannot be guessed.\nST_Intersects, ST_AsHexWKB, ST_GeomFromHexWKB, and constant ST_MakeEnvelope expressions\nare supported. ST_Transform is not currently supported by the SQL compiler.\nLIMIT and CTE names do not make a full-source spatial join cheap.\n\nFor multiple polygon matches, MAX on a categorical zone label is lexicographic,\nnot a risk ranking. Use a documented domain rule or return distinct categories;\ndo not independently aggregate related attributes into a fictitious matched row.\nAn unmatched LEFT JOIN is unknown coverage, not proof of safety. Prebuilt tiles\nare for display, not exact exposure calculations.\n",
+    "input_schema": {
+     "$defs": {
+      "BasemapStyle": {
+       "enum": [
+        "street",
+        "satellite"
+       ],
+       "type": "string"
+      },
+      "Color": {
+       "pattern": "^#[0-9A-Fa-f]{6}$",
+       "type": "string"
+      },
+      "ColorScheme": {
+       "enum": [
+        "blues",
+        "greens",
+        "oranges",
+        "purples",
+        "viridis",
+        "plasma",
+        "rdyblu",
+        "rdyg"
+       ],
+       "type": "string"
+      },
+      "JSONValue": {
+       "anyOf": [
+        {
+         "type": "boolean"
+        },
+        {
+         "type": "integer"
+        },
+        {
+         "type": "number"
+        },
+        {
+         "type": "string"
+        },
+        {
+         "items": {
+          "$ref": "#/$defs/JSONValue"
+         },
+         "type": "array"
+        },
+        {
+         "additionalProperties": {
+          "$ref": "#/$defs/JSONValue"
+         },
+         "type": "object"
+        },
+        {
+         "type": "null"
+        }
+       ]
+      },
+      "Latitude": {
+       "maximum": 90,
+       "minimum": -90,
+       "type": "number"
+      },
+      "Longitude": {
+       "maximum": 180,
+       "minimum": -180,
+       "type": "number"
+      },
+      "MapCameraInput": {
+       "additionalProperties": false,
+       "description": "Constrained initial MapLibre camera without arbitrary expressions.",
+       "properties": {
+        "bounds": {
+         "anyOf": [
+          {
+           "maxItems": 4,
+           "minItems": 4,
+           "prefixItems": [
+            {
+             "$ref": "#/$defs/Longitude"
+            },
+            {
+             "$ref": "#/$defs/Latitude"
+            },
+            {
+             "$ref": "#/$defs/Longitude"
+            },
+            {
+             "$ref": "#/$defs/Latitude"
+            }
+           ],
+           "type": "array"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null
+        },
+        "center": {
+         "anyOf": [
+          {
+           "maxItems": 2,
+           "minItems": 2,
+           "prefixItems": [
+            {
+             "$ref": "#/$defs/Longitude"
+            },
+            {
+             "$ref": "#/$defs/Latitude"
+            }
+           ],
+           "type": "array"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null
+        },
+        "zoom": {
+         "anyOf": [
+          {
+           "$ref": "#/$defs/Zoom"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null
+        },
+        "bearing": {
+         "anyOf": [
+          {
+           "maximum": 180,
+           "minimum": -180,
+           "type": "number"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null
+        },
+        "pitch": {
+         "anyOf": [
+          {
+           "maximum": 85,
+           "minimum": 0,
+           "type": "number"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null
+        },
+        "padding": {
+         "anyOf": [
+          {
+           "maximum": 256,
+           "minimum": 0,
+           "type": "number"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null
+        }
+       },
+       "type": "object"
+      },
+      "MapLayerStyleInput": {
+       "additionalProperties": false,
+       "description": "Data-driven styling equivalent to the web map's approved style vocabulary.",
+       "properties": {
+        "color": {
+         "anyOf": [
+          {
+           "$ref": "#/$defs/Color"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Fallback solid color as a six-digit hex value."
+        },
+        "color_property": {
+         "anyOf": [
+          {
+           "maxLength": 200,
+           "minLength": 1,
+           "type": "string"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Query result column used for data-driven color. Numeric columns use breaks; string columns use categorical colors. Inspect the query preview's actual distinct values before choosing categorical styling; do not assume dataset-specific values. The column must be selected by the SQL."
+        },
+        "color_scheme": {
+         "anyOf": [
+          {
+           "$ref": "#/$defs/ColorScheme"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Named web-map palette used with color_property."
+        },
+        "breaks": {
+         "anyOf": [
+          {
+           "items": {
+            "type": "number"
+           },
+           "maxItems": 8,
+           "type": "array"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Optional increasing numeric color breakpoints; omit for automatic breaks."
+        },
+        "opacity": {
+         "anyOf": [
+          {
+           "maximum": 1,
+           "minimum": 0,
+           "type": "number"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Fill, line, and point opacity."
+        },
+        "point_radius": {
+         "anyOf": [
+          {
+           "exclusiveMinimum": 0,
+           "maximum": 50,
+           "type": "number"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Base point radius in pixels."
+        },
+        "point_radius_property": {
+         "anyOf": [
+          {
+           "maxLength": 200,
+           "minLength": 1,
+           "type": "string"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Numeric query result column used to scale point radius between half and double point_radius. The column must be selected by the SQL."
+        },
+        "point_radius_scale": {
+         "anyOf": [
+          {
+           "$ref": "#/$defs/NumericScale"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Numeric transform used for point-radius scaling."
+        },
+        "line_width": {
+         "anyOf": [
+          {
+           "exclusiveMinimum": 0,
+           "maximum": 20,
+           "type": "number"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Base line width in pixels."
+        },
+        "line_width_property": {
+         "anyOf": [
+          {
+           "maxLength": 200,
+           "minLength": 1,
+           "type": "string"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Numeric query result column used to scale line width between half and double line_width. The column must be selected by the SQL."
+        },
+        "line_width_scale": {
+         "anyOf": [
+          {
+           "$ref": "#/$defs/NumericScale"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Numeric transform used for line-width scaling."
+        }
+       },
+       "type": "object"
+      },
+      "MapQueryLayerInput": {
+       "additionalProperties": false,
+       "description": "One named, independently styled spatial query in a map.",
+       "properties": {
+        "color": {
+         "anyOf": [
+          {
+           "$ref": "#/$defs/Color"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Fallback solid color as a six-digit hex value."
+        },
+        "color_property": {
+         "anyOf": [
+          {
+           "maxLength": 200,
+           "minLength": 1,
+           "type": "string"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Query result column used for data-driven color. Numeric columns use breaks; string columns use categorical colors. Inspect the query preview's actual distinct values before choosing categorical styling; do not assume dataset-specific values. The column must be selected by the SQL."
+        },
+        "color_scheme": {
+         "anyOf": [
+          {
+           "$ref": "#/$defs/ColorScheme"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Named web-map palette used with color_property."
+        },
+        "breaks": {
+         "anyOf": [
+          {
+           "items": {
+            "type": "number"
+           },
+           "maxItems": 8,
+           "type": "array"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Optional increasing numeric color breakpoints; omit for automatic breaks."
+        },
+        "opacity": {
+         "anyOf": [
+          {
+           "maximum": 1,
+           "minimum": 0,
+           "type": "number"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Fill, line, and point opacity."
+        },
+        "point_radius": {
+         "anyOf": [
+          {
+           "exclusiveMinimum": 0,
+           "maximum": 50,
+           "type": "number"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Base point radius in pixels."
+        },
+        "point_radius_property": {
+         "anyOf": [
+          {
+           "maxLength": 200,
+           "minLength": 1,
+           "type": "string"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Numeric query result column used to scale point radius between half and double point_radius. The column must be selected by the SQL."
+        },
+        "point_radius_scale": {
+         "anyOf": [
+          {
+           "$ref": "#/$defs/NumericScale"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Numeric transform used for point-radius scaling."
+        },
+        "line_width": {
+         "anyOf": [
+          {
+           "exclusiveMinimum": 0,
+           "maximum": 20,
+           "type": "number"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Base line width in pixels."
+        },
+        "line_width_property": {
+         "anyOf": [
+          {
+           "maxLength": 200,
+           "minLength": 1,
+           "type": "string"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Numeric query result column used to scale line width between half and double line_width. The column must be selected by the SQL."
+        },
+        "line_width_scale": {
+         "anyOf": [
+          {
+           "$ref": "#/$defs/NumericScale"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Numeric transform used for line-width scaling."
+        },
+        "layer_name": {
+         "$ref": "#/$defs/MapTitle"
+        },
+        "sources": {
+         "items": {
+          "additionalProperties": {
+           "$ref": "#/$defs/JSONValue"
+          },
+          "type": "object"
+         },
+         "maxItems": 8,
+         "minItems": 1,
+         "type": "array"
+        },
+        "sql": {
+         "maxLength": 50000,
+         "minLength": 1,
+         "type": "string"
+        },
+        "geometry_column": {
+         "anyOf": [
+          {
+           "type": "string"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Name of the DuckDB GEOMETRY result column to render."
+        },
+        "result_crs": {
+         "anyOf": [
+          {
+           "type": "string"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "CRS of the geometry values produced by SQL. Tiles and map framing reproject that result server-side."
+        },
+        "style": {
+         "anyOf": [
+          {
+           "$ref": "#/$defs/MapLayerStyleInput"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Deprecated nested style object. Prefer the layer-level color, color_property, color_scheme, breaks, opacity, point_radius, point_radius_property, point_radius_scale, line_width, line_width_property, and line_width_scale fields."
+        },
+        "visible": {
+         "default": true,
+         "type": "boolean"
+        }
+       },
+       "required": [
+        "layer_name",
+        "sources",
+        "sql"
+       ],
+       "type": "object"
+      },
+      "MapTitle": {
+       "maxLength": 200,
+       "minLength": 1,
+       "type": "string"
+      },
+      "NumericScale": {
+       "enum": [
+        "linear",
+        "sqrt",
+        "log"
+       ],
+       "type": "string"
+      },
+      "Zoom": {
+       "maximum": 22,
+       "minimum": 0,
+       "type": "number"
+      }
+     },
+     "additionalProperties": false,
+     "properties": {
+      "title": {
+       "$ref": "#/$defs/MapTitle"
+      },
+      "layers": {
+       "items": {
+        "$ref": "#/$defs/MapQueryLayerInput"
+       },
+       "type": "array"
+      },
+      "basemap": {
+       "$ref": "#/$defs/BasemapStyle",
+       "default": "street"
+      },
+      "camera": {
+       "anyOf": [
+        {
+         "$ref": "#/$defs/MapCameraInput"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      }
+     },
+     "required": [
+      "title",
+      "layers"
+     ],
+     "type": "object"
+    }
+   },
+   {
+    "name": "view_map",
+    "description": "Configure a map from query, catalog PMTiles, or public HTTPS vector sources.\n\n        Prefer published PMTiles through a catalog source for displaying existing\n        data, including viewport navigation and styling existing properties.\n        Inspect get_dataset_file.map_sources first. Use a query source when SQL\n        is needed for filtering, joins, aggregation, or calculated properties,\n        or when no suitable prebuilt tiles exist. Camera bounds only position\n        the map; they do not filter the dataset. Choose independently for each layer:\n        prebuilt tiles and query results can be combined in the same map.\n        Tiles may contain simplified geometries or omit features at some zooms;\n        use query_parquet against the underlying data for exact analysis, not tiles.\n\n        Each layer has a layer_name, a discriminated source, shared styling fields,\n        and visibility. Query sources contain inputs and SQL. Catalog sources copy a\n        map_sources reference from get_dataset_file. Explicit pmtiles and tilejson\n        sources use a public HTTPS URL; vector_tiles uses public HTTPS XYZ templates\n        and requires source_layer. The server never fetches explicit source URLs.\n\n        Before mapping new or revised SQL, run that exact SQL with query_parquet\n        using a small returned-page limit and the same inputs and result_crs.\n        Check errors, empty results, geometry, and styling columns. A page limit\n        does not necessarily make joins or aggregates cheap; do not add SQL LIMIT\n        merely for testing and then accidentally map only that limited subset.\n\n        This tool executes a bounded one-row preview for every query layer before\n        returning a map. If any query preparation fails, it returns a tool error\n        instead of a map. Success includes per-layer preview rows, columns, warnings,\n        and result_status in text and structured content. Geometry previews are\n        summaries, not GeoJSON. Empty layers are explicitly identified. The widget\n        reuses prepared tile access; previews do not guarantee successful rendering.\n\n        The widget sends asynchronous map_status model-context updates when the\n        host supports them: loading, loaded, partial, or failed, with per-layer\n        status and sanitized errors. Loaded applies only to the current viewport,\n        not the entire dataset or proof that features are present. Use these\n        updates to report failures and partial success. Missing feedback is not\n        success; ask the user for the widget error if updates are unavailable.\n\n        Success prepares a map configuration; it does not confirm that the host\n        rendered it or loaded every layer. Do not claim visual success without\n        confirmation from the widget or user. For an invalid map result, report\n        the widget's validation field paths as a configuration/host problem.\n        Do not change SQL or switch to expensive query layers to fix validation\n        errors. Tile-fetch errors are separate and require their own diagnosis.\n        \n\nBefore writing spatial SQL, call inspect_query_source for each input and consult\nget_dataset_file.query_hints. Catalog statistics may predate generated Parquet\nbbox or Hive fields. Use verified columns and CRS, never guessed names.\n\nFor large sources, restrict relevant Hive partitions and apply scalar bbox\noverlap filters in the source CRS before exact spatial predicates and joins.\nThe pattern is xmin <= east AND xmax >= west AND ymin <= north AND ymax >= south;\nuse discovered field paths, quote identifiers, and a conservative query envelope\nin the bbox CRS. Missing metadata does not justify inventing bbox fields.\nPreserve string partition values including leading zeroes; select all partitions\nintersecting the area. Camera bounds do not filter SQL.\n\nSpatial query sources are normalized into the requested result_crs before SQL;\nmap preparation defaults that working CRS to EPSG:4326. Native bbox columns stay\nin the source CRS, while coordinate literals and geometry expressions are in the\nworking CRS. Unknown source CRS is not EPSG:4326 and cannot be guessed.\nST_Intersects, ST_AsHexWKB, ST_GeomFromHexWKB, and constant ST_MakeEnvelope expressions\nare supported. ST_Transform is not currently supported by the SQL compiler.\nLIMIT and CTE names do not make a full-source spatial join cheap.\n\nFor multiple polygon matches, MAX on a categorical zone label is lexicographic,\nnot a risk ranking. Use a documented domain rule or return distinct categories;\ndo not independently aggregate related attributes into a fictitious matched row.\nAn unmatched LEFT JOIN is unknown coverage, not proof of safety. Prebuilt tiles\nare for display, not exact exposure calculations.\n",
+    "input_schema": {
+     "$defs": {
+      "BasemapStyle": {
+       "enum": [
+        "street",
+        "satellite"
+       ],
+       "type": "string"
+      },
+      "CatalogIdentity": {
+       "maxLength": 128,
+       "minLength": 1,
+       "type": "string"
+      },
+      "CatalogMapSourceInput": {
+       "additionalProperties": false,
+       "properties": {
+        "type": {
+         "const": "catalog",
+         "default": "catalog",
+         "type": "string"
+        },
+        "collection_slug": {
+         "$ref": "#/$defs/CatalogIdentity"
+        },
+        "dataset_slug": {
+         "$ref": "#/$defs/CatalogIdentity"
+        },
+        "file_slug": {
+         "$ref": "#/$defs/CatalogIdentity"
+        },
+        "version": {
+         "$ref": "#/$defs/CatalogIdentity"
+        },
+        "asset_key": {
+         "$ref": "#/$defs/CatalogIdentity"
+        }
+       },
+       "required": [
+        "collection_slug",
+        "dataset_slug",
+        "file_slug",
+        "version",
+        "asset_key"
+       ],
+       "type": "object"
+      },
+      "Color": {
+       "pattern": "^#[0-9A-Fa-f]{6}$",
+       "type": "string"
+      },
+      "ColorScheme": {
+       "enum": [
+        "blues",
+        "greens",
+        "oranges",
+        "purples",
+        "viridis",
+        "plasma",
+        "rdyblu",
+        "rdyg"
+       ],
+       "type": "string"
+      },
+      "JSONValue": {
+       "anyOf": [
+        {
+         "type": "boolean"
+        },
+        {
+         "type": "integer"
+        },
+        {
+         "type": "number"
+        },
+        {
+         "type": "string"
+        },
+        {
+         "items": {
+          "$ref": "#/$defs/JSONValue"
+         },
+         "type": "array"
+        },
+        {
+         "additionalProperties": {
+          "$ref": "#/$defs/JSONValue"
+         },
+         "type": "object"
+        },
+        {
+         "type": "null"
+        }
+       ]
+      },
+      "Latitude": {
+       "maximum": 90,
+       "minimum": -90,
+       "type": "number"
+      },
+      "Longitude": {
+       "maximum": 180,
+       "minimum": -180,
+       "type": "number"
+      },
+      "MapCameraInput": {
+       "additionalProperties": false,
+       "description": "Constrained initial MapLibre camera without arbitrary expressions.",
+       "properties": {
+        "bounds": {
+         "anyOf": [
+          {
+           "maxItems": 4,
+           "minItems": 4,
+           "prefixItems": [
+            {
+             "$ref": "#/$defs/Longitude"
+            },
+            {
+             "$ref": "#/$defs/Latitude"
+            },
+            {
+             "$ref": "#/$defs/Longitude"
+            },
+            {
+             "$ref": "#/$defs/Latitude"
+            }
+           ],
+           "type": "array"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null
+        },
+        "center": {
+         "anyOf": [
+          {
+           "maxItems": 2,
+           "minItems": 2,
+           "prefixItems": [
+            {
+             "$ref": "#/$defs/Longitude"
+            },
+            {
+             "$ref": "#/$defs/Latitude"
+            }
+           ],
+           "type": "array"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null
+        },
+        "zoom": {
+         "anyOf": [
+          {
+           "$ref": "#/$defs/Zoom"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null
+        },
+        "bearing": {
+         "anyOf": [
+          {
+           "maximum": 180,
+           "minimum": -180,
+           "type": "number"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null
+        },
+        "pitch": {
+         "anyOf": [
+          {
+           "maximum": 85,
+           "minimum": 0,
+           "type": "number"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null
+        },
+        "padding": {
+         "anyOf": [
+          {
+           "maximum": 256,
+           "minimum": 0,
+           "type": "number"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null
+        }
+       },
+       "type": "object"
+      },
+      "MapLayerInput": {
+       "additionalProperties": false,
+       "properties": {
+        "color": {
+         "anyOf": [
+          {
+           "$ref": "#/$defs/Color"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Fallback solid color as a six-digit hex value."
+        },
+        "color_property": {
+         "anyOf": [
+          {
+           "maxLength": 200,
+           "minLength": 1,
+           "type": "string"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Query result column used for data-driven color. Numeric columns use breaks; string columns use categorical colors. Inspect the query preview's actual distinct values before choosing categorical styling; do not assume dataset-specific values. The column must be selected by the SQL."
+        },
+        "color_scheme": {
+         "anyOf": [
+          {
+           "$ref": "#/$defs/ColorScheme"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Named web-map palette used with color_property."
+        },
+        "breaks": {
+         "anyOf": [
+          {
+           "items": {
+            "type": "number"
+           },
+           "maxItems": 8,
+           "type": "array"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Optional increasing numeric color breakpoints; omit for automatic breaks."
+        },
+        "opacity": {
+         "anyOf": [
+          {
+           "maximum": 1,
+           "minimum": 0,
+           "type": "number"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Fill, line, and point opacity."
+        },
+        "point_radius": {
+         "anyOf": [
+          {
+           "exclusiveMinimum": 0,
+           "maximum": 50,
+           "type": "number"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Base point radius in pixels."
+        },
+        "point_radius_property": {
+         "anyOf": [
+          {
+           "maxLength": 200,
+           "minLength": 1,
+           "type": "string"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Numeric query result column used to scale point radius between half and double point_radius. The column must be selected by the SQL."
+        },
+        "point_radius_scale": {
+         "anyOf": [
+          {
+           "$ref": "#/$defs/NumericScale"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Numeric transform used for point-radius scaling."
+        },
+        "line_width": {
+         "anyOf": [
+          {
+           "exclusiveMinimum": 0,
+           "maximum": 20,
+           "type": "number"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Base line width in pixels."
+        },
+        "line_width_property": {
+         "anyOf": [
+          {
+           "maxLength": 200,
+           "minLength": 1,
+           "type": "string"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Numeric query result column used to scale line width between half and double line_width. The column must be selected by the SQL."
+        },
+        "line_width_scale": {
+         "anyOf": [
+          {
+           "$ref": "#/$defs/NumericScale"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Numeric transform used for line-width scaling."
+        },
+        "layer_name": {
+         "$ref": "#/$defs/MapTitle"
+        },
+        "source": {
+         "$ref": "#/$defs/MapSourceInput"
+        },
+        "visible": {
+         "default": true,
+         "type": "boolean"
+        }
+       },
+       "required": [
+        "layer_name",
+        "source"
+       ],
+       "type": "object"
+      },
+      "MapSourceInput": {
+       "discriminator": {
+        "mapping": {
+         "catalog": "#/$defs/CatalogMapSourceInput",
+         "pmtiles": "#/$defs/PmtilesMapSourceInput",
+         "query": "#/$defs/QueryMapSourceInput",
+         "tilejson": "#/$defs/TileJSONMapSourceInput",
+         "vector_tiles": "#/$defs/VectorTilesMapSourceInput"
+        },
+        "propertyName": "type"
+       },
+       "oneOf": [
+        {
+         "$ref": "#/$defs/QueryMapSourceInput"
+        },
+        {
+         "$ref": "#/$defs/CatalogMapSourceInput"
+        },
+        {
+         "$ref": "#/$defs/PmtilesMapSourceInput"
+        },
+        {
+         "$ref": "#/$defs/TileJSONMapSourceInput"
+        },
+        {
+         "$ref": "#/$defs/VectorTilesMapSourceInput"
+        }
+       ]
+      },
+      "MapTitle": {
+       "maxLength": 200,
+       "minLength": 1,
+       "type": "string"
+      },
+      "NumericScale": {
+       "enum": [
+        "linear",
+        "sqrt",
+        "log"
+       ],
+       "type": "string"
+      },
+      "PmtilesMapSourceInput": {
+       "additionalProperties": false,
+       "properties": {
+        "type": {
+         "const": "pmtiles",
+         "default": "pmtiles",
+         "type": "string"
+        },
+        "url": {
+         "type": "string"
+        },
+        "source_layer": {
+         "anyOf": [
+          {
+           "$ref": "#/$defs/SourceLayer"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null
+        }
+       },
+       "required": [
+        "url"
+       ],
+       "type": "object"
+      },
+      "QueryMapSourceInput": {
+       "additionalProperties": false,
+       "properties": {
+        "type": {
+         "const": "query",
+         "default": "query",
+         "type": "string"
+        },
+        "inputs": {
+         "items": {
+          "additionalProperties": {
+           "$ref": "#/$defs/JSONValue"
+          },
+          "type": "object"
+         },
+         "maxItems": 8,
+         "minItems": 1,
+         "type": "array"
+        },
+        "sql": {
+         "maxLength": 50000,
+         "minLength": 1,
+         "type": "string"
+        },
+        "geometry_column": {
+         "anyOf": [
+          {
+           "type": "string"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null
+        },
+        "result_crs": {
+         "anyOf": [
+          {
+           "type": "string"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null
+        }
+       },
+       "required": [
+        "inputs",
+        "sql"
+       ],
+       "type": "object"
+      },
+      "SourceLayer": {
+       "maxLength": 200,
+       "minLength": 1,
+       "type": "string"
+      },
+      "TileJSONMapSourceInput": {
+       "additionalProperties": false,
+       "properties": {
+        "type": {
+         "const": "tilejson",
+         "default": "tilejson",
+         "type": "string"
+        },
+        "url": {
+         "type": "string"
+        },
+        "source_layer": {
+         "anyOf": [
+          {
+           "$ref": "#/$defs/SourceLayer"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null
+        }
+       },
+       "required": [
+        "url"
+       ],
+       "type": "object"
+      },
+      "VectorTilesMapSourceInput": {
+       "additionalProperties": false,
+       "properties": {
+        "type": {
+         "const": "vector_tiles",
+         "default": "vector_tiles",
+         "type": "string"
+        },
+        "tiles": {
+         "items": {
+          "type": "string"
+         },
+         "maxItems": 8,
+         "minItems": 1,
+         "type": "array"
+        },
+        "source_layer": {
+         "$ref": "#/$defs/SourceLayer"
+        },
+        "minzoom": {
+         "anyOf": [
+          {
+           "maximum": 22,
+           "minimum": 0,
+           "type": "integer"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null
+        },
+        "maxzoom": {
+         "anyOf": [
+          {
+           "maximum": 22,
+           "minimum": 0,
+           "type": "integer"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null
+        },
+        "bounds": {
+         "anyOf": [
+          {
+           "maxItems": 4,
+           "minItems": 4,
+           "prefixItems": [
+            {
+             "$ref": "#/$defs/Longitude"
+            },
+            {
+             "$ref": "#/$defs/Latitude"
+            },
+            {
+             "$ref": "#/$defs/Longitude"
+            },
+            {
+             "$ref": "#/$defs/Latitude"
+            }
+           ],
+           "type": "array"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null
+        }
+       },
+       "required": [
+        "tiles",
+        "source_layer"
+       ],
+       "type": "object"
+      },
+      "Zoom": {
+       "maximum": 22,
+       "minimum": 0,
+       "type": "number"
+      }
+     },
+     "additionalProperties": false,
+     "properties": {
+      "title": {
+       "$ref": "#/$defs/MapTitle"
+      },
+      "layers": {
+       "items": {
+        "$ref": "#/$defs/MapLayerInput"
+       },
+       "type": "array"
+      },
+      "basemap": {
+       "$ref": "#/$defs/BasemapStyle",
+       "default": "street"
+      },
+      "camera": {
+       "anyOf": [
+        {
+         "$ref": "#/$defs/MapCameraInput"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      }
+     },
+     "required": [
+      "title",
+      "layers"
+     ],
+     "type": "object"
+    }
+   },
+   {
+    "name": "refresh_query_map",
+    "description": "Refresh runtime map tokens from a durable map definition.\n\nThis app-only tool lets a restored or long-running map renew its signed\nquery tokens without persisting query state on the MCP server.",
+    "input_schema": {
+     "$defs": {
+      "BasemapStyle": {
+       "enum": [
+        "street",
+        "satellite"
+       ],
+       "type": "string"
+      },
+      "Color": {
+       "pattern": "^#[0-9A-Fa-f]{6}$",
+       "type": "string"
+      },
+      "ColorScheme": {
+       "enum": [
+        "blues",
+        "greens",
+        "oranges",
+        "purples",
+        "viridis",
+        "plasma",
+        "rdyblu",
+        "rdyg"
+       ],
+       "type": "string"
+      },
+      "JSONValue": {
+       "anyOf": [
+        {
+         "type": "boolean"
+        },
+        {
+         "type": "integer"
+        },
+        {
+         "type": "number"
+        },
+        {
+         "type": "string"
+        },
+        {
+         "items": {
+          "$ref": "#/$defs/JSONValue"
+         },
+         "type": "array"
+        },
+        {
+         "additionalProperties": {
+          "$ref": "#/$defs/JSONValue"
+         },
+         "type": "object"
+        },
+        {
+         "type": "null"
+        }
+       ]
+      },
+      "Latitude": {
+       "maximum": 90,
+       "minimum": -90,
+       "type": "number"
+      },
+      "Longitude": {
+       "maximum": 180,
+       "minimum": -180,
+       "type": "number"
+      },
+      "MapCameraInput": {
+       "additionalProperties": false,
+       "description": "Constrained initial MapLibre camera without arbitrary expressions.",
+       "properties": {
+        "bounds": {
+         "anyOf": [
+          {
+           "maxItems": 4,
+           "minItems": 4,
+           "prefixItems": [
+            {
+             "$ref": "#/$defs/Longitude"
+            },
+            {
+             "$ref": "#/$defs/Latitude"
+            },
+            {
+             "$ref": "#/$defs/Longitude"
+            },
+            {
+             "$ref": "#/$defs/Latitude"
+            }
+           ],
+           "type": "array"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null
+        },
+        "center": {
+         "anyOf": [
+          {
+           "maxItems": 2,
+           "minItems": 2,
+           "prefixItems": [
+            {
+             "$ref": "#/$defs/Longitude"
+            },
+            {
+             "$ref": "#/$defs/Latitude"
+            }
+           ],
+           "type": "array"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null
+        },
+        "zoom": {
+         "anyOf": [
+          {
+           "$ref": "#/$defs/Zoom"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null
+        },
+        "bearing": {
+         "anyOf": [
+          {
+           "maximum": 180,
+           "minimum": -180,
+           "type": "number"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null
+        },
+        "pitch": {
+         "anyOf": [
+          {
+           "maximum": 85,
+           "minimum": 0,
+           "type": "number"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null
+        },
+        "padding": {
+         "anyOf": [
+          {
+           "maximum": 256,
+           "minimum": 0,
+           "type": "number"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null
+        }
+       },
+       "type": "object"
+      },
+      "MapDefinitionInput": {
+       "additionalProperties": false,
+       "description": "Durable, replayable definition of a query map without runtime tokens.",
+       "properties": {
+        "title": {
+         "$ref": "#/$defs/MapTitle"
+        },
+        "layers": {
+         "items": {
+          "$ref": "#/$defs/MapQueryLayerInput"
+         },
+         "maxItems": 8,
+         "minItems": 1,
+         "type": "array"
+        },
+        "basemap": {
+         "$ref": "#/$defs/BasemapStyle",
+         "default": "street"
+        },
+        "camera": {
+         "anyOf": [
+          {
+           "$ref": "#/$defs/MapCameraInput"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null
+        }
+       },
+       "required": [
+        "title",
+        "layers"
+       ],
+       "type": "object"
+      },
+      "MapLayerStyleInput": {
+       "additionalProperties": false,
+       "description": "Data-driven styling equivalent to the web map's approved style vocabulary.",
+       "properties": {
+        "color": {
+         "anyOf": [
+          {
+           "$ref": "#/$defs/Color"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Fallback solid color as a six-digit hex value."
+        },
+        "color_property": {
+         "anyOf": [
+          {
+           "maxLength": 200,
+           "minLength": 1,
+           "type": "string"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Query result column used for data-driven color. Numeric columns use breaks; string columns use categorical colors. Inspect the query preview's actual distinct values before choosing categorical styling; do not assume dataset-specific values. The column must be selected by the SQL."
+        },
+        "color_scheme": {
+         "anyOf": [
+          {
+           "$ref": "#/$defs/ColorScheme"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Named web-map palette used with color_property."
+        },
+        "breaks": {
+         "anyOf": [
+          {
+           "items": {
+            "type": "number"
+           },
+           "maxItems": 8,
+           "type": "array"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Optional increasing numeric color breakpoints; omit for automatic breaks."
+        },
+        "opacity": {
+         "anyOf": [
+          {
+           "maximum": 1,
+           "minimum": 0,
+           "type": "number"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Fill, line, and point opacity."
+        },
+        "point_radius": {
+         "anyOf": [
+          {
+           "exclusiveMinimum": 0,
+           "maximum": 50,
+           "type": "number"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Base point radius in pixels."
+        },
+        "point_radius_property": {
+         "anyOf": [
+          {
+           "maxLength": 200,
+           "minLength": 1,
+           "type": "string"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Numeric query result column used to scale point radius between half and double point_radius. The column must be selected by the SQL."
+        },
+        "point_radius_scale": {
+         "anyOf": [
+          {
+           "$ref": "#/$defs/NumericScale"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Numeric transform used for point-radius scaling."
+        },
+        "line_width": {
+         "anyOf": [
+          {
+           "exclusiveMinimum": 0,
+           "maximum": 20,
+           "type": "number"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Base line width in pixels."
+        },
+        "line_width_property": {
+         "anyOf": [
+          {
+           "maxLength": 200,
+           "minLength": 1,
+           "type": "string"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Numeric query result column used to scale line width between half and double line_width. The column must be selected by the SQL."
+        },
+        "line_width_scale": {
+         "anyOf": [
+          {
+           "$ref": "#/$defs/NumericScale"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Numeric transform used for line-width scaling."
+        }
+       },
+       "type": "object"
+      },
+      "MapQueryLayerInput": {
+       "additionalProperties": false,
+       "description": "One named, independently styled spatial query in a map.",
+       "properties": {
+        "color": {
+         "anyOf": [
+          {
+           "$ref": "#/$defs/Color"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Fallback solid color as a six-digit hex value."
+        },
+        "color_property": {
+         "anyOf": [
+          {
+           "maxLength": 200,
+           "minLength": 1,
+           "type": "string"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Query result column used for data-driven color. Numeric columns use breaks; string columns use categorical colors. Inspect the query preview's actual distinct values before choosing categorical styling; do not assume dataset-specific values. The column must be selected by the SQL."
+        },
+        "color_scheme": {
+         "anyOf": [
+          {
+           "$ref": "#/$defs/ColorScheme"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Named web-map palette used with color_property."
+        },
+        "breaks": {
+         "anyOf": [
+          {
+           "items": {
+            "type": "number"
+           },
+           "maxItems": 8,
+           "type": "array"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Optional increasing numeric color breakpoints; omit for automatic breaks."
+        },
+        "opacity": {
+         "anyOf": [
+          {
+           "maximum": 1,
+           "minimum": 0,
+           "type": "number"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Fill, line, and point opacity."
+        },
+        "point_radius": {
+         "anyOf": [
+          {
+           "exclusiveMinimum": 0,
+           "maximum": 50,
+           "type": "number"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Base point radius in pixels."
+        },
+        "point_radius_property": {
+         "anyOf": [
+          {
+           "maxLength": 200,
+           "minLength": 1,
+           "type": "string"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Numeric query result column used to scale point radius between half and double point_radius. The column must be selected by the SQL."
+        },
+        "point_radius_scale": {
+         "anyOf": [
+          {
+           "$ref": "#/$defs/NumericScale"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Numeric transform used for point-radius scaling."
+        },
+        "line_width": {
+         "anyOf": [
+          {
+           "exclusiveMinimum": 0,
+           "maximum": 20,
+           "type": "number"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Base line width in pixels."
+        },
+        "line_width_property": {
+         "anyOf": [
+          {
+           "maxLength": 200,
+           "minLength": 1,
+           "type": "string"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Numeric query result column used to scale line width between half and double line_width. The column must be selected by the SQL."
+        },
+        "line_width_scale": {
+         "anyOf": [
+          {
+           "$ref": "#/$defs/NumericScale"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Numeric transform used for line-width scaling."
+        },
+        "layer_name": {
+         "$ref": "#/$defs/MapTitle"
+        },
+        "sources": {
+         "items": {
+          "additionalProperties": {
+           "$ref": "#/$defs/JSONValue"
+          },
+          "type": "object"
+         },
+         "maxItems": 8,
+         "minItems": 1,
+         "type": "array"
+        },
+        "sql": {
+         "maxLength": 50000,
+         "minLength": 1,
+         "type": "string"
+        },
+        "geometry_column": {
+         "anyOf": [
+          {
+           "type": "string"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Name of the DuckDB GEOMETRY result column to render."
+        },
+        "result_crs": {
+         "anyOf": [
+          {
+           "type": "string"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "CRS of the geometry values produced by SQL. Tiles and map framing reproject that result server-side."
+        },
+        "style": {
+         "anyOf": [
+          {
+           "$ref": "#/$defs/MapLayerStyleInput"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Deprecated nested style object. Prefer the layer-level color, color_property, color_scheme, breaks, opacity, point_radius, point_radius_property, point_radius_scale, line_width, line_width_property, and line_width_scale fields."
+        },
+        "visible": {
+         "default": true,
+         "type": "boolean"
+        }
+       },
+       "required": [
+        "layer_name",
+        "sources",
+        "sql"
+       ],
+       "type": "object"
+      },
+      "MapTitle": {
+       "maxLength": 200,
+       "minLength": 1,
+       "type": "string"
+      },
+      "NumericScale": {
+       "enum": [
+        "linear",
+        "sqrt",
+        "log"
+       ],
+       "type": "string"
+      },
+      "Zoom": {
+       "maximum": 22,
+       "minimum": 0,
+       "type": "number"
+      }
+     },
+     "additionalProperties": false,
+     "properties": {
+      "map_spec": {
+       "$ref": "#/$defs/MapDefinitionInput"
+      }
+     },
+     "required": [
+      "map_spec"
+     ],
+     "type": "object"
+    }
+   },
+   {
+    "name": "prepare_map_layer",
+    "description": "Prepare one query layer independently for the map widget.\n\nThis app-only tool validates and previews the query before issuing its\nsigned tile access. Other map layers can continue loading independently.",
+    "input_schema": {
+     "$defs": {
+      "CatalogIdentity": {
+       "maxLength": 128,
+       "minLength": 1,
+       "type": "string"
+      },
+      "CatalogMapSourceInput": {
+       "additionalProperties": false,
+       "properties": {
+        "type": {
+         "const": "catalog",
+         "default": "catalog",
+         "type": "string"
+        },
+        "collection_slug": {
+         "$ref": "#/$defs/CatalogIdentity"
+        },
+        "dataset_slug": {
+         "$ref": "#/$defs/CatalogIdentity"
+        },
+        "file_slug": {
+         "$ref": "#/$defs/CatalogIdentity"
+        },
+        "version": {
+         "$ref": "#/$defs/CatalogIdentity"
+        },
+        "asset_key": {
+         "$ref": "#/$defs/CatalogIdentity"
+        }
+       },
+       "required": [
+        "collection_slug",
+        "dataset_slug",
+        "file_slug",
+        "version",
+        "asset_key"
+       ],
+       "type": "object"
+      },
+      "Color": {
+       "pattern": "^#[0-9A-Fa-f]{6}$",
+       "type": "string"
+      },
+      "ColorScheme": {
+       "enum": [
+        "blues",
+        "greens",
+        "oranges",
+        "purples",
+        "viridis",
+        "plasma",
+        "rdyblu",
+        "rdyg"
+       ],
+       "type": "string"
+      },
+      "JSONValue": {
+       "anyOf": [
+        {
+         "type": "boolean"
+        },
+        {
+         "type": "integer"
+        },
+        {
+         "type": "number"
+        },
+        {
+         "type": "string"
+        },
+        {
+         "items": {
+          "$ref": "#/$defs/JSONValue"
+         },
+         "type": "array"
+        },
+        {
+         "additionalProperties": {
+          "$ref": "#/$defs/JSONValue"
+         },
+         "type": "object"
+        },
+        {
+         "type": "null"
+        }
+       ]
+      },
+      "Latitude": {
+       "maximum": 90,
+       "minimum": -90,
+       "type": "number"
+      },
+      "Longitude": {
+       "maximum": 180,
+       "minimum": -180,
+       "type": "number"
+      },
+      "MapLayerInput": {
+       "additionalProperties": false,
+       "properties": {
+        "color": {
+         "anyOf": [
+          {
+           "$ref": "#/$defs/Color"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Fallback solid color as a six-digit hex value."
+        },
+        "color_property": {
+         "anyOf": [
+          {
+           "maxLength": 200,
+           "minLength": 1,
+           "type": "string"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Query result column used for data-driven color. Numeric columns use breaks; string columns use categorical colors. Inspect the query preview's actual distinct values before choosing categorical styling; do not assume dataset-specific values. The column must be selected by the SQL."
+        },
+        "color_scheme": {
+         "anyOf": [
+          {
+           "$ref": "#/$defs/ColorScheme"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Named web-map palette used with color_property."
+        },
+        "breaks": {
+         "anyOf": [
+          {
+           "items": {
+            "type": "number"
+           },
+           "maxItems": 8,
+           "type": "array"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Optional increasing numeric color breakpoints; omit for automatic breaks."
+        },
+        "opacity": {
+         "anyOf": [
+          {
+           "maximum": 1,
+           "minimum": 0,
+           "type": "number"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Fill, line, and point opacity."
+        },
+        "point_radius": {
+         "anyOf": [
+          {
+           "exclusiveMinimum": 0,
+           "maximum": 50,
+           "type": "number"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Base point radius in pixels."
+        },
+        "point_radius_property": {
+         "anyOf": [
+          {
+           "maxLength": 200,
+           "minLength": 1,
+           "type": "string"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Numeric query result column used to scale point radius between half and double point_radius. The column must be selected by the SQL."
+        },
+        "point_radius_scale": {
+         "anyOf": [
+          {
+           "$ref": "#/$defs/NumericScale"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Numeric transform used for point-radius scaling."
+        },
+        "line_width": {
+         "anyOf": [
+          {
+           "exclusiveMinimum": 0,
+           "maximum": 20,
+           "type": "number"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Base line width in pixels."
+        },
+        "line_width_property": {
+         "anyOf": [
+          {
+           "maxLength": 200,
+           "minLength": 1,
+           "type": "string"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Numeric query result column used to scale line width between half and double line_width. The column must be selected by the SQL."
+        },
+        "line_width_scale": {
+         "anyOf": [
+          {
+           "$ref": "#/$defs/NumericScale"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Numeric transform used for line-width scaling."
+        },
+        "layer_name": {
+         "$ref": "#/$defs/MapTitle"
+        },
+        "source": {
+         "$ref": "#/$defs/MapSourceInput"
+        },
+        "visible": {
+         "default": true,
+         "type": "boolean"
+        }
+       },
+       "required": [
+        "layer_name",
+        "source"
+       ],
+       "type": "object"
+      },
+      "MapSourceInput": {
+       "discriminator": {
+        "mapping": {
+         "catalog": "#/$defs/CatalogMapSourceInput",
+         "pmtiles": "#/$defs/PmtilesMapSourceInput",
+         "query": "#/$defs/QueryMapSourceInput",
+         "tilejson": "#/$defs/TileJSONMapSourceInput",
+         "vector_tiles": "#/$defs/VectorTilesMapSourceInput"
+        },
+        "propertyName": "type"
+       },
+       "oneOf": [
+        {
+         "$ref": "#/$defs/QueryMapSourceInput"
+        },
+        {
+         "$ref": "#/$defs/CatalogMapSourceInput"
+        },
+        {
+         "$ref": "#/$defs/PmtilesMapSourceInput"
+        },
+        {
+         "$ref": "#/$defs/TileJSONMapSourceInput"
+        },
+        {
+         "$ref": "#/$defs/VectorTilesMapSourceInput"
+        }
+       ]
+      },
+      "MapTitle": {
+       "maxLength": 200,
+       "minLength": 1,
+       "type": "string"
+      },
+      "NumericScale": {
+       "enum": [
+        "linear",
+        "sqrt",
+        "log"
+       ],
+       "type": "string"
+      },
+      "PmtilesMapSourceInput": {
+       "additionalProperties": false,
+       "properties": {
+        "type": {
+         "const": "pmtiles",
+         "default": "pmtiles",
+         "type": "string"
+        },
+        "url": {
+         "type": "string"
+        },
+        "source_layer": {
+         "anyOf": [
+          {
+           "$ref": "#/$defs/SourceLayer"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null
+        }
+       },
+       "required": [
+        "url"
+       ],
+       "type": "object"
+      },
+      "QueryMapSourceInput": {
+       "additionalProperties": false,
+       "properties": {
+        "type": {
+         "const": "query",
+         "default": "query",
+         "type": "string"
+        },
+        "inputs": {
+         "items": {
+          "additionalProperties": {
+           "$ref": "#/$defs/JSONValue"
+          },
+          "type": "object"
+         },
+         "maxItems": 8,
+         "minItems": 1,
+         "type": "array"
+        },
+        "sql": {
+         "maxLength": 50000,
+         "minLength": 1,
+         "type": "string"
+        },
+        "geometry_column": {
+         "anyOf": [
+          {
+           "type": "string"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null
+        },
+        "result_crs": {
+         "anyOf": [
+          {
+           "type": "string"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null
+        }
+       },
+       "required": [
+        "inputs",
+        "sql"
+       ],
+       "type": "object"
+      },
+      "SourceLayer": {
+       "maxLength": 200,
+       "minLength": 1,
+       "type": "string"
+      },
+      "TileJSONMapSourceInput": {
+       "additionalProperties": false,
+       "properties": {
+        "type": {
+         "const": "tilejson",
+         "default": "tilejson",
+         "type": "string"
+        },
+        "url": {
+         "type": "string"
+        },
+        "source_layer": {
+         "anyOf": [
+          {
+           "$ref": "#/$defs/SourceLayer"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null
+        }
+       },
+       "required": [
+        "url"
+       ],
+       "type": "object"
+      },
+      "VectorTilesMapSourceInput": {
+       "additionalProperties": false,
+       "properties": {
+        "type": {
+         "const": "vector_tiles",
+         "default": "vector_tiles",
+         "type": "string"
+        },
+        "tiles": {
+         "items": {
+          "type": "string"
+         },
+         "maxItems": 8,
+         "minItems": 1,
+         "type": "array"
+        },
+        "source_layer": {
+         "$ref": "#/$defs/SourceLayer"
+        },
+        "minzoom": {
+         "anyOf": [
+          {
+           "maximum": 22,
+           "minimum": 0,
+           "type": "integer"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null
+        },
+        "maxzoom": {
+         "anyOf": [
+          {
+           "maximum": 22,
+           "minimum": 0,
+           "type": "integer"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null
+        },
+        "bounds": {
+         "anyOf": [
+          {
+           "maxItems": 4,
+           "minItems": 4,
+           "prefixItems": [
+            {
+             "$ref": "#/$defs/Longitude"
+            },
+            {
+             "$ref": "#/$defs/Latitude"
+            },
+            {
+             "$ref": "#/$defs/Longitude"
+            },
+            {
+             "$ref": "#/$defs/Latitude"
+            }
+           ],
+           "type": "array"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null
+        }
+       },
+       "required": [
+        "tiles",
+        "source_layer"
+       ],
+       "type": "object"
+      }
+     },
+     "additionalProperties": false,
+     "properties": {
+      "layer": {
+       "$ref": "#/$defs/MapLayerInput"
+      }
+     },
+     "required": [
+      "layer"
+     ],
+     "type": "object"
+    }
+   },
+   {
+    "name": "refresh_map",
+    "description": "Refresh catalog resolution and validate query previews from a durable map spec.",
+    "input_schema": {
+     "$defs": {
+      "BasemapStyle": {
+       "enum": [
+        "street",
+        "satellite"
+       ],
+       "type": "string"
+      },
+      "CatalogIdentity": {
+       "maxLength": 128,
+       "minLength": 1,
+       "type": "string"
+      },
+      "CatalogMapSourceInput": {
+       "additionalProperties": false,
+       "properties": {
+        "type": {
+         "const": "catalog",
+         "default": "catalog",
+         "type": "string"
+        },
+        "collection_slug": {
+         "$ref": "#/$defs/CatalogIdentity"
+        },
+        "dataset_slug": {
+         "$ref": "#/$defs/CatalogIdentity"
+        },
+        "file_slug": {
+         "$ref": "#/$defs/CatalogIdentity"
+        },
+        "version": {
+         "$ref": "#/$defs/CatalogIdentity"
+        },
+        "asset_key": {
+         "$ref": "#/$defs/CatalogIdentity"
+        }
+       },
+       "required": [
+        "collection_slug",
+        "dataset_slug",
+        "file_slug",
+        "version",
+        "asset_key"
+       ],
+       "type": "object"
+      },
+      "Color": {
+       "pattern": "^#[0-9A-Fa-f]{6}$",
+       "type": "string"
+      },
+      "ColorScheme": {
+       "enum": [
+        "blues",
+        "greens",
+        "oranges",
+        "purples",
+        "viridis",
+        "plasma",
+        "rdyblu",
+        "rdyg"
+       ],
+       "type": "string"
+      },
+      "JSONValue": {
+       "anyOf": [
+        {
+         "type": "boolean"
+        },
+        {
+         "type": "integer"
+        },
+        {
+         "type": "number"
+        },
+        {
+         "type": "string"
+        },
+        {
+         "items": {
+          "$ref": "#/$defs/JSONValue"
+         },
+         "type": "array"
+        },
+        {
+         "additionalProperties": {
+          "$ref": "#/$defs/JSONValue"
+         },
+         "type": "object"
+        },
+        {
+         "type": "null"
+        }
+       ]
+      },
+      "Latitude": {
+       "maximum": 90,
+       "minimum": -90,
+       "type": "number"
+      },
+      "Longitude": {
+       "maximum": 180,
+       "minimum": -180,
+       "type": "number"
+      },
+      "MapCameraInput": {
+       "additionalProperties": false,
+       "description": "Constrained initial MapLibre camera without arbitrary expressions.",
+       "properties": {
+        "bounds": {
+         "anyOf": [
+          {
+           "maxItems": 4,
+           "minItems": 4,
+           "prefixItems": [
+            {
+             "$ref": "#/$defs/Longitude"
+            },
+            {
+             "$ref": "#/$defs/Latitude"
+            },
+            {
+             "$ref": "#/$defs/Longitude"
+            },
+            {
+             "$ref": "#/$defs/Latitude"
+            }
+           ],
+           "type": "array"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null
+        },
+        "center": {
+         "anyOf": [
+          {
+           "maxItems": 2,
+           "minItems": 2,
+           "prefixItems": [
+            {
+             "$ref": "#/$defs/Longitude"
+            },
+            {
+             "$ref": "#/$defs/Latitude"
+            }
+           ],
+           "type": "array"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null
+        },
+        "zoom": {
+         "anyOf": [
+          {
+           "$ref": "#/$defs/Zoom"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null
+        },
+        "bearing": {
+         "anyOf": [
+          {
+           "maximum": 180,
+           "minimum": -180,
+           "type": "number"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null
+        },
+        "pitch": {
+         "anyOf": [
+          {
+           "maximum": 85,
+           "minimum": 0,
+           "type": "number"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null
+        },
+        "padding": {
+         "anyOf": [
+          {
+           "maximum": 256,
+           "minimum": 0,
+           "type": "number"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null
+        }
+       },
+       "type": "object"
+      },
+      "MapDefinitionInput": {
+       "additionalProperties": false,
+       "properties": {
+        "title": {
+         "$ref": "#/$defs/MapTitle"
+        },
+        "layers": {
+         "items": {
+          "$ref": "#/$defs/MapLayerInput"
+         },
+         "maxItems": 8,
+         "minItems": 1,
+         "type": "array"
+        },
+        "basemap": {
+         "$ref": "#/$defs/BasemapStyle",
+         "default": "street"
+        },
+        "camera": {
+         "anyOf": [
+          {
+           "$ref": "#/$defs/MapCameraInput"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null
+        }
+       },
+       "required": [
+        "title",
+        "layers"
+       ],
+       "type": "object"
+      },
+      "MapLayerInput": {
+       "additionalProperties": false,
+       "properties": {
+        "color": {
+         "anyOf": [
+          {
+           "$ref": "#/$defs/Color"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Fallback solid color as a six-digit hex value."
+        },
+        "color_property": {
+         "anyOf": [
+          {
+           "maxLength": 200,
+           "minLength": 1,
+           "type": "string"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Query result column used for data-driven color. Numeric columns use breaks; string columns use categorical colors. Inspect the query preview's actual distinct values before choosing categorical styling; do not assume dataset-specific values. The column must be selected by the SQL."
+        },
+        "color_scheme": {
+         "anyOf": [
+          {
+           "$ref": "#/$defs/ColorScheme"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Named web-map palette used with color_property."
+        },
+        "breaks": {
+         "anyOf": [
+          {
+           "items": {
+            "type": "number"
+           },
+           "maxItems": 8,
+           "type": "array"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Optional increasing numeric color breakpoints; omit for automatic breaks."
+        },
+        "opacity": {
+         "anyOf": [
+          {
+           "maximum": 1,
+           "minimum": 0,
+           "type": "number"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Fill, line, and point opacity."
+        },
+        "point_radius": {
+         "anyOf": [
+          {
+           "exclusiveMinimum": 0,
+           "maximum": 50,
+           "type": "number"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Base point radius in pixels."
+        },
+        "point_radius_property": {
+         "anyOf": [
+          {
+           "maxLength": 200,
+           "minLength": 1,
+           "type": "string"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Numeric query result column used to scale point radius between half and double point_radius. The column must be selected by the SQL."
+        },
+        "point_radius_scale": {
+         "anyOf": [
+          {
+           "$ref": "#/$defs/NumericScale"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Numeric transform used for point-radius scaling."
+        },
+        "line_width": {
+         "anyOf": [
+          {
+           "exclusiveMinimum": 0,
+           "maximum": 20,
+           "type": "number"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Base line width in pixels."
+        },
+        "line_width_property": {
+         "anyOf": [
+          {
+           "maxLength": 200,
+           "minLength": 1,
+           "type": "string"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Numeric query result column used to scale line width between half and double line_width. The column must be selected by the SQL."
+        },
+        "line_width_scale": {
+         "anyOf": [
+          {
+           "$ref": "#/$defs/NumericScale"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null,
+         "description": "Numeric transform used for line-width scaling."
+        },
+        "layer_name": {
+         "$ref": "#/$defs/MapTitle"
+        },
+        "source": {
+         "$ref": "#/$defs/MapSourceInput"
+        },
+        "visible": {
+         "default": true,
+         "type": "boolean"
+        }
+       },
+       "required": [
+        "layer_name",
+        "source"
+       ],
+       "type": "object"
+      },
+      "MapSourceInput": {
+       "discriminator": {
+        "mapping": {
+         "catalog": "#/$defs/CatalogMapSourceInput",
+         "pmtiles": "#/$defs/PmtilesMapSourceInput",
+         "query": "#/$defs/QueryMapSourceInput",
+         "tilejson": "#/$defs/TileJSONMapSourceInput",
+         "vector_tiles": "#/$defs/VectorTilesMapSourceInput"
+        },
+        "propertyName": "type"
+       },
+       "oneOf": [
+        {
+         "$ref": "#/$defs/QueryMapSourceInput"
+        },
+        {
+         "$ref": "#/$defs/CatalogMapSourceInput"
+        },
+        {
+         "$ref": "#/$defs/PmtilesMapSourceInput"
+        },
+        {
+         "$ref": "#/$defs/TileJSONMapSourceInput"
+        },
+        {
+         "$ref": "#/$defs/VectorTilesMapSourceInput"
+        }
+       ]
+      },
+      "MapTitle": {
+       "maxLength": 200,
+       "minLength": 1,
+       "type": "string"
+      },
+      "NumericScale": {
+       "enum": [
+        "linear",
+        "sqrt",
+        "log"
+       ],
+       "type": "string"
+      },
+      "PmtilesMapSourceInput": {
+       "additionalProperties": false,
+       "properties": {
+        "type": {
+         "const": "pmtiles",
+         "default": "pmtiles",
+         "type": "string"
+        },
+        "url": {
+         "type": "string"
+        },
+        "source_layer": {
+         "anyOf": [
+          {
+           "$ref": "#/$defs/SourceLayer"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null
+        }
+       },
+       "required": [
+        "url"
+       ],
+       "type": "object"
+      },
+      "QueryMapSourceInput": {
+       "additionalProperties": false,
+       "properties": {
+        "type": {
+         "const": "query",
+         "default": "query",
+         "type": "string"
+        },
+        "inputs": {
+         "items": {
+          "additionalProperties": {
+           "$ref": "#/$defs/JSONValue"
+          },
+          "type": "object"
+         },
+         "maxItems": 8,
+         "minItems": 1,
+         "type": "array"
+        },
+        "sql": {
+         "maxLength": 50000,
+         "minLength": 1,
+         "type": "string"
+        },
+        "geometry_column": {
+         "anyOf": [
+          {
+           "type": "string"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null
+        },
+        "result_crs": {
+         "anyOf": [
+          {
+           "type": "string"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null
+        }
+       },
+       "required": [
+        "inputs",
+        "sql"
+       ],
+       "type": "object"
+      },
+      "SourceLayer": {
+       "maxLength": 200,
+       "minLength": 1,
+       "type": "string"
+      },
+      "TileJSONMapSourceInput": {
+       "additionalProperties": false,
+       "properties": {
+        "type": {
+         "const": "tilejson",
+         "default": "tilejson",
+         "type": "string"
+        },
+        "url": {
+         "type": "string"
+        },
+        "source_layer": {
+         "anyOf": [
+          {
+           "$ref": "#/$defs/SourceLayer"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null
+        }
+       },
+       "required": [
+        "url"
+       ],
+       "type": "object"
+      },
+      "VectorTilesMapSourceInput": {
+       "additionalProperties": false,
+       "properties": {
+        "type": {
+         "const": "vector_tiles",
+         "default": "vector_tiles",
+         "type": "string"
+        },
+        "tiles": {
+         "items": {
+          "type": "string"
+         },
+         "maxItems": 8,
+         "minItems": 1,
+         "type": "array"
+        },
+        "source_layer": {
+         "$ref": "#/$defs/SourceLayer"
+        },
+        "minzoom": {
+         "anyOf": [
+          {
+           "maximum": 22,
+           "minimum": 0,
+           "type": "integer"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null
+        },
+        "maxzoom": {
+         "anyOf": [
+          {
+           "maximum": 22,
+           "minimum": 0,
+           "type": "integer"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null
+        },
+        "bounds": {
+         "anyOf": [
+          {
+           "maxItems": 4,
+           "minItems": 4,
+           "prefixItems": [
+            {
+             "$ref": "#/$defs/Longitude"
+            },
+            {
+             "$ref": "#/$defs/Latitude"
+            },
+            {
+             "$ref": "#/$defs/Longitude"
+            },
+            {
+             "$ref": "#/$defs/Latitude"
+            }
+           ],
+           "type": "array"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "default": null
+        }
+       },
+       "required": [
+        "tiles",
+        "source_layer"
+       ],
+       "type": "object"
+      },
+      "Zoom": {
+       "maximum": 22,
+       "minimum": 0,
+       "type": "number"
+      }
+     },
+     "additionalProperties": false,
+     "properties": {
+      "map_spec": {
+       "$ref": "#/$defs/MapDefinitionInput"
+      }
+     },
+     "required": [
+      "map_spec"
+     ],
+     "type": "object"
+    }
+   }
+  ]
+ },
+ "MoSPI": {
+  "instructions": null,
+  "tools": [
+   {
+    "name": "get_indicators",
+    "description": "Returns the full list of available indicators for a given dataset.\n\nDatasets often have broader coverage than expected - for example, ASI covers\n57 indicators (capital structure, wages, employment, GVA, fuel consumption),\nand GENDER covers 154 indicators across health, education, labor, and crime.\n\nFor PLFS and ASUSE, indicators are grouped by frequency_code:\n  - PLFS frequency_code=1 (Annual): all 8 indicators including wages\n  - PLFS frequency_code=2 (Quarterly): indicators 1-4 only\n  - PLFS frequency_code=3 (Monthly): indicators 1-3 only\n  frequency_code selects the indicator set, not time granularity.\n\nStep 2 of: list_datasets -> get_indicators -> get_metadata -> get_data",
+    "input_schema": {
+     "additionalProperties": false,
+     "properties": {
+      "dataset": {
+       "type": "string",
+       "description": "Dataset name - one of: PLFS, CPI, IIP, ISP, ASI, NAS, WPI,\n     ENERGY, AISHE, ASUSE, GENDER, NFHS, ENVSTATS, RBI,\n     NSS77, NSS78, NSS76, NSS75E, NSS79, CPIALRL, HCES, TUS, EC, UDISE, MNRE, NSS80, NSS73, NSS74, NSS71, NSS72, NSS72T.\n     For CPI, IIP, ISP, WPI: returns available base years and frequencies."
+      },
+      "user_query": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "description": "The user's original question, verbatim. Pass this on every tool call\n        (list_datasets, get_indicators, get_metadata, get_data) so the\n        engagement report can list questions. Not echoed back in the response."
+      },
+      "classification_year": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      },
+      "base_year": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      },
+      "frequency": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      },
+      "frequency_code": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      },
+      "level": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      },
+      "series": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      },
+      "Format": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      }
+     },
+     "required": [
+      "dataset"
+     ],
+     "type": "object"
+    }
+   },
+   {
+    "name": "get_metadata",
+    "description": "Returns the valid filter values (states, years, quarters, etc.) for a\ngiven dataset and indicator.\n\nFilter codes are arbitrary and dataset-specific - for example, PLFS\nstate_code 99 means \"All India\", and NAS frequency_code 1 means \"Annual\".\nThese values cannot be inferred or guessed from parameter names alone.\n\nThe returned filter_values and api_params should be used as-is when\ncalling get_data.\n\nStep 3 of: list_datasets -> get_indicators -> get_metadata -> get_data",
+    "input_schema": {
+     "additionalProperties": false,
+     "properties": {
+      "dataset": {
+       "type": "string",
+       "description": "Dataset name (same values as get_indicators)."
+      },
+      "user_query": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "description": "The user's original question, verbatim. Pass the same text on\n        every step. Captured for the engagement report only; not returned."
+      },
+      "indicator_code": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "description": "Required for: PLFS, NAS, ENERGY, AISHE, ASUSE, GENDER,\n            NFHS, ENVSTATS, RBI, NSS77, NSS78, NSS76, NSS75E, NSS79, CPIALRL, HCES, TUS, EC, UDISE, MNRE, NSS80, NSS73, NSS74, NSS71, NSS72, NSS72T.\n            Not applicable for: CPI, IIP, ISP, ASI, WPI.\n            For RBI, this maps to sub_indicator_code internally."
+      },
+      "base_year": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "description": "Required for CPI (\"2024\"/\"2012\"/\"2010\"),\n       IIP (\"2011-12\"/\"2004-05\"/\"1993-94\"),\n       NAS (\"2022-23\"/\"2011-12\"),\n       WPI (\"2022-23\"/\"2011-12\"/\"2004-05\"/\"1993-94\").\n       Not applicable for PLFS, ASI."
+      },
+      "level": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "description": "Required for CPI (\"Group\"/\"Item\")."
+      },
+      "frequency": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "description": "Required for IIP (\"Annually\"/\"Monthly\")."
+      },
+      "classification_year": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "description": "Required for ASI (\"2008\"/\"2004\"/\"1998\"/\"1987\")."
+      },
+      "frequency_code": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "description": "Required for PLFS and ASUSE.\n            PLFS: 1=Annual, 2=Quarterly bulletin, 3=Monthly.\n            ASUSE: 1=Annual, 2=Quarterly."
+      },
+      "series": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "description": "For CPI and NAS only (\"Current\"/\"Back\")."
+      },
+      "use_of_energy_balance_code": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "description": "For ENERGY only (1=Supply, 2=Consumption)."
+      },
+      "sub_indicator_code": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      },
+      "survey_code": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "description": "For NSS76 (1=Disability, 2=Housing & drinking water), NSS75E\n         (2=Education, indicators 43-55), NSS80 (1=Telecom (CMST), 2=Education (CMSE)),\n         and NSS77 AIDIS module (always 1)."
+      },
+      "module": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "description": "For NSS77 only - land_livestock (portal nss77) or aidis (portal nss77a).\n    Required when indicator_code overlaps both modules (16-19, 24, 26, 29, 32, 34, 36).\n    Auto-derived for codes unique to one module."
+      },
+      "state_code": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "description": "For NAS only - required when indicator_code is 23-34\n        (state-level GSDP/NSDP/GSVA family). Values 01-37, where\n        37 = All-India aggregate. Comma separated for multiple\n        states. Not applicable when frequency_code=2 (Quarterly) -\n        state-level indicators have Annual data only."
+      },
+      "Format": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      },
+      "type": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      }
+     },
+     "required": [
+      "dataset"
+     ],
+     "type": "object"
+    }
+   },
+   {
+    "name": "get_data",
+    "description": "Fetches statistical data from a MoSPI dataset.\n\nThis is the final step of the workflow. It requires filter values from\nget_metadata - filter codes are arbitrary (e.g., indicator_code=3 means\n\"Unemployment Rate\" in PLFS but something different in other datasets).\n\nAll filter parameters including limit and page go inside the filters dict,\nnot as top-level arguments.\n\nStep 4 of: list_datasets -> get_indicators -> get_metadata -> get_data",
+    "input_schema": {
+     "additionalProperties": false,
+     "properties": {
+      "dataset": {
+       "type": "string",
+       "description": "Dataset name (PLFS, CPI, IIP, ISP, ASI, NAS, WPI, ENERGY,\n     AISHE, ASUSE, GENDER, NFHS, ENVSTATS, RBI, NSS77,\n     NSS78, NSS76, NSS75E, NSS79, CPIALRL, HCES, TUS, EC, UDISE, MNRE, NSS80, NSS73, NSS74, NSS71, NSS72, NSS72T).\n     CPI auto-routes to Group or Item endpoint based on\n     whether filters contain item_code.\n     IIP uses a single endpoint; pass frequency=\"Annually\" or\n     frequency=\"Monthly\" in filters."
+      },
+      "filters": {
+       "additionalProperties": true,
+       "type": "object",
+       "description": "Key-value pairs from get_metadata filter_values.\n     PLFS requires frequency_code (1=Annual, 2=Quarterly, 3=Monthly).\n     PLFS year: omit it for the latest year, pass year=\"all\" for every year\n     (trends), or a specific year (\"2024\" and \"PLFS 2024\" both work).\n     NAS requires base_year (\"2022-23\" or \"2011-12\")."
+      },
+      "user_query": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "description": "The user's original question, verbatim. Captured for the\n        engagement report only; not returned.\n     MNRE: indicator_code (1-5) is mapped to type_of_renewable_energy_code.\n     Pass limit (e.g., \"50\") to retrieve 50 records. Change this parameter value to retrieve desired number of records."
+      }
+     },
+     "required": [
+      "dataset",
+      "filters"
+     ],
+     "type": "object"
+    }
+   },
+   {
+    "name": "list_datasets",
+    "description": "Returns an overview of all MoSPI statistical datasets with descriptions and coverage.\nThis is the starting point - call this first to identify the right dataset.\n\nPass user_query on this call and on every later step. It is the user's original\nquestion, stored for the engagement report and not included in the response.\n\nThe API covers 500+ indicators across employment, prices, industry, national\naccounts, health, education, disability, housing, environment, trade, and more. Each dataset has\nits own indicator codes, filter parameters, and valid values - these are not\nstandardized and cannot be inferred or guessed from parameter names alone.\n\nFour-step workflow (each step depends on the previous):\n  1. list_datasets() - identify the dataset\n  2. get_indicators(dataset) - list available indicators\n  3. get_metadata(dataset, indicator_code) - retrieve valid filter values\n  4. get_data(dataset, filters) - fetch the data\n\nReturns:\n    dict with 'datasets' (name, description, use_for for each dataset)\n    and 'workflow' (the four-step sequence).",
+    "input_schema": {
+     "additionalProperties": false,
+     "properties": {
+      "user_query": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      }
+     },
+     "type": "object"
+    }
+   }
+  ]
+ },
+ "Urban EDP": {
+  "instructions": "You are connected to the Urban Institute's Education Data Portal, which harmonises federal education data (CCD, CRDC, IPEDS, EdFacts, SAIPE, College Scorecard, MEPS, PSEO, and others) for schools, school districts, and colleges.\n\nCHOOSING A TOOL\n- Totals, averages or counts by group \u2014 get_summary. It aggregates in the API and groups by year automatically, so ONE call covers a whole time series. Its path, var and by come from describe_dataset, which prints the exact call \u2014 they are not guessable from the data path.\n- A named school, district or college \u2014 resolve_entity first, to turn the name into an ID to filter on.\n- Specific rows \u2014 get_data, always with fields=.\n- \"Largest / smallest N\" \u2014 get_data with ordering=-<field> for highest first, ordering=<field> for lowest.\n- Unfamiliar with the data \u2014 search_datasets, then describe_dataset.\n\nALWAYS PASS fields= TO get_data. These tables are 50-96 columns wide; requesting only the columns you need is typically an 8-17x reduction and is usually the difference between an answer and a refusal.\n\nFILTERS: only fields marked [FILTER] in describe_dataset work. The API silently ignores an unsupported filter and returns UNFILTERED data, so check before assuming a filter applied. Filter by state using FIPS codes \u2014 see lookup_codes(format_name='fips').\n\nRESULTS ARE COMPLETE OR REFUSED, never silently truncated, so counting and averaging over what you receive is valid. A refusal reports the true size and how to narrow it \u2014 follow it rather than retrying the same query.\n\nPASS THE SOURCE ON. Every data result ends with a provenance block naming the federal source and carrying a preformatted Cite string. The data is open under ODC-By, which asks for attribution wherever figures are reported \u2014 so name the source with the numbers, and reproduce that Cite string rather than composing one of your own.",
+  "tools": [
+   {
+    "name": "search_datasets",
+    "description": "Find datasets in the Education Data Portal. Returns each one's path\ntemplate, description and years available; pass a template to\ndescribe_dataset for its variables and its summary call. All arguments are\noptional filters.\n\nNOT COVERED by this portal at all: NAEP scores (see the NAEP Data\nExplorer), teacher salaries (BLS), private K-12 (limited; CRDC covers\nsome), and curriculum data. Say so rather than searching repeatedly.\n\nArgs:\n    level: \"schools\", \"school-districts\", or \"college-university\"\n    source: \"ccd\", \"ipeds\", \"crdc\", \"edfacts\", \"saipe\", \"scorecard\", \u2026\n    topic: \"enrollment\", \"directory\", \"finance\", \"discipline\", \u2026\n    search: Words matched per-token against dataset paths and descriptions,\n        not as a phrase \u2014 so drop specific terms like grade numbers\n        (\"8th\") if a query returns nothing, since datasets rarely spell\n        those out verbatim.\n",
+    "input_schema": {
+     "properties": {
+      "level": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Level"
+      },
+      "source": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Source"
+      },
+      "topic": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Topic"
+      },
+      "search": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Search"
+      }
+     },
+     "type": "object",
+     "title": "search_datasetsArguments"
+    }
+   },
+   {
+    "name": "describe_dataset",
+    "description": "Inspect one dataset: every variable with its definition, data type,\ncoded-value format, and whether it is filterable. Also returns the years\ncovered, the source description, and equivalent R/Stata code.\n\nThis is where the [FILTER] marks come from \u2014 filtering on anything else\nreturns UNFILTERED data rather than an error.\n\nArgs:\n    path: Dataset path, template or filled in \u2014 both resolve to the same\n        dataset: \"schools/ccd/enrollment/{year}/{grade}/race/\" or\n        \"schools/ccd/enrollment/2022/grade-99/race/\"\n    filterable_only: Show only the variables usable as filters\n",
+    "input_schema": {
+     "properties": {
+      "path": {
+       "title": "Path",
+       "type": "string"
+      },
+      "filterable_only": {
+       "default": false,
+       "title": "Filterable Only",
+       "type": "boolean"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "type": "object",
+     "title": "describe_datasetArguments"
+    }
+   },
+   {
+    "name": "get_data",
+    "description": "Fetch raw data records from one dataset path. For totals or averages\nacross groups use get_summary instead \u2014 it aggregates server-side.\n\nResults are COMPLETE or refused, never truncated, so counting and averaging\nover the rows returned is valid. A query matching over 10,000 rows is refused\nwith its true size and how to narrow it. When one is too big, aggregate with\nget_summary, narrow to a state or district, or hand the user the bulk CSV\nlink from the refusal or the R/Stata snippet from describe_dataset \u2014 for\nwhole-country or long multi-year analysis those beat paging through calls.\n\nCOST: this hits a live API and a broad query can take 30s+. Filter before\nfetching rather than issuing many wide calls in parallel.\n\nArgs:\n    path: A dataset path from search_datasets with every {placeholder}\n        filled in \u2014 \"schools/ccd/enrollment/2022/grade-99/race/\". One year\n        per call; a leading \"/api/v1/\" is optional.\n    filters: \"fips=11&charter=1\". Only fields marked [FILTER] in\n        describe_dataset work; others are rejected here rather than silently\n        returning unfiltered data. Also takes \"ordering=\" to rank\n        server-side: \"ordering=-enrollment\" largest first, \"ordering=enrollment\"\n        smallest. Ranking sorts the whole result before paging, so a ranked\n        query answers where an unranked one is refused as too large.\n    fields: Comma-separated columns \u2014 \"ncessch,school_name,enrollment\".\n        ALWAYS PASS THIS. These tables are 50-96 columns wide; requesting\n        only what you need is typically an 8-17x reduction and is usually\n        the difference between an answer and a refusal.\n    add_labels: Decode coded values to labels (default True). Decoding is\n        per variable, so meanings are FIELD-SPECIFIC \u2014 trust the decoded\n        label over any assumption about what a raw code means.\n    preview: Return a small labelled SAMPLE rather than a complete result.\n        The rows are the API's first N by ID, NOT a random sample \u2014 never\n        count, rank or average over them.\n",
+    "input_schema": {
+     "properties": {
+      "path": {
+       "title": "Path",
+       "type": "string"
+      },
+      "filters": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Filters"
+      },
+      "fields": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Fields"
+      },
+      "add_labels": {
+       "default": true,
+       "title": "Add Labels",
+       "type": "boolean"
+      },
+      "preview": {
+       "default": false,
+       "title": "Preview",
+       "type": "boolean"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "type": "object",
+     "title": "get_dataArguments"
+    }
+   },
+   {
+    "name": "get_summary",
+    "description": "Aggregate a dataset server-side: counts, sums, averages by group. Use\nthis rather than get_data whenever the question is about totals (\"how many\nschools per state\", \"total enrollment by race\").\n\nEVERY year comes back in one call \u2014 results are grouped by year on top of\n`by`, so a trend needs one call, never one per year. Filter years only to\nnarrow a large result. Results are COMPLETE or refused. The API cannot rank\naggregates, and refuses groupings that produce too many groups (by=leaid\nnationally, for instance).\n\n`var` and `by` are drawn from two different pools \u2014 describe_dataset lists\nboth for any dataset. Guessing costs a slow round trip; reading them does not.\n\nCOST: this hits a live API and a broad aggregation can take 30s+.\n\nNO COUNTY AGGREGATION for schools or districts. Several datasets return\n`county_code` as a column, but it is neither filterable nor groupable, so\ncounty totals cannot be computed here \u2014 fetch the rows with get_data and\naggregate them yourself, or say the portal does not support it. Do not\nretry with county in `by`.\n\nArgs:\n    path: The SUMMARY path \u2014 no year, no {placeholders}, e.g.\n        \"schools/ccd/enrollment\". describe_dataset prints the right one for\n        any dataset. Some differ from the data path\n        (\"college-university/ipeds/fall-enrollment/race\").\n    var: The measure to aggregate \u2014 a numeric, non-filter variable\n    stat: sum, count, avg, min, max, median, stddev, or variance\n    by: Comma-separated groupings \u2014 \"fips\", \"fips,race\". May also use\n        variables from the source's directory (\"school_level\", \"sector\").\n    filters: \"fips=6\" \u2014 omit year to get every year; \"year=2018,2019,2020\"\n        to restrict the range\n",
+    "input_schema": {
+     "properties": {
+      "path": {
+       "title": "Path",
+       "type": "string"
+      },
+      "var": {
+       "title": "Var",
+       "type": "string"
+      },
+      "stat": {
+       "title": "Stat",
+       "type": "string"
+      },
+      "by": {
+       "title": "By",
+       "type": "string"
+      },
+      "filters": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Filters"
+      }
+     },
+     "required": [
+      "path",
+      "var",
+      "stat",
+      "by"
+     ],
+     "type": "object",
+     "title": "get_summaryArguments"
+    }
+   },
+   {
+    "name": "lookup_codes",
+    "description": "Look up the code-to-label mapping for a coded variable \u2014 mainly to find a\nfilter value for get_data (\"California\" -> fips=6).\n\nArgs:\n    format_name: The \"Format\" shown for a variable in describe_dataset \u2014\n        \"fips\", \"race\", \"sex\", \"school_level\", \"charter\", \u2026\n    codes: Comma-separated codes to look up \u2014 \"6,48\". Omit for all values.\n",
+    "input_schema": {
+     "properties": {
+      "format_name": {
+       "title": "Format Name",
+       "type": "string"
+      },
+      "codes": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Codes"
+      }
+     },
+     "required": [
+      "format_name"
+     ],
+     "type": "object",
+     "title": "lookup_codesArguments"
+    }
+   },
+   {
+    "name": "resolve_entity",
+    "description": "Resolve a school/district/college NAME to the ID used in get_data filters.\n\nReturns CANDIDATES with their city and level, not one authoritative answer \u2014\nnames repeat, so the right row is the one whose city and level fit what the\nuser meant. Type words (\"Elementary\", \"High\", \"ISD\") are ignored when\nmatching, which is what lets natural phrasings reach the directory's\nabbreviations (\"Lakewood Elementary\" finds \"LAKEWOOD EL\").\n\nSchools and districts require `fips`: without it this asks which state rather\nthan guessing, since \"Homestead High\" exists in CA, WI, IN and FL.\n\nCOST: downloads a whole state's directory, so the first call for a state\noften takes 10-30s and later ones are cached. Resolve names in the same\nstate together.\n\nArgs:\n    name: Name to search for; distinctive words matter most.\n    entity_type: \"school\", \"district\", or \"college\"\n    fips: State FIPS code (6 = California). Required for schools and\n        districts. See lookup_codes(format_name=\"fips\").\n    max_results: Maximum candidates to return (default 15)\n",
+    "input_schema": {
+     "properties": {
+      "name": {
+       "title": "Name",
+       "type": "string"
+      },
+      "entity_type": {
+       "title": "Entity Type",
+       "type": "string"
+      },
+      "fips": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Fips"
+      },
+      "max_results": {
+       "default": 15,
+       "title": "Max Results",
+       "type": "integer"
+      }
+     },
+     "required": [
+      "name",
+      "entity_type"
+     ],
+     "type": "object",
+     "title": "resolve_entityArguments"
+    }
+   }
+  ]
+ }
+}
