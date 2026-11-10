@@ -69,9 +69,9 @@ def _():
 def _():
     datasets = []
     for offset in range(0, 2000, 100):  # bounded: the catalog has about 330 datasets
-        page = http.get(API, params={"limit": 100, "offset": offset, "omit": "description"})
-        page.raise_for_status()
-        batch = page.json()["datasets"]
+        _page = http.get(API, params={"limit": 100, "offset": offset, "omit": "description"})
+        _page.raise_for_status()
+        batch = _page.json()["datasets"]
         datasets += batch
         if len(batch) < 100:
             break
@@ -98,7 +98,9 @@ def _():
             "pmtiles_url": next(
                 (a["href"] for a in assets if a.get("type") == "application/vnd.pmtiles"), None
             ),
-            "parquet_url": next((a["href"] for a in assets if "parquet" in a.get("type", "")), None),
+            "parquet_url": next(
+                (a["href"] for a in assets if "parquet" in a.get("type", "")), None
+            ),
         }
 
     with ThreadPoolExecutor(8) as pool:
@@ -144,7 +146,7 @@ def _(catalog):
 
     The file says it was built with **{sample_meta["generator"]}**:
     `{sample_meta["generator_options"].split(" -o ")[0]}`. Its tile layer is named
-    `{json.loads(sample_meta["vector_layers"].replace("'", '"'))[0]["id"]}`, after a temporary
+    `{sample_meta["vector_layers"][0]["id"]}`, after a temporary
     build file, so a map has to read the name from each archive rather than guess it.
     """
     )
@@ -174,7 +176,7 @@ def _(catalog):
     by_title = {normalize(t): d for t, d in zip(catalog.title, catalog.dataset, strict=True)}
     views: dict[str, list[int]] = {}
     for start in range(1, 1001, 100):
-        result = http.get(
+        _result = http.get(
             "https://www.arcgis.com/sharing/rest/search",
             params={
                 "q": "HIFLD",
@@ -185,8 +187,8 @@ def _(catalog):
                 "f": "json",
             },
         )
-        result.raise_for_status()
-        body = result.json()
+        _result.raise_for_status()
+        body = _result.json()
         for item in body["results"]:
             match = by_title.get(normalize(item["title"]))
             if match:
@@ -195,7 +197,10 @@ def _(catalog):
             break
     ranking = (
         pd.DataFrame(
-            [{"dataset": d, "arcgis_views": sum(v), "arcgis_items": len(v)} for d, v in views.items()]
+            [
+                {"dataset": d, "arcgis_views": sum(v), "arcgis_items": len(v)}
+                for d, v in views.items()
+            ]
         )
         .sort_values("arcgis_views", ascending=False)
         .reset_index(drop=True)
@@ -237,23 +242,23 @@ def _(chosen):
             return Reader(MmapSource(handle)).header()
 
     builds = []
-    for row in chosen.itertuples():
-        parquet = DATA / f"{row.dataset}.parquet"
+    for _row in chosen.itertuples():
+        parquet = DATA / f"{_row.dataset}.parquet"
         if not parquet.exists():
-            with http.stream("GET", row.parquet_url) as download:
+            with http.stream("GET", _row.parquet_url) as download:
                 download.raise_for_status()
                 with parquet.open("wb") as handle:
                     for chunk in download.iter_bytes(1 << 20):
                         handle.write(chunk)
-        started = time.perf_counter()
+        _started = time.perf_counter()
         frame = gpd.read_parquet(parquet).to_crs(4326)
-        tippecanoe(frame, SITE / f"{row.dataset}.pmtiles")
-        tippecanoe_seconds = time.perf_counter() - started
-        max_zoom = header(SITE / f"{row.dataset}.pmtiles")["max_zoom"]
+        tippecanoe(frame, SITE / f"{_row.dataset}.pmtiles")
+        tippecanoe_seconds = time.perf_counter() - _started
+        max_zoom = header(SITE / f"{_row.dataset}.pmtiles")["max_zoom"]
 
-        started = time.perf_counter()
+        _started = time.perf_counter()
         frame = gpd.read_parquet(parquet).to_crs(4326)
-        gdal_file = DATA / f"{row.dataset}.gdal.pmtiles"
+        gdal_file = DATA / f"{_row.dataset}.gdal.pmtiles"
         gdal_file.unlink(missing_ok=True)
         pyogrio.write_dataframe(
             frame,
@@ -261,16 +266,16 @@ def _(chosen):
             driver="PMTiles",
             dataset_options={"MINZOOM": "0", "MAXZOOM": str(max_zoom)},
         )
-        gdal_seconds = time.perf_counter() - started
-        published = http.head(row.pmtiles_url).headers
+        gdal_seconds = time.perf_counter() - _started
+        published = http.head(_row.pmtiles_url).headers
         builds.append(
             {
-                "layer": row.dataset,
+                "layer": _row.dataset,
                 "features": pq.ParquetFile(parquet).metadata.num_rows,
                 "geometry": frame.geom_type.mode().iloc[0],
                 "geoparquet_mb": parquet.stat().st_size / 1e6,
                 "hifld_pmtiles_mb": int(published["content-length"]) / 1e6,
-                "tippecanoe_mb": (SITE / f"{row.dataset}.pmtiles").stat().st_size / 1e6,
+                "tippecanoe_mb": (SITE / f"{_row.dataset}.pmtiles").stat().st_size / 1e6,
                 "tippecanoe_s": tippecanoe_seconds,
                 "max_zoom": max_zoom,
                 "gdal_mb": gdal_file.stat().st_size / 1e6,
@@ -314,26 +319,39 @@ def _():
 
 @app.cell
 def _(build_table, chosen):
-    colors = ["#d7263d", "#f49d37", "#3f88c5", "#1b998b", "#6c4ab6", "#e36397", "#8a6f3e", "#2e4057"]
+    colors = [
+        "#d7263d",
+        "#f49d37",
+        "#3f88c5",
+        "#1b998b",
+        "#6c4ab6",
+        "#e36397",
+        "#8a6f3e",
+        "#2e4057",
+    ]
     states_url = (
         "https://hifld.publicenvirodata.org/storage/hifld/us-state-boundaries-1/"
         "us-state-boundaries-1/v1.0.0/pmtiles/us-state-boundaries-1.pmtiles"
     )
     geometry = dict(zip(build_table.layer, build_table.geometry, strict=True))
-    for name, base in (("layers-hifld.json", None), ("layers-local.json", BUCKET)):
-        layers = [{"id": "states", "url": states_url, "kind": "fill", "color": "#9a9a9a"}]
-        for row, color in zip(chosen.itertuples(), colors, strict=False):
-            shape = geometry[row.dataset]
-            layers.append(
+    for name, _base in (("layers-hifld.json", None), ("layers-local.json", BUCKET)):
+        _layers = [{"id": "states", "url": states_url, "kind": "fill", "color": "#9a9a9a"}]
+        for _row, color in zip(chosen.itertuples(), colors, strict=False):
+            shape = geometry[_row.dataset]
+            _layers.append(
                 {
-                    "id": row.dataset,
-                    "url": row.pmtiles_url if base is None else f"{base}/{row.dataset}.pmtiles",
-                    "kind": "line" if "Line" in shape else "fill" if "Polygon" in shape else "point",
+                    "id": _row.dataset,
+                    "url": _row.pmtiles_url if _base is None else f"{_base}/{_row.dataset}.pmtiles",
+                    "kind": "line"
+                    if "Line" in shape
+                    else "fill"
+                    if "Polygon" in shape
+                    else "point",
                     "color": color,
-                    "legend": row.title,
+                    "legend": _row.title,
                 }
             )
-        (SITE / name).write_text(json.dumps(layers, indent=1))
+        (SITE / name).write_text(json.dumps(_layers, indent=1))
     shutil.copy(HERE / "map" / "index.html", SITE / "index.html")
 
     config = (HERE / "nginx.conf").read_text()
@@ -344,7 +362,9 @@ def _(build_table, chosen):
         """Start the three local servers with empty CDN caches."""
         for cache in ("cache-whole", "cache-slice"):
             shutil.rmtree(RUN / cache, ignore_errors=True)
-        server = subprocess.Popen(["nginx", "-p", str(RUN.resolve()), "-c", str(RUN / "nginx.conf")])
+        server = subprocess.Popen(
+            ["nginx", "-p", str(RUN.resolve()), "-c", str(RUN / "nginx.conf")]
+        )
         for _attempt in range(50):  # bounded wait for the ports to open
             try:
                 if http.get(f"{CDN_SLICE}/index.html").status_code == 200:
@@ -360,9 +380,9 @@ def _(build_table, chosen):
 
 @app.cell
 def _(nginx):
-    def open_map(context, url: str, timeout_s: float = 90) -> dict:  # noqa: ANN001
+    def open_map(_context, url: str, timeout_s: float = 90) -> dict:  # noqa: ANN001
         """Open the map, wait until it is idle, and count the PMTiles requests and bytes."""
-        page = context.new_page()
+        _page = _context.new_page()
         fetched = {"requests": 0, "bytes": 0, "from_cache": 0}
 
         def count(response) -> None:  # noqa: ANN001
@@ -375,13 +395,13 @@ def _(nginx):
             fetched["bytes"] += sizes["responseBodySize"]
             fetched["from_cache"] += sizes["responseBodySize"] == 0
 
-        page.on("response", count)
-        started = time.perf_counter()
-        page.goto(url)
-        page.wait_for_function("window.mapIdle === true", timeout=timeout_s * 1000)
-        fetched["seconds"] = round(time.perf_counter() - started, 2)
-        fetched["errors"] = page.evaluate("window.mapErrors")
-        fetched["page"] = page
+        _page.on("response", count)
+        _started = time.perf_counter()
+        _page.goto(url)
+        _page.wait_for_function("window.mapIdle === true", timeout=timeout_s * 1000)
+        fetched["seconds"] = round(time.perf_counter() - _started, 2)
+        fetched["errors"] = _page.evaluate("window.mapErrors")
+        fetched["page"] = _page
         return fetched
 
     browser_path = os.environ.get("CHROMIUM_PATH") or None
@@ -394,24 +414,24 @@ def _(nginx):
 @app.cell
 def _(browser, build_table, open_map):
     first_views = []
-    for label, layers in (
+    for label, _layers in (
         ("HIFLD Next files on Google Cloud Storage (internet)", "layers-hifld.json"),
         ("Our tippecanoe rebuilds on the local nginx bucket", "layers-local.json"),
     ):
         for run in range(3):
-            context = browser.new_context(viewport={"width": 1280, "height": 800})
-            result = open_map(context, f"{BUCKET}/index.html?layers={layers}")
+            _context = browser.new_context(viewport={"width": 1280, "height": 800})
+            _result = open_map(_context, f"{BUCKET}/index.html?layers={_layers}")
             if run == 0 and "HIFLD" in label:
-                result["page"].screenshot(path=OUT / "map_first_view.png")
-            context.close()
+                _result["page"].screenshot(path=OUT / "map_first_view.png")
+            _context.close()
             first_views.append(
                 {
                     "source": label,
                     "run": run + 1,
-                    "seconds_to_idle": result["seconds"],
-                    "pmtiles_requests": result["requests"],
-                    "kb_fetched": round(result["bytes"] / 1e3),
-                    "map_errors": len(result["errors"]),
+                    "seconds_to_idle": _result["seconds"],
+                    "pmtiles_requests": _result["requests"],
+                    "kb_fetched": round(_result["bytes"] / 1e3),
+                    "map_errors": len(_result["errors"]),
                 }
             )
     first_view_table = pd.DataFrame(first_views)
@@ -464,17 +484,17 @@ def _(tippecanoe):
     version_one = hospitals.assign(layer_version="v1")
     tippecanoe(version_one, DATA / "hospitals-v1.pmtiles")
 
-    started = time.perf_counter()
+    _started = time.perf_counter()
     edited = gpd.read_parquet(DATA / "hospitals-3.parquet").to_crs(4326)
     edited = edited.drop(index=edited.index[0])
     edited.loc[edited.index[0], "BEDS"] = edited.loc[edited.index[0], "BEDS"] + 10
     edited = edited.assign(layer_version="v2")
     tippecanoe(edited, DATA / "hospitals-v2.pmtiles")
-    rebuild_seconds = time.perf_counter() - started
-    started = time.perf_counter()
+    rebuild_seconds = time.perf_counter() - _started
+    _started = time.perf_counter()
     shutil.copy(DATA / "hospitals-v2.pmtiles", SITE / "hospitals.staged")
     (SITE / "hospitals.staged").replace(SITE / "hospitals.pmtiles")
-    publish_seconds = time.perf_counter() - started
+    publish_seconds = time.perf_counter() - _started
     v2_mb = (DATA / "hospitals-v2.pmtiles").stat().st_size / 1e6
     uplink_mbit = 50  # stated assumption for an upload from an office connection
     upload_estimate = v2_mb * 8 / uplink_mbit
@@ -493,25 +513,25 @@ def _(browser, nginx, open_map, rebuild_seconds, start_nginx):
     texas, ohio = "-99,31,6", "-82.8,40.2,6"
     local_layers = (SITE / "layers-local.json").read_text()
 
-    def publish_layers(base: str, hospital_file: str) -> None:
-        text = local_layers.replace(BUCKET, base).replace("hospitals-3.pmtiles", hospital_file)
+    def publish_layers(_base: str, hospital_file: str) -> None:
+        text = local_layers.replace(BUCKET, _base).replace("hospitals-3.pmtiles", hospital_file)
         (SITE / "layers-update.json").write_text(text)
 
-    def visit(context, base: str, view: str) -> dict:  # noqa: ANN001
-        result = open_map(context, f"{base}/index.html?layers=layers-update.json&view={view}")
-        result["versions"] = result["page"].evaluate("window.versionsSeen('hospitals-3')")
-        return result
+    def visit(_context, _base: str, view: str) -> dict:  # noqa: ANN001
+        _result = open_map(_context, f"{_base}/index.html?layers=layers-update.json&view={view}")
+        _result["versions"] = _result["page"].evaluate("window.versionsSeen('hospitals-3')")
+        return _result
 
-    def summary(step: str, result: dict) -> dict:
+    def summary(step: str, _result: dict) -> dict:
         return {
             "step": step,
-            "versions_drawn": "+".join(result["versions"]) or "none",
-            "map_errors": len(result["errors"]),
-            "first_error": (result["errors"] or [""])[0][:90],
+            "versions_drawn": "+".join(_result["versions"]) or "none",
+            "map_errors": len(_result["errors"]),
+            "first_error": (_result["errors"] or [""])[0][:90],
         }
 
-    rows = []
-    for setup, base, strategy in (
+    _rows = []
+    for setup, _base, strategy in (
         ("bucket only", BUCKET, "overwrite"),
         ("CDN, whole-object cache", CDN_WHOLE, "overwrite"),
         ("CDN, range-slice cache", CDN_SLICE, "overwrite"),
@@ -520,36 +540,38 @@ def _(browser, nginx, open_map, rebuild_seconds, start_nginx):
     ):
         shutil.copy(DATA / "hospitals-v1.pmtiles", SITE / "hospitals.pmtiles")
         (SITE / "hospitals-v2.pmtiles").unlink(missing_ok=True)
-        publish_layers(base, "hospitals.pmtiles")
+        publish_layers(_base, "hospitals.pmtiles")
         nginx["server"].terminate()
         nginx["server"].wait(timeout=10)
         nginx["server"] = start_nginx()
 
-        context = browser.new_context(viewport={"width": 1280, "height": 800})
-        visitor = visit(context, base, texas)
+        _context = browser.new_context(viewport={"width": 1280, "height": 800})
+        visitor = visit(_context, _base, texas)
         steps = [summary("1. map open over Texas (v1 published)", visitor)]
         if strategy == "overwrite":
             shutil.copy(DATA / "hospitals-v2.pmtiles", SITE / "hospitals.staged")
             (SITE / "hospitals.staged").replace(SITE / "hospitals.pmtiles")
         else:
             shutil.copy(DATA / "hospitals-v2.pmtiles", SITE / "hospitals-v2.pmtiles")
-            publish_layers(base, "hospitals-v2.pmtiles")
-        page = visitor["page"]
-        page.evaluate("window.mapIdle = false; window.map.once('idle', () => window.mapIdle = true)")
-        page.evaluate("window.map.jumpTo({center: [-82.8, 40.2]})")
-        page.wait_for_function("window.mapIdle === true", timeout=60_000)
+            publish_layers(_base, "hospitals-v2.pmtiles")
+        _page = visitor["page"]
+        _page.evaluate(
+            "window.mapIdle = false; window.map.once('idle', () => window.mapIdle = true)"
+        )
+        _page.evaluate("window.map.jumpTo({center: [-82.8, 40.2]})")
+        _page.wait_for_function("window.mapIdle === true", timeout=60_000)
         panned = {
-            "versions": page.evaluate("window.versionsSeen('hospitals-3')"),
-            "errors": page.evaluate("window.mapErrors"),
+            "versions": _page.evaluate("window.versionsSeen('hospitals-3')"),
+            "errors": _page.evaluate("window.mapErrors"),
         }
         steps.append(summary("2. same visitor pans to Ohio after the change", panned))
-        steps.append(summary("3. same visitor reloads", visit(context, base, ohio)))
-        context.close()
+        steps.append(summary("3. same visitor reloads", visit(_context, _base, ohio)))
+        _context.close()
         fresh = browser.new_context(viewport={"width": 1280, "height": 800})
-        steps.append(summary("4. new visitor opens the map", visit(fresh, base, ohio)))
+        steps.append(summary("4. new visitor opens the map", visit(fresh, _base, ohio)))
         fresh.close()
-        rows += [{"setup": setup, "publish": strategy, **step} for step in steps]
-    update_table = pd.DataFrame(rows)
+        _rows += [{"setup": setup, "publish": strategy, **step} for step in steps]
+    update_table = pd.DataFrame(_rows)
     update_table.to_csv(OUT / "update_path.csv", index=False)
     update_table
     return (update_table,)
@@ -588,7 +610,7 @@ def _():
 def _(build_table, first_view_summary):
     stored_gb = build_table.tippecanoe_mb.sum() / 1e3
     view = first_view_summary.iloc[0]
-    rows = []
+    _rows = []
     for sessions in (10_000, 100_000):
         egress_gb = sessions * 5 * view.kb_fetched / 1e6
         requests = sessions * 5 * view.pmtiles_requests
@@ -599,7 +621,7 @@ def _(build_table, first_view_summary):
         hf_allowance = 8 * stored_gb
         cloudfront_plan = 0 if (requests <= 1e6 and egress_gb <= 100) else 15
         origin_fill = max(egress_gb * 0.1 - 1, 0) * 0.12 + requests * 0.1 / 1000 * 0.0004
-        rows += [
+        _rows += [
             {
                 "sessions": sessions,
                 "setup": "Google Cloud Storage, direct (HIFLD Next today)",
@@ -630,7 +652,7 @@ def _(build_table, first_view_summary):
                 else "Pro plan $15 (10 M requests, 50 TB)",
             },
         ]
-    cost_table = pd.DataFrame(rows).round({"usd_month": 2})
+    cost_table = pd.DataFrame(_rows).round({"usd_month": 2})
     cost_table.to_csv(OUT / "costs.csv", index=False)
     cost_table
     return (cost_table,)
