@@ -16,7 +16,7 @@ can show them yet.
 ## Run it
 
 ```bash
-./run.sh            # needs uv; downloads ~9 MB into data/ and runs the notebook (about 10 seconds)
+./run.sh            # needs uv; downloads ~9 MB into data/ and runs the notebook (about 10 seconds once uv has installed the packages; the first run takes about a minute)
 ./run.sh --chips    # also draws the aerial-imagery chips behind hand_check.csv (data/chips/, not committed)
 ```
 
@@ -105,6 +105,9 @@ and 6 (all Longhorn) are a real gap.
 - **Six substations couldn't be confirmed.** Both sources put Christmas Valley, Cedarville Junction, Duckabush,
   East Hills, Gold Beach and Cascade Locks where imagery shows no yard (7 requests, 0.05 GW). They are left out
   rather than called misplaced.
+- **Longhorn counts as missing from us-substations-verified by judgement, not by the 1 km rule.** Verified's
+  nearest point is Morrow Flat Substation, about 420 m west, which imagery shows is a separate yard. Under a
+  strict "nothing within 1 km" rule verified would miss nothing.
 - **Ten identifications are low confidence** (marked in `hand_check.csv` with the reason), mostly small utility
   substations whose only point has a placeholder name. Two of them, Canby (Oregon) and Victor (Idaho), are among
   HIFLD's real gaps, together 2 requests and 7 MW; the rest are found or found under another name.

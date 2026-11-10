@@ -163,8 +163,8 @@ def _(loads, pd):
 @app.cell
 def _(mo):
     mo.md(r"""
-    About half the requests, and most of the live megawatts, name a line rather than a substation: the
-    biggest asks want a new substation cut into a 500 kV line. No map can show those yet. The rest of this
+    About two in five requests (42%), and 45% of live megawatts, name a tap on a line rather than a
+    substation: they want a new substation cut into the line. No map can show those yet. The rest of this
     notebook is about the requests that name a substation.
 
     ## 3. The automatic join
@@ -245,7 +245,8 @@ def _(mo):
     - **found under another name**: a point at the site, but its name is a placeholder (`UNKNOWN206447`),
       blank or another substation's. It's on the map; a name search won't find it.
     - **misplaced**: the name is in the source but more than 1 km from the yard, with nothing at the yard.
-    - **missing**: nothing within 1 km.
+    - **missing**: no point for this yard within 1 km. A point that belongs to a separate neighbouring yard
+      doesn't count (at Longhorn, verified's nearest point is Morrow Flat's, about 420 m west).
 
     Substations that aren't built yet, that the filing calls planned and we couldn't find, or whose named
     points sit on bare ground with no yard we could locate (`exists` other than `yes`), are left out of the
