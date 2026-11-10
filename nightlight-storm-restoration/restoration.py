@@ -12,7 +12,6 @@ def _():
     from datetime import date, datetime, timedelta, timezone
     from pathlib import Path
 
-    import geopandas as gpd
     import marimo as mo
     import matplotlib
 
@@ -21,7 +20,6 @@ def _():
     import numpy as np
     import polars as pl
     from pypdf import PdfReader
-    from shapely.geometry import Point
 
     import nightlight as nl
 
@@ -29,11 +27,9 @@ def _():
     outputs = Path(__file__).parent / "outputs"
     outputs.mkdir(exist_ok=True)
     return (
-        Point,
         PdfReader,
         date,
         datetime,
-        gpd,
         json,
         mo,
         nl,
@@ -86,9 +82,14 @@ def _(PdfReader, nl, re):
     filing_text = " ".join(page.extract_text() or "" for page in PdfReader(filing_path).pages)
     filing_text = re.sub(r"\s+", " ", filing_text)
 
-    restoration_sentence = re.search(r"Of the total affected customer population,.*?July 9\.", filing_text)
+    restoration_sentence = re.search(
+        r"Of the total affected customer population,.*?July 9\.", filing_text
+    )
     assert restoration_sentence, "restoration sentence not found in the filing"
-    shares = [int(s) for s in re.findall(r"(\d+)% (?:were restored )?(?:within|after)", restoration_sentence[0])]
+    shares = [
+        int(s)
+        for s in re.findall(r"(\d+)% (?:were restored )?(?:within|after)", restoration_sentence[0])
+    ]
     assert shares == [44, 70, 88, 99], f"unexpected restoration shares {shares}"
 
     affected_match = re.search(r"nearly ([\d,]+) customers impacted", filing_text)
@@ -104,7 +105,10 @@ def _(PdfReader, nl, re):
     dte_hours = [0, 24, 48, 72, 111, 132]
     dte_restored = [0.0, 0.44, 0.70, 0.88, 0.99, 1.0]
     print(restoration_sentence[0])
-    print(f"affected {customers_affected:,}, served {customers_served:,.0f}, meters reporting at peak {meter_reporting}%")
+    print(
+        f"affected {customers_affected:,}, served {customers_served:,.0f}, "
+        f"meters reporting at peak {meter_reporting}%"
+    )
     return customers_affected, customers_served, dte_hours, dte_restored, meter_reporting
 
 
@@ -123,23 +127,12 @@ def _(mo):
 
 
 @app.cell
-def _(Point, gpd, nl):
-    territories_url = (
-        "https://hifld.publicenvirodata.org/storage/hifld/electric-retail-service-territories/"
-        "electric-retail-service-territories/v1.0.0/geoparquet/electric-retail-service-territories.parquet"
+def _(nl):
+    territory, hifld_area_km2, territory_area_km2 = nl.dte_territory()
+    print(
+        f"HIFLD DTE polygon {hifld_area_km2:,.0f} km²; "
+        f"piece with Detroit {territory_area_km2:,.0f} km²"
     )
-    territories = gpd.read_parquet(nl.download(territories_url, nl.cache_dir() / "territories.parquet"))
-    dte_all = territories[territories["NAME"] == "DTE ELECTRIC COMPANY"].to_crs(4326)
-    assert len(dte_all) == 1, "expected one DTE polygon"
-    dte_parts = dte_all.explode(index_parts=False).reset_index(drop=True)
-    detroit = Point(-83.05, 42.33)
-    territory = dte_parts[dte_parts.contains(detroit)].reset_index(drop=True)
-    assert len(territory) == 1, "no DTE piece contains Detroit"
-
-    hifld_area_km2 = float(dte_all.to_crs(5070).area.sum() / 1e6)
-    territory_area_km2 = float(territory.to_crs(5070).area.sum() / 1e6)
-    print(f"HIFLD DTE polygon {hifld_area_km2:,.0f} km² in {len(dte_parts)} parts; "
-          f"piece with Detroit {territory_area_km2:,.0f} km². HIFLD lists {int(dte_all['CUSTOMERS'].iloc[0]):,} customers.")
     return hifld_area_km2, territory, territory_area_km2
 
 
@@ -155,22 +148,8 @@ def _(mo):
 
 
 @app.cell
-def _(gpd, nl, territory):
-    census = "https://www2.census.gov/geo/tiger/GENZ2024/shp/"
-    county_zip = nl.download(census + "cb_2024_us_county_500k.zip", nl.cache_dir() / "cb_2024_us_county_500k.zip")
-    tract_zip = nl.download(census + "cb_2024_26_tract_500k.zip", nl.cache_dir() / "cb_2024_26_tract_500k.zip")
-    all_counties = gpd.read_file(county_zip).query("STATEFP == '26'").to_crs(4326)
-    all_tracts = gpd.read_file(tract_zip).to_crs(4326)
-
-    def inside(zones: gpd.GeoDataFrame, min_share: float) -> gpd.GeoDataFrame:
-        zones = zones.copy()
-        full_area = zones.to_crs(5070).area
-        zones["geometry"] = zones.intersection(territory.geometry.iloc[0])
-        share = zones.to_crs(5070).area / full_area
-        return zones[share >= min_share].reset_index(drop=True)
-
-    counties = inside(all_counties, 0.10)[["GEOID", "NAME", "geometry"]]
-    tracts = inside(all_tracts, 0.50)[["GEOID", "NAMELSADCO", "geometry"]]
+def _(nl, territory):
+    counties, tracts = nl.zones_inside(territory)
     print(f"{len(counties)} counties, {len(tracts)} tracts in the territory")
     return counties, tracts
 
@@ -192,19 +171,17 @@ def _(mo):
 
 @app.cell
 def _(date, nl, territory, time, timedelta):
-    west, south, east, north = territory.total_bounds
-    snap = 1 / nl.PIXELS_PER_DEGREE
-    grid = nl.Grid(
-        round(west // snap * snap, 6), round(south // snap * snap, 6),
-        round(-(-east // snap) * snap, 6), round(-(-north // snap) * snap, 6),
-    )
+    grid = nl.grid_for(territory)
     storm_night = date(2026, 7, 4)  # first overpass after the storm
     nights = [storm_night + timedelta(days=d) for d in range(-31, 30)]
     fetch_started = time.time()
     radiance, clear = nl.nightly_stack("NOAA20", nights, grid)
     fetch_seconds = time.time() - fetch_started
     gibs_bytes = sum(p.stat().st_size for p in (nl.cache_dir() / "gibs").rglob("*.png"))
-    print(f"grid {grid.shape}, {len(nights)} nights, {fetch_seconds:.0f} s, GIBS cache {gibs_bytes / 1e6:.0f} MB")
+    print(
+        f"grid {grid.shape}, {len(nights)} nights, {fetch_seconds:.0f} s, "
+        f"GIBS cache {gibs_bytes / 1e6:.0f} MB"
+    )
     return clear, fetch_seconds, grid, nights, radiance, storm_night
 
 
@@ -230,7 +207,10 @@ def _(clear, grid, nights, nl, np, radiance, storm_night, territory):
     lit = in_territory & (usual >= nl.LIT_RADIANCE)
     dark = nl.dark_pixels(radiance, usual)
     saturated_share = float((usual[lit] >= nl.SATURATION).mean())
-    print(f"{lit.sum():,} lit pixels in the territory, {saturated_share:.1%} saturated in the GIBS images")
+    print(
+        f"{lit.sum():,} lit pixels in the territory, "
+        f"{saturated_share:.1%} saturated in the GIBS images"
+    )
     return dark, lit, pre, saturated_share, usual
 
 
@@ -278,34 +258,49 @@ def _(
         dark_share = np.where(clear_lit > 0, dark_lit / clear_lit, np.nan)
     dte_out_share = [
         (1 - float(np.interp(h, dte_hours, dte_restored))) * customers_affected / customers_served
-        if h >= 0 else 0.0
+        if h >= 0
+        else 0.0
         for h in hours_after
     ]
-    territory_nights = pl.DataFrame({
-        "night": nights, "hours_after_storm": np.round(hours_after, 1),
-        "clear_share": clear_share, "dark_share": dark_share, "dte_out_share": dte_out_share,
-    })
+    territory_nights = pl.DataFrame(
+        {
+            "night": nights,
+            "hours_after_storm": np.round(hours_after, 1),
+            "clear_share": clear_share,
+            "dark_share": dark_share,
+            "dte_out_share": dte_out_share,
+        }
+    )
     clear_enough = 0.5
     noise = territory_nights.filter(pl.Series(pre) & (pl.col("clear_share") >= clear_enough))
     noise_floor = float(noise["dark_share"].quantile(0.95))
     noise_median = float(noise["dark_share"].median())
     print(f"normal-night dark share: median {noise_median:.2%}")
-    print(f"noise floor: {noise_floor:.2%} of clear lit pixels read dark on a normal night (95th pct of {len(noise)} clear pre-storm nights)")
+    print(
+        f"noise floor: {noise_floor:.2%} of clear lit pixels read dark on a normal night "
+        f"(95th pct of {len(noise)} clear pre-storm nights)"
+    )
     territory_nights.filter(pl.col("hours_after_storm") > -30).head(10)
     return clear_enough, hours_after, noise_floor, noise_median, territory_nights
 
 
 @app.cell
-def _(clear_enough, noise_floor, pl, territory_nights):
+def _(clear_enough, noise_floor, noise_median, pl, territory_nights):
     after = territory_nights.filter(pl.col("hours_after_storm") > 0)
     first_48h = after.filter(pl.col("hours_after_storm") <= 48)
     first_clear = after.filter(pl.col("clear_share") >= clear_enough).row(0, named=True)
-    first_clear_excess = first_clear["dark_share"] - noise_floor
+    first_clear_excess = first_clear["dark_share"] - noise_median
     post_clear_nights = after.filter(pl.col("clear_share") >= clear_enough).height
     print(f"first 48 hours: best clear view {first_48h['clear_share'].max():.1%} of lit pixels")
-    print(f"first clear night {first_clear['night']} at {first_clear['hours_after_storm']} h: "
-          f"{first_clear['dark_share']:.2%} dark (noise floor {noise_floor:.2%}); DTE implies {first_clear['dte_out_share']:.2%} of customers still out")
-    print(f"{post_clear_nights} of {after.height} post-storm nights had at least half the territory clear")
+    print(
+        f"first clear night {first_clear['night']} at {first_clear['hours_after_storm']} h: "
+        f"{first_clear['dark_share']:.2%} dark (noise floor {noise_floor:.2%}); "
+        f"DTE implies {first_clear['dte_out_share']:.2%} of customers still out"
+    )
+    print(
+        f"{post_clear_nights} of {after.height} post-storm nights "
+        "had at least half the territory clear"
+    )
     return first_48h, first_clear, first_clear_excess, post_clear_nights
 
 
@@ -326,8 +321,10 @@ def _(date, grid, nl, np, outputs, plt):
     strip_nights = [date(2026, 7, d) for d in (1, 4, 5, 6, 7, 8)]
     radiance_map = nl.load_colormap(nl.RADIANCE_COLORMAP)
     fig_strip, axes_strip = plt.subplots(1, 6, figsize=(18, 4.2))
-    for ax_s, n_s in zip(axes_strip, strip_nights):
-        raw = nl.decode(nl.fetch_png("VIIRS_NOAA20_DayNightBand_At_Sensor_Radiance", n_s, grid), radiance_map)
+    for ax_s, n_s in zip(axes_strip, strip_nights, strict=True):
+        raw = nl.decode(
+            nl.fetch_png("VIIRS_NOAA20_DayNightBand_At_Sensor_Radiance", n_s, grid), radiance_map
+        )
         ax_s.imshow(np.log1p(raw), cmap="gray", vmin=0, vmax=np.log1p(38.2))
         ax_s.set_title(n_s.strftime("%b %-d (UTC)"))
         ax_s.axis("off")
@@ -339,17 +336,57 @@ def _(date, grid, nl, np, outputs, plt):
 
 
 @app.cell
-def _(clear_enough, noise_floor, outputs, pl, plt, territory_nights):
+def _(
+    clear_enough,
+    customers_affected,
+    customers_served,
+    dte_hours,
+    dte_restored,
+    noise_floor,
+    np,
+    outputs,
+    pl,
+    plt,
+    territory_nights,
+):
+    curve_hours = np.arange(-7 * 24, 30 * 24)
+    curve_out = np.where(
+        curve_hours >= 0,
+        (1 - np.interp(curve_hours, dte_hours, dte_restored))
+        * customers_affected
+        / customers_served,
+        0.0,
+    )
     window = territory_nights.filter(pl.col("hours_after_storm").is_between(-7 * 24, 30 * 24))
     clear_rows = window.filter(pl.col("clear_share") >= clear_enough)
-    fig_curve, (ax_top, ax_bottom) = plt.subplots(2, 1, figsize=(10, 6.5), sharex=True, height_ratios=[3, 1])
-    ax_top.plot(window["hours_after_storm"] / 24, window["dte_out_share"] * 100, color="black", label="DTE filing: customers still out, % of all DTE customers")
-    ax_top.scatter(clear_rows["hours_after_storm"] / 24, clear_rows["dark_share"] * 100, color="tab:orange", zorder=3, label="Night light: lit pixels dark, % of clear lit pixels")
-    ax_top.axhline(noise_floor * 100, color="tab:orange", linestyle=":", label="Night light noise floor (normal nights)")
+    fig_curve, (ax_top, ax_bottom) = plt.subplots(
+        2, 1, figsize=(10, 6.5), sharex=True, height_ratios=[3, 1]
+    )
+    ax_top.plot(
+        curve_hours / 24,
+        curve_out * 100,
+        color="black",
+        label="DTE filing: customers still out, % of all DTE customers",
+    )
+    ax_top.scatter(
+        clear_rows["hours_after_storm"] / 24,
+        clear_rows["dark_share"] * 100,
+        color="tab:orange",
+        zorder=3,
+        label="Night light: lit pixels dark, % of clear lit pixels",
+    )
+    ax_top.axhline(
+        noise_floor * 100,
+        color="tab:orange",
+        linestyle=":",
+        label="Night light noise floor (normal nights)",
+    )
     ax_top.set_ylabel("%")
     ax_top.legend(loc="upper right", fontsize=8)
     ax_top.set_title("DTE Storm 2026004: reported restoration vs. what night light could see")
-    ax_bottom.bar(window["hours_after_storm"] / 24, window["clear_share"] * 100, width=0.8, color="tab:blue")
+    ax_bottom.bar(
+        window["hours_after_storm"] / 24, window["clear_share"] * 100, width=0.8, color="tab:blue"
+    )
     ax_bottom.set_ylabel("clear view, %")
     ax_bottom.set_xlabel("days after 16:00 EDT, July 3, 2026 (NOAA-20 overpass about 03:00 EDT)")
     for ax_c in (ax_top, ax_bottom):
@@ -369,8 +406,10 @@ def _(mo):
     DTE's filing gives one curve for the whole territory, not county numbers, and EAGLE-I's
     county outage counts for 2026 are not published yet (its public record ends December 31,
     2025). So the county test is weaker than planned: we compare each county's dark share,
-    less the noise floor, with DTE's territory-wide share still out, and flag counties that
-    were darker than that, which is where restoration may have lagged.
+    less its usual share on a normal night (the median), with DTE's territory-wide share
+    still out, and flag counties darker than that, which is where restoration may have
+    lagged. To see whether a flag means anything, we also count how many counties the same
+    rule flags on normal clear nights before the storm.
     """)
     return
 
@@ -386,9 +425,12 @@ def _(
     lit,
     nights,
     nl,
-    noise_floor,
+    noise_median,
     np,
+    outputs,
     pl,
+    pre,
+    territory_nights,
     tracts,
 ):
     def zone_table(zones, id_col: str, label_col: str) -> pl.DataFrame:
@@ -398,10 +440,18 @@ def _(
             with np.errstate(all="ignore"):
                 share_clear = counts["clear"][i] / counts["lit"]
                 share_dark = counts["dark"][i] / counts["clear"][i]
-            rows.append(pl.DataFrame({
-                "zone": zones[id_col], "name": zones[label_col], "night": night,
-                "lit_pixels": counts["lit"], "clear_share": share_clear, "dark_share": share_dark,
-            }))
+            rows.append(
+                pl.DataFrame(
+                    {
+                        "zone": zones[id_col],
+                        "name": zones[label_col],
+                        "night": night,
+                        "lit_pixels": counts["lit"],
+                        "clear_share": share_clear,
+                        "dark_share": share_dark,
+                    }
+                )
+            )
         return pl.concat(rows).with_columns(
             pl.col("clear_share").fill_nan(None), pl.col("dark_share").fill_nan(None)
         )
@@ -409,25 +459,61 @@ def _(
     county_nights = zone_table(counties, "GEOID", "NAME")
     tract_nights = zone_table(tracts, "GEOID", "NAMELSADCO")
 
-    def first_clear_night(table: pl.DataFrame, margin: float) -> pl.DataFrame:
-        night = table.filter(
-            (pl.col("night") == first_clear["night"]) & (pl.col("lit_pixels") >= 20)
-        )
-        return night.with_columns(
+    def on_night(table: pl.DataFrame, night, dte_out: float, margin: float) -> pl.DataFrame:
+        rows = table.filter((pl.col("night") == night) & (pl.col("lit_pixels") >= 20))
+        return rows.with_columns(
             clear_reading=pl.col("clear_share") >= clear_enough,
-            excess_dark=(pl.col("dark_share") - noise_floor).clip(lower_bound=0),
+            excess_dark=(pl.col("dark_share") - noise_median).clip(lower_bound=0),
         ).with_columns(
-            within_margin=(pl.col("excess_dark") - first_clear["dte_out_share"]).abs() <= margin,
-            darker_than_dte=pl.col("excess_dark") > first_clear["dte_out_share"] + margin,
+            within_margin=(pl.col("excess_dark") - dte_out).abs() <= margin,
+            darker_than_dte=pl.col("excess_dark") > dte_out + margin,
         )
 
+    def false_flag_share(table: pl.DataFrame, margin: float) -> float:
+        """On clear nights before the storm, the median share of clear zones flagged darker."""
+        normal_nights = territory_nights.filter(
+            pl.Series(pre) & (pl.col("clear_share") >= clear_enough)
+        )["night"]
+        shares = []
+        for normal_night in normal_nights:
+            flagged = on_night(table, normal_night, 0.0, margin).filter(pl.col("clear_reading"))
+            if flagged.height:
+                shares.append(flagged["darker_than_dte"].mean())
+        return float(pl.Series(shares).median())
+
     margin_points = 0.05
-    county_first = first_clear_night(county_nights, margin_points)
-    tract_first = first_clear_night(tract_nights, margin_points)
+    county_first = on_night(
+        county_nights, first_clear["night"], first_clear["dte_out_share"], margin_points
+    )
+    tract_first = on_night(
+        tract_nights, first_clear["night"], first_clear["dte_out_share"], margin_points
+    )
+    county_false_flags = false_flag_share(county_nights, margin_points)
+    tract_false_flags = false_flag_share(tract_nights, margin_points)
+    print(
+        f"on a normal clear night {county_false_flags:.0%} of counties and "
+        f"{tract_false_flags:.0%} of tracts are flagged darker anyway"
+    )
     county_nights.write_csv(outputs / "county_nights.csv")
     tract_first.write_csv(outputs / "tracts_first_clear_night.csv")
-    county_first.select("name", "lit_pixels", "clear_share", "dark_share", "excess_dark", "within_margin", "darker_than_dte").sort("excess_dark", descending=True)
-    return county_first, county_nights, margin_points, tract_first, tract_nights
+    county_first.select(
+        "name",
+        "lit_pixels",
+        "clear_share",
+        "dark_share",
+        "excess_dark",
+        "within_margin",
+        "darker_than_dte",
+    ).sort("excess_dark", descending=True)
+    return (
+        county_false_flags,
+        county_first,
+        county_nights,
+        margin_points,
+        tract_false_flags,
+        tract_first,
+        tract_nights,
+    )
 
 
 @app.cell
@@ -443,24 +529,43 @@ def _(county_first, first_48h, margin_points, pl, tract_first, tract_nights):
 
     county_counts = counts(county_first)
     tract_counts = counts(tract_first)
-    tracts_clear_48h = (
-        tract_nights.filter(pl.col("night").is_in(first_48h["night"].to_list()) & (pl.col("clear_share") >= 0.5))
-        ["zone"].n_unique()
+    tracts_clear_48h = tract_nights.filter(
+        pl.col("night").is_in(first_48h["night"].to_list()) & (pl.col("clear_share") >= 0.5)
+    )["zone"].n_unique()
+    print(
+        f"counties: {county_counts['within']} of {county_counts['clear']} with a clear reading "
+        f"within {margin_points:.0%} points of DTE ({county_counts['zones']} in territory); "
+        f"{county_counts['darker']} darker"
     )
-    print(f"counties: {county_counts['within']} of {county_counts['clear']} with a clear reading within {margin_points:.0%} points of DTE ({county_counts['zones']} in territory); {county_counts['darker']} darker")
-    print(f"tracts:   {tract_counts['within']} of {tract_counts['clear']} within; {tract_counts['darker']} darker; {tracts_clear_48h} of {tract_counts['zones']} had a clear reading in the first 48 h")
+    print(
+        f"tracts: {tract_counts['within']} of {tract_counts['clear']} within; "
+        f"{tract_counts['darker']} darker; {tracts_clear_48h} of {tract_counts['zones']} "
+        "had a clear reading in the first 48 h"
+    )
     return county_counts, tract_counts, tracts_clear_48h
 
 
 @app.cell
 def _(outputs, plt, tract_first, tracts):
-    tract_map = tracts.merge(tract_first.to_pandas()[["zone", "excess_dark", "clear_reading"]], left_on="GEOID", right_on="zone", how="left")
+    tract_map = tracts.merge(
+        tract_first.to_pandas()[["zone", "excess_dark", "clear_reading"]],
+        left_on="GEOID",
+        right_on="zone",
+        how="left",
+    )
     fig_map, ax_map = plt.subplots(figsize=(7, 8))
-    tract_map[~tract_map["clear_reading"].fillna(False).astype(bool)].plot(ax=ax_map, color="lightgrey")
+    tract_map[~tract_map["clear_reading"].fillna(False).astype(bool)].plot(
+        ax=ax_map, color="lightgrey"
+    )
     tract_map["excess_pct"] = tract_map["excess_dark"] * 100
     tract_map[tract_map["clear_reading"].fillna(False).astype(bool)].plot(
-        ax=ax_map, column="excess_pct", cmap="magma_r", vmin=0, vmax=30, legend=True,
-        legend_kwds={"label": "lit pixels dark beyond the noise floor, %"},
+        ax=ax_map,
+        column="excess_pct",
+        cmap="magma_r",
+        vmin=0,
+        vmax=30,
+        legend=True,
+        legend_kwds={"label": "lit pixels dark beyond a normal night, %"},
     )
     ax_map.set_title("First clear night after the storm, by census tract (grey: no clear reading)")
     ax_map.axis("off")
@@ -483,6 +588,7 @@ def _(mo):
 @app.cell
 def _(
     county_counts,
+    county_false_flags,
     county_nights,
     customers_affected,
     customers_served,
@@ -505,6 +611,7 @@ def _(
     territory_area_km2,
     time,
     tract_counts,
+    tract_false_flags,
     tracts_clear_48h,
 ):
     gibs_mb = sum(p.stat().st_size for p in (nl.cache_dir() / "gibs").rglob("*.png")) / 1e6
@@ -527,6 +634,8 @@ def _(
         "margin_points": margin_points,
         "counties": county_counts,
         "tracts": tract_counts,
+        "county_false_flag_share_normal_night": round(county_false_flags, 3),
+        "tract_false_flag_share_normal_night": round(tract_false_flags, 3),
         "tracts_clear_first_48h": tracts_clear_48h,
         "county_nights_rows": county_nights.height,
         "saturated_lit_share": round(saturated_share, 4),

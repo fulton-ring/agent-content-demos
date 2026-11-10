@@ -117,7 +117,10 @@ def fetch_png(layer: str, night: date, grid: Grid) -> np.ndarray:
 
 
 def decode(rgba: np.ndarray, colormap: tuple[np.ndarray, np.ndarray, np.ndarray]) -> np.ndarray:
-    """Map each pixel's color back to the lower bound of its bin. No data and unknown colors are NaN."""
+    """Map each pixel's color back to the lower bound of its bin.
+
+    No-data and unknown colors become NaN.
+    """
     keys, lows, _ = colormap
     rgb = rgba[..., :3].astype(np.int64)
     flat = (rgb[..., 0] << 16) | (rgb[..., 1] << 8) | rgb[..., 2]
@@ -201,6 +204,69 @@ def zone_nights(
     lit_count = np.bincount(ids, minlength=n_zones)
     clear_count = np.stack([np.bincount(ids, c[in_zone], n_zones) for c in clear])
     dark_count = np.stack(
-        [np.bincount(ids, (c & d)[in_zone], n_zones) for c, d in zip(clear, dark)]
+        [np.bincount(ids, (c & d)[in_zone], n_zones) for c, d in zip(clear, dark, strict=True)]
     )
     return {"lit": lit_count, "clear": clear_count, "dark": dark_count}
+
+
+TERRITORIES_URL = (
+    "https://hifld.publicenvirodata.org/storage/hifld/electric-retail-service-territories/"
+    "electric-retail-service-territories/v1.0.0/geoparquet/"
+    "electric-retail-service-territories.parquet"
+)
+CENSUS = "https://www2.census.gov/geo/tiger/GENZ2024/shp/"
+
+
+def dte_territory() -> tuple[gpd.GeoDataFrame, float, float]:
+    """The piece of HIFLD Next's DTE Electric polygon that contains Detroit.
+
+    Returns that piece and the areas (km²) of the whole HIFLD polygon and of the piece.
+    """
+    from shapely.geometry import Point
+
+    path = download(TERRITORIES_URL, cache_dir() / "territories.parquet")
+    territories = gpd.read_parquet(path)
+    dte = territories[territories["NAME"] == "DTE ELECTRIC COMPANY"].to_crs(4326)
+    assert len(dte) == 1, "expected one DTE polygon"
+    parts = dte.explode(index_parts=False).reset_index(drop=True)
+    piece = parts[parts.contains(Point(-83.05, 42.33))].reset_index(drop=True)
+    assert len(piece) == 1, "no DTE piece contains Detroit"
+    whole_km2 = float(dte.to_crs(5070).area.sum() / 1e6)
+    piece_km2 = float(piece.to_crs(5070).area.sum() / 1e6)
+    return piece, whole_km2, piece_km2
+
+
+def zones_inside(
+    territory: gpd.GeoDataFrame, county_share: float = 0.10, tract_share: float = 0.50
+) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame]:
+    """Michigan counties and tracts with enough of their area in the territory, clipped to it."""
+    county_zip = download(
+        CENSUS + "cb_2024_us_county_500k.zip", cache_dir() / "cb_2024_us_county_500k.zip"
+    )
+    tract_zip = download(
+        CENSUS + "cb_2024_26_tract_500k.zip", cache_dir() / "cb_2024_26_tract_500k.zip"
+    )
+    shape = territory.geometry.iloc[0]
+
+    def clip(zones: gpd.GeoDataFrame, min_share: float) -> gpd.GeoDataFrame:
+        zones = zones.to_crs(4326)
+        full_area = zones.to_crs(5070).area
+        zones["geometry"] = zones.intersection(shape)
+        share = zones.to_crs(5070).area / full_area
+        return zones[share >= min_share].reset_index(drop=True)
+
+    counties = clip(gpd.read_file(county_zip).query("STATEFP == '26'"), county_share)
+    tracts = clip(gpd.read_file(tract_zip), tract_share)
+    return counties[["GEOID", "NAME", "geometry"]], tracts[["GEOID", "NAMELSADCO", "geometry"]]
+
+
+def grid_for(zones: gpd.GeoDataFrame) -> Grid:
+    """The smallest Black Marble grid box covering the zones."""
+    step = 1 / PIXELS_PER_DEGREE
+    west, south, east, north = zones.total_bounds
+    return Grid(
+        round(west // step * step, 6),
+        round(south // step * step, 6),
+        round(-(-east // step) * step, 6),
+        round(-(-north // step) * step, 6),
+    )
