@@ -39,7 +39,12 @@ with app.setup:
     ).split()
     # The trauma-access spike's straight-line-to-minutes lines (trauma-burn-center-access/outputs/summary.json,
     # "fits"), fitted on Valhalla drive times in Maine and New Jersey: minutes = a + b * km, by RUCA class.
-    FITS = {"Metropolitan": (11.5, 0.703), "Micropolitan": (15.7, 0.614), "Small town": (28.9, 0.633), "Rural": (23.3, 0.711)}
+    FITS = {
+        "Metropolitan": (11.5, 0.703),
+        "Micropolitan": (15.7, 0.614),
+        "Small town": (28.9, 0.633),
+        "Rural": (23.3, 0.711),
+    }
     EXTRACTION_SAMPLE = 60
     # HIFLD's trauma levels date from 2023-2024; a list older than this can't judge them.
     OLDEST_LIST = "2022-01-01"
@@ -172,7 +177,9 @@ def _():
     sources = pd.read_csv(HERE / "state_sources.csv", dtype=str).fillna("")
     _extracted = pd.read_csv(HERE / "state_designations.csv", dtype=str).fillna("")
     designations = _extracted[~_extracted["level"].isin(NOT_TRAUMA)].reset_index(drop=True)
-    assert set(sources["state"]) == set(STATES), f"state_sources.csv must cover 51 states: {set(STATES) ^ set(sources['state'])}"
+    assert set(sources["state"]) == set(STATES), (
+        f"state_sources.csv must cover 51 states: {set(STATES) ^ set(sources['state'])}"
+    )
     _by_state = sources.groupby("state").agg(
         reusable=("reusable", lambda s: "yes" if (s == "yes").all() else ("no" if (s == "no").all() else "unclear")),
         covers_peds=("covers_peds", lambda s: "yes" if (s == "yes").any() else "no"),
@@ -197,7 +204,9 @@ def _():
         "checked for pediatric levels": int(state_status["checked_peds"].sum()),
         "list dates from": _dated.min(),
         "list dates to": _dated.max(),
-        "lists with no stated date": int((sources["list_date"] == "").sum()),
+        "checked lists with no stated date": int(
+            ((sources["list_date"] == "") & sources["state"].map(state_status["checked_adult"])).sum()
+        ),
     }
     source_counts
     return designations, source_counts, sources, state_status
@@ -361,7 +370,9 @@ def _(designations, hifld, state_status):
     _list = designations[_home].assign(level=designations["level"].replace(TIERS))
     _list = _list.assign(_rank=_list["level"].map(rank)).sort_values("_rank")
     # A row with no HIFLD match gets its own key; two rows matched to one record keep the higher level.
-    _list["key"] = np.where(_list["source_ID"] != "", _list["source_ID"], "list:" + _list["state"] + ":" + _list["list_name"])
+    _list["key"] = np.where(
+        _list["source_ID"] != "", _list["source_ID"], "list:" + _list["state"] + ":" + _list["list_name"]
+    )
     _list = _list.drop_duplicates(["key", "kind"])
 
     _pairs = []
@@ -402,7 +413,9 @@ def _(designations, hifld, state_status):
         _stale = pairs[(pairs["kind"] == _kind) & (pairs["bucket"] == "stale")]
         _a = np.radians(_xy.loc[_on_list["key"]].to_numpy(float))
         _b = np.radians(_xy.loc[_stale["key"]].to_numpy(float))
-        _cos = np.sin(_b[:, :1]) * np.sin(_a[:, 0]) + np.cos(_b[:, :1]) * np.cos(_a[:, 0]) * np.cos(_b[:, 1:] - _a[:, 1])
+        _cos = np.sin(_b[:, :1]) * np.sin(_a[:, 0]) + np.cos(_b[:, :1]) * np.cos(_a[:, 0]) * np.cos(
+            _b[:, 1:] - _a[:, 1]
+        )
         _km = EARTH_KM * np.arccos(np.clip(_cos, -1, 1)).min(axis=1)
         pairs.loc[_stale.index[_km < 0.5], "bucket"] = "stale, duplicate record"
 
@@ -418,7 +431,14 @@ def _(designations, hifld, state_status):
     BUCKETS = ["correct", "wrong level", "missing, blank", "missing, absent", "stale", "stale, duplicate record"]
     national = pairs.groupby(["kind", "bucket"]).size().unstack(fill_value=0).reindex(columns=BUCKETS, fill_value=0)
     national["mistyped"] = mistyped.groupby("kind").size().reindex(national.index, fill_value=0)
-    mo.vstack([national, mo.md(f"{len(out_of_state_rows)} list rows name a hospital in another state and are left to that state's list.")])
+    mo.vstack(
+        [
+            national,
+            mo.md(
+                f"{len(out_of_state_rows)} list rows name a hospital in another state and are left to that state."
+            ),
+        ]
+    )
     return BUCKETS, mistyped, national, out_of_state_rows, pairs
 
 
@@ -489,7 +509,10 @@ def _(hifld, pairs, sources, state_status):
         corrected[f"{_kind}_corrected"] = np.where(_checked, _state_value, corrected[f"{_kind}_hifld"])
 
     def trauma_text(adult: str, peds: str) -> str:
-        parts = [f"LEVEL {adult} ADULT" if adult in LEVELS else adult, f"LEVEL {peds} PEDIATRIC" if peds in LEVELS else peds]
+        parts = [
+            f"LEVEL {adult} ADULT" if adult in LEVELS else adult,
+            f"LEVEL {peds} PEDIATRIC" if peds in LEVELS else peds,
+        ]
         return ", ".join(p for p in parts if p)
 
     corrected["TRAUMA_corrected"] = [
@@ -530,7 +553,9 @@ def _(corrected, designations, hifld, state_status):
         "of which on the state list at Level I/II": int(
             _peds_before["source_ID"].isin(set(_peds_checked["source_ID"])).sum()
         ),
-        "pediatric Level I/II after correction, nationally": int(corrected["peds_corrected"].isin(["I", "II", "unspecified"]).sum()),
+        "pediatric Level I/II after correction, nationally": int(
+            corrected["peds_corrected"].isin(["I", "II", "unspecified"]).sum()
+        ),
     }
     pediatric_counts
     return (pediatric_counts,)
@@ -566,13 +591,16 @@ def _(files):
     _age = _age[_age["GEO_ID"].str.startswith("1500000US")]
     _age = _age.assign(geoid=_age["GEO_ID"].str[9:], pop=_age["B01001_E001"], children=_age[_age_columns].sum(axis=1))
     _ruca = pd.read_csv(
-        files["ruca"], dtype={"TractFIPS20": str, "TractFIPS23": str}, usecols=["TractFIPS20", "TractFIPS23", "PrimaryRUCA"]
+        files["ruca"],
+        dtype={"TractFIPS20": str, "TractFIPS23": str},
+        usecols=["TractFIPS20", "TractFIPS23", "PrimaryRUCA"],
     )
     # The 2022 ACS moved Connecticut's tracts to planning regions; RUCA maps the 2020 codes to the new ones.
     _tract_2020 = _centres["STATEFP"] + _centres["COUNTYFP"] + _centres["TRACTCE"]
-    _centres["geoid"] = _tract_2020.map(dict(zip(_ruca["TractFIPS20"], _ruca["TractFIPS23"], strict=True))).fillna(
-        _tract_2020
-    ) + _centres["BLKGRPCE"]
+    _centres["geoid"] = (
+        _tract_2020.map(dict(zip(_ruca["TractFIPS20"], _ruca["TractFIPS23"], strict=True))).fillna(_tract_2020)
+        + _centres["BLKGRPCE"]
+    )
     _ruca = _ruca.drop_duplicates("TractFIPS23")
     _ruca["rurality"] = pd.cut(
         _ruca["PrimaryRUCA"], [0, 3, 6, 9, 10], labels=["Metropolitan", "Micropolitan", "Small town", "Rural"]
@@ -672,21 +700,25 @@ def _(bg, hifld):
 
 
 @app.cell
-def _(by_state, state_status):
-    # Share of each state's checked records that HIFLD gets right, adult and pediatric.
-    _share = by_state["share correct"].unstack("kind").reindex(state_status.index[state_status["checked_adult"]])
-    _share = _share.sort_values("adult")
-    _fig, _ax = plt.subplots(figsize=(10, 4.2))
-    _x = np.arange(len(_share))
-    _ax.bar(_x - 0.2, _share["adult"], 0.4, label="adult levels")
-    _ax.bar(_x + 0.2, _share.get("peds", pd.Series(np.nan, index=_share.index)), 0.4, label="pediatric levels")
-    _ax.set_xticks(_x, _share.index, fontsize=7, rotation=90)
-    _ax.set_ylabel("share of records correct")
-    _ax.set_ylim(0, 1)
-    _ax.legend(fontsize=8)
-    _ax.set_title("HIFLD hospitals-3 v1.1.0 trauma levels against each state's designation list")
+def _(BUCKETS, by_state):
+    # Each state's records by bucket, adult and pediatric side by side.
+    _colors = ["#4c78a8", "#f2a541", "#e45756", "#9d2a2a", "#b0b0b0", "#dcdcdc"]
+    _fig, _axes = plt.subplots(1, 2, figsize=(11, 9), gridspec_kw={"width_ratios": [3, 1]})
+    for _ax, _kind in zip(_axes, KINDS, strict=True):
+        _t = by_state.xs(_kind, level="kind")[BUCKETS]
+        _t = _t.loc[(_t["correct"] / _t.sum(axis=1)).sort_values(ascending=False).index]
+        _left = np.zeros(len(_t))
+        for _bucket, _color in zip(BUCKETS, _colors, strict=True):
+            _ax.barh(_t.index, _t[_bucket], left=_left, color=_color, label=_bucket)
+            _left += _t[_bucket].to_numpy()
+        _ax.invert_yaxis()
+        _ax.tick_params(axis="y", labelsize=7)
+        _ax.set_title(f"{KINDS[_kind]} levels ({len(_t)} states)")
+        _ax.set_xlabel("records")
+    _axes[0].legend(fontsize=8, loc="lower right")
+    _fig.suptitle("HIFLD hospitals-3 v1.1.0 trauma levels against each state's list, states ordered by share correct")
     _fig.tight_layout()
-    _fig.savefig(OUT / "share_correct_by_state.png", dpi=130)
+    _fig.savefig(OUT / "buckets_by_state.png", dpi=130)
     _fig
     return
 
