@@ -719,5 +719,39 @@ def _(
     return
 
 
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ## What didn't work, and what this doesn't show
+
+    - **Four states have no list to check against.** Connecticut, Rhode Island and Vermont designate by American
+      College of Surgeons verification and publish no list of their own; Oklahoma's hospitals report their own
+      level on a licensing form and the state doesn't publish the results. New Mexico's only official list is an
+      archived 2013 map and North Dakota's a 2020 map that shows levels by marker colour; both are too old. These
+      six keep HIFLD's values.
+    - **Thirteen states don't designate pediatric centers separately** (New Jersey among them), so their
+      pediatric records stay unchecked. There, the corrected list keeps HIFLD's pediatric records and adds
+      children's hospitals the state designates at Level I or II. New Jersey's 1-of-5 gap from the trauma-access
+      spike can't be confirmed from a state list for this reason.
+    - **Some sources aren't the state's own document.** Pennsylvania's list is the press release of the
+      nonprofit the state law names as its accreditor; Colorado's, Kansas's, Missouri's and Wisconsin's come from
+      the state's own map services because their pages blocked us or only show a map; Mississippi's PDF was taken
+      down in a site redesign and was read from a cached copy. `state_sources.csv` says which.
+    - **Several lists are undated or a few years old** (West Virginia 2022, New Jersey 2024). A hospital dropped
+      since then shows as correct; one added since shows as stale.
+    - **Tiers don't line up perfectly.** Montana, Wyoming and South Dakota map their tiers to levels; Mississippi's
+      Secondary pediatric tier sits between Levels II and III and we called it III; Maine's "Trauma System
+      Hospital" and Mississippi's "Primary Pediatric" mean taking part in the system, not a trauma level, and are
+      dropped. Changing any of these moves a handful of records.
+    - **Matching is by hand and campus-level.** A children's hospital with no HIFLD record of its own is matched
+      to the adult campus it shares; where HIFLD has two records for one campus, the one the list row matches is
+      judged and the other shows as a duplicate.
+    - **The distance rerun reuses the trauma-access spike's straight-line-to-minutes lines**, fitted on two
+      northeastern states; its ±5-point caveat on national shares applies here too. It moves only the facility
+      list, not the method.
+    """)
+    return
+
+
 if __name__ == "__main__":
     app.run()
