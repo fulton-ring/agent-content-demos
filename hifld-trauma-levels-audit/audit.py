@@ -46,9 +46,12 @@ with app.setup:
         "RTC": "II", "RTH": "II", "ATH": "III", "CTH": "IV", "TRF": "V", "TRH": "V",  # Montana, Wyoming, South Dakota
         "CRPC": "I",  # Tennessee's Comprehensive Regional Pediatric Center
         "PARC": "I",  # Maryland's Primary Adult Resource Center (Shock Trauma)
-        "TERTIARY": "I", "SECONDARY": "II",  # Mississippi's pediatric tiers
+        # Mississippi's pediatric tiers: a Secondary center may be a Level III adult center and keeps children only
+        # for orthopedic injuries (15 Miss. Code R. 3-1-7.2.1), so it maps to III, not II.
+        "TERTIARY": "I", "SECONDARY": "III",
     }  # fmt: skip
-    # Tiers that mean a hospital takes part in the state system, not that it is a trauma center.
+    # Tiers that mean a hospital takes part in the state system, not that it is a trauma center: Maine's Trauma
+    # System Hospitals, and Mississippi's Primary Pediatric tier, which every designated hospital holds.
     NOT_TRAUMA = {"TSH", "PRIMARY"}
     RUN_STARTED = time.perf_counter()
 
