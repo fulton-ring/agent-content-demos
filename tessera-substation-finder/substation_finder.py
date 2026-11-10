@@ -426,7 +426,7 @@ def _(mo):
 
 
 @app.cell
-def _(ALBERS, READ, SEED, codes, np, osm, patch_transforms, rasterize, samples, scales):
+def _(READ, SEED, codes, np, osm, patch_transforms, rasterize, samples, scales):
     _rng = np.random.default_rng(SEED)
     _outline = osm.to_crs(4326).geometry
     _near = osm.geometry.buffer(60).to_crs(4326)
@@ -466,7 +466,6 @@ def _(ALBERS, READ, SEED, codes, np, osm, patch_transforms, rasterize, samples, 
         f"Probe training pixels: {int(probe_y.sum()):,} substation, "
         f"{int((probe_y == 0).sum()):,} other"
     )
-    assert ALBERS
     return inside, probe_x, probe_y
 
 
@@ -1179,7 +1178,6 @@ def _(
     time,
     timings,
 ):
-    timings["total"] = time.time() - run_start
     _disk = sum(f.stat().st_size for f in DATA_DIR.rglob("*") if f.is_file())
 
     # What a run from an empty data/ fetches from TESSERA: every read takes whole rows of 128
@@ -1196,6 +1194,7 @@ def _(
             for _r, k in scan_tiles
         )
     )
+    timings["total"] = time.time() - run_start
     cost = {
         "tessera_GB_fetched_from_empty_data_dir": round(_fresh / 1e9, 1),
         "tessera_range_read_GB_this_run": round(range_bytes[0] / 1e9, 2),
