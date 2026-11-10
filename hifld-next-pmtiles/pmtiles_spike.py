@@ -398,7 +398,15 @@ def _(build_table, chosen):
 
 @app.cell
 def _(nginx):
-    def open_map(_context, url: str, timeout_s: float = 90) -> dict:  # noqa: ANN001
+    def wait_until_idle(_page, timeout_s: float) -> bool:  # noqa: ANN001
+        """Poll until the map reports idle, for at most timeout_s; False if it never settles."""
+        for _attempt in range(int(timeout_s * 2)):
+            if _page.evaluate("window.mapIdle === true"):
+                return True
+            _page.wait_for_timeout(500)
+        return False
+
+    def open_map(_context, url: str, timeout_s: float = 60) -> dict:  # noqa: ANN001
         """Open the map, wait until it is idle, and count the PMTiles requests and bytes."""
         _page = _context.new_page()
         # Chrome's own network events give the bytes on the wire for each request, including
@@ -421,7 +429,7 @@ def _(nginx):
         cdp.on("Network.loadingFinished", on_finished)
         _started = time.perf_counter()
         _page.goto(url)
-        _page.wait_for_function("window.mapIdle === true", timeout=timeout_s * 1000)
+        fetched["settled"] = wait_until_idle(_page, timeout_s)
         fetched["seconds"] = round(time.perf_counter() - _started, 2)
         fetched["errors"] = _page.evaluate("window.mapErrors")
         fetched["page"] = _page
@@ -431,7 +439,7 @@ def _(nginx):
     playwright = sync_playwright().start()
     browser = playwright.chromium.launch(executable_path=browser_path)
     assert nginx["server"].poll() is None
-    return browser, open_map
+    return browser, open_map, wait_until_idle
 
 
 @app.cell
@@ -444,6 +452,7 @@ def _(browser, build_table, open_map):
         for run in range(3):
             _context = browser.new_context(viewport={"width": 1280, "height": 800})
             _result = open_map(_context, f"{BUCKET}/index.html?layers={_layers}")
+            assert _result["settled"], _result["errors"]
             if run == 0 and "HIFLD" in label:
                 _result["page"].screenshot(path=OUT / "map_first_view.png")
             _context.close()
@@ -532,7 +541,7 @@ def _(tippecanoe):
 
 
 @app.cell
-def _(browser, nginx, open_map, rebuild_seconds, start_nginx):
+def _(browser, nginx, open_map, rebuild_seconds, start_nginx, wait_until_idle):
     assert rebuild_seconds > 0  # the v1 and v2 hospital files exist
     texas, ohio = "-99,31,6", "-82.8,40.2,6"
     local_layers = (SITE / "layers-local.json").read_text()
@@ -550,6 +559,7 @@ def _(browser, nginx, open_map, rebuild_seconds, start_nginx):
         changed = [e for e in outcome["errors"] if e.startswith("hospitals-3")]
         return {
             "step": step,
+            "map_settled": outcome["settled"],
             "versions_drawn": "+".join(outcome["versions"]) or "none",
             "hospital_errors": len(changed),
             "first_error": (changed or [""])[0][:100],
@@ -585,8 +595,8 @@ def _(browser, nginx, open_map, rebuild_seconds, start_nginx):
             "window.mapIdle = false; window.map.once('idle', () => window.mapIdle = true)"
         )
         _page.evaluate("window.map.jumpTo({center: [-82.8, 40.2]})")
-        _page.wait_for_function("window.mapIdle === true", timeout=60_000)
         panned = {
+            "settled": wait_until_idle(_page, 60),
             "versions": _page.evaluate("window.versionsSeen('hospitals-3')"),
             "errors": _page.evaluate("window.mapErrors"),
         }
