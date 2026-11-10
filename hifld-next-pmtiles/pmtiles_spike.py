@@ -633,10 +633,13 @@ def _(update_table):
         "refetches them, and draws the new data. A whole-object CDN serves the old file to "
         "everyone until its cache expires (an hour here, from the bucket's `max-age=3600`) or "
         "is purged. A CDN that caches by range slice is worse: it holds slices of the old file "
-        "and fetches new slices from the new one, so one URL returns pieces of two files. "
-        "pmtiles.js sees two ETags, retries, sees them again and gives up, so the layer fails "
-        f"to draw ({len(broken)} steps with errors on the changed layer), even for a new "
-        "visitor, until the cache expires. Publishing each version under a new URL avoids all "
+        "and fetches missing slices from the new one, so one URL now holds pieces of two files. "
+        "nginx notices when the slices behind one request carry different ETags and drops the "
+        "connection (its log says `etag mismatch in slice response`), which the browser reports "
+        "as 'Failed to fetch'; a CDN that didn't check would hand over mixed bytes, which "
+        "pmtiles.js can only catch by ETag. Either way the layer fails to draw "
+        f"({len(broken)} steps with errors on the changed layer), even for a new visitor, "
+        "until the cache expires. Publishing each version under a new URL avoids all "
         "of it: nothing cached is ever wrong, and only the small layer list has to be fresh. A "
         "visitor who already has the map open keeps the old version until they reload.\n\n"
         f"Separately, reloading a page with a warm browser cache gave {other_errors} "
@@ -679,7 +682,7 @@ def _(build_table, first_view_summary):
         _rows += [
             {
                 "sessions": sessions,
-                "setup": "Google Cloud Storage, direct (HIFLD Next today)",
+                "setup": "Google Cloud Storage, direct, no CDN",
                 "usd_month": gcs_storage + gcs_ops + gcs_egress,
                 "note": f"{egress_gb:.0f} GB egress, {requests / 1e6:.1f} M reads",
             },
