@@ -616,14 +616,31 @@ def _(browser, nginx, open_map, rebuild_seconds, start_nginx, wait_until_idle):
 @app.cell
 def _(update_table):
     last = update_table[update_table.step.str.startswith("4.")].set_index(["setup", "publish"])
+    broken = update_table[update_table.hospital_errors > 0]
+    other_errors = update_table.other_layer_errors.sum()
     mo.md(
-        "What a new visitor sees after the change, per setup: "
-        + "; ".join(f"{s} / {p}: **{r.versions_drawn}**" for (s, p), r in last.iterrows())
-        + ". A CDN keeps serving the old file until its cache expires (an hour here, from the "
-        "bucket's `max-age=3600`) unless it is purged. A CDN that caches by range slice can "
-        "hand out pieces of two different files for one URL, which pmtiles.js detects by ETag and "
-        "can only answer with an error. Publishing each version under a new URL avoids all of "
-        "this: nothing cached is ever wrong, only the small layer list has to be fresh."
+        "What a new visitor sees after the change: "
+        + "; ".join(
+            f"{s} / {p}: **{r.versions_drawn}**"
+            + (f" ({r.hospital_errors} tile errors)" if r.hospital_errors else "")
+            for (s, p), r in last.iterrows()
+        )
+        + ".\n\n"
+        "On the plain bucket, pmtiles.js handles an overwrite by itself: the first tile request "
+        "after the swap comes back with a new ETag, so it drops the old header and directory, "
+        "refetches them, and draws the new data. A whole-object CDN serves the old file to "
+        "everyone until its cache expires (an hour here, from the bucket's `max-age=3600`) or "
+        "is purged. A CDN that caches by range slice is worse: it holds slices of the old file "
+        "and fetches new slices from the new one, so one URL returns pieces of two files. "
+        "pmtiles.js sees two ETags, retries, sees them again and gives up, so the layer fails "
+        f"to draw ({len(broken)} steps with errors on the changed layer), even for a new "
+        "visitor, until the cache expires. Publishing each version under a new URL avoids all "
+        "of it: nothing cached is ever wrong, and only the small layer list has to be fresh. A "
+        "visitor who already has the map open keeps the old version until they reload.\n\n"
+        f"Separately, reloading a page with a warm browser cache gave {other_errors} "
+        "'Failed to fetch' errors on layers that had not changed, in every setup including the "
+        "new-URL ones. They are not caused by the update; we did not track down why Chrome "
+        "fails those cached range reads."
     )
     return
 
@@ -675,9 +692,10 @@ def _(build_table, first_view_summary):
             {
                 "sessions": sessions,
                 "setup": "Hugging Face bucket (public)",
-                "usd_month": stored_gb / 1e3 * 12,
-                "note": f"egress included only up to 8x storage = {hf_allowance:.1f} GB; "
-                f"needs {egress_gb:.0f} GB",
+                # Storage alone is $12/TB, but the page prices no egress beyond 8x storage.
+                "usd_month": stored_gb / 1e3 * 12 if egress_gb <= hf_allowance else None,
+                "note": f"not priced: egress is included only up to 8x storage = "
+                f"{hf_allowance:.1f} GB, and this needs {egress_gb:.0f} GB",
             },
             {
                 "sessions": sessions,
