@@ -47,7 +47,7 @@ Every number is in `outputs/summary.json`, `outputs/field_summary.csv` and
 **The inventory.** We checked 9 shared identifier fields (`STATE`, `COUNTY`, `COUNTYFIPS`,
 `FIPS`, `FIPS_CODE`, `ZIP`, `NAICS_CODE`, `STATUS`, `TYPE`) in 137 layers (320 layer-field
 pairs, reading the real values, not catalog samples). **All 9 change format or meaning
-between layers**, and 79 layer-field pairs depart from the common form (`outputs/code_notes.md`
+between layers**, and 77 layer-field pairs depart from the common form (`outputs/code_notes.md`
 lists each one). The ones that can join to the wrong place:
 
 | field | what we found |
@@ -55,7 +55,7 @@ lists each one). The ones that can join to the wrong place:
 | `STATE` | postal code in 59 layers, full name in 15, FIPS number (`48`) in 13, lowercase in 2; city names in 2 (`dialysis-centers`, `mines-and-mineral-resources`, where columns are shifted by one) |
 | `COUNTY` | a name in 46 layers, a 3-digit FIPS (`029`, no state) in 6 |
 | `FIPS` | county code in 6 layers, state code in 2, county *name* in 1 |
-| county codes, Connecticut | 28 of 36 layers with a county code still use the 8 counties abolished in 2022 for some CT rows (`09003` Hartford); the county layer, hospitals, power plants and NRI use the 9 planning regions (`09110` Capitol). The two never match. |
+| county codes, Connecticut | 28 of the 31 county-code layers with Connecticut rows still use the 8 counties abolished in 2022 for some CT rows (`09003` Hartford); the county layer, hospitals, power plants and NRI use the 9 planning regions (`09110` Capitol). The two never match. |
 | `private-schools.COUNTYFIPS` | county and state reversed in 75% of rows: Erskine Academy, Maine (`23011`) is stored as `01123`, which is Tallapoosa County, **Alabama** |
 | `ncua...COUNTYFIPS`, `FIPS_CODE` | stored as a number (`6019`, leading zero lost) in NCUA; `ME011`-style codes in 5% of EPA TRI rows |
 | `STATUS` | operating status in words (`OPEN`), in codes (`OP`, `A`, `1`-`8`), or not status at all: ownership, volcano dating evidence, regulatory stage |

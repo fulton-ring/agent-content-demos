@@ -222,7 +222,7 @@ def _(FIELDS, MAX_ROWS_READ, db, layers, pl):
             }
         sql = (
             f"WITH s AS (SELECT CAST(\"{column}\" AS VARCHAR) v FROM read_parquet('{href}') "
-            f"LIMIT {MAX_ROWS_READ}) SELECT v, count(*) n FROM s GROUP BY v ORDER BY n DESC"
+            f"LIMIT {MAX_ROWS_READ}) SELECT v, count(*) n FROM s GROUP BY v ORDER BY n DESC, v"
         )
         error = None
         for _attempt in range(3):
@@ -566,7 +566,7 @@ def _(OUT, inventory, pl, status):
                 .str.join("; "),
             )
             .with_columns(differs=(pl.col("formats") > 1) | (pl.col("meanings") > 1))
-            .sort("layers", descending=True)
+            .sort(["layers", "field"], descending=[True, False])
         )
 
     summary_by_field = field_summary(inventory_out.filter(pl.col("family") != "type"))
