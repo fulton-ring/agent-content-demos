@@ -16,7 +16,7 @@ from the run below is in [`outputs/cost_per_answer.html`](outputs/cost_per_answe
 ```bash
 export OPENROUTER_API_KEY=...   # about $1.60 of model calls per full run
 ./run.sh                        # runs the notebook as a script, about 12 minutes
-RESCORE=1 ./run.sh              # rescores the committed runs; no model calls, no key needed
+RESCORE=1 ./run.sh              # rescores the committed runs; no model calls, no key needed, about 8 minutes (it re-checks every cited link)
 ```
 
 To read it with its tables, run `uv run marimo edit cost_per_answer.py`. Settings are
@@ -53,8 +53,8 @@ OpenRouter). Every number is in `outputs/summary.json`. Model: Claude Haiku 5.5.
 | Urban EDP | 40 | 92.5% | 100% | 55,194 (111,237) | 5 (8) | 11.2 (58.1) | 0.0079 | 0.0085 |
 
 "Link from tools" means the answer's source URL came out of a tool result. The stricter
-"checkable" column in the notebook (the link is on the publisher's domain and opens) gives the
-same 100% / 0% / 100%.
+"checkable" column in the notebook (the link is on the publisher's domain and opens) gives about
+the same (95–100% / 0% / 97.5–100%); it depends on live link checks.
 
 **Where the tokens go.** Every step resends the tool definitions, so the first request of a run
 is the fixed price of a step:
