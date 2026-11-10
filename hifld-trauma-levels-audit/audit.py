@@ -51,7 +51,6 @@ with app.setup:
     # State tiers that aren't numbered, mapped to the nearest ACS level (see state_sources.csv notes).
     TIERS = {
         "RTC": "II", "RTH": "II", "ATH": "III", "CTH": "IV", "TRF": "V", "TRH": "V",  # Montana, Wyoming, South Dakota
-        "CRPC": "I",  # Tennessee's Comprehensive Regional Pediatric Center
         "PARC": "I",  # Maryland's Primary Adult Resource Center (Shock Trauma)
         # Mississippi's pediatric tiers: a Secondary center may be a Level III adult center and keeps children only
         # for orthopedic injuries (15 Miss. Code R. 3-1-7.2.1), so it maps to III, not II.
@@ -60,7 +59,12 @@ with app.setup:
     }  # fmt: skip
     # Tiers that mean a hospital takes part in the state system, not that it is a trauma center: Maine's Trauma
     # System Hospitals, and Mississippi's Primary Pediatric tier, which every designated hospital holds.
-    NOT_TRAUMA = {"TSH", "PRIMARY"}
+    # Tennessee's Comprehensive Regional Pediatric Center is a pediatric emergency-care tier, not a trauma level.
+    NOT_TRAUMA = {"TSH", "PRIMARY", "CRPC"}
+    # States whose list leaves out pediatric centers that other official documents designate (the pediatric check
+    # found Los Angeles and Riverside county pediatric centers missing from California's list, and UK Kentucky
+    # Children's Level I missing from Kentucky's map), so their pediatric levels count as unchecked.
+    PEDS_LIST_INCOMPLETE = {"CA", "KY"}
     RUN_STARTED = time.perf_counter()
 
     def rank(level: str) -> int:
@@ -176,7 +180,10 @@ def _():
 def _():
     sources = pd.read_csv(HERE / "state_sources.csv", dtype=str).fillna("")
     _extracted = pd.read_csv(HERE / "state_designations.csv", dtype=str).fillna("")
-    designations = _extracted[~_extracted["level"].isin(NOT_TRAUMA)].reset_index(drop=True)
+    # "Seeking provisional status" (Ohio) is an application, not a designation.
+    designations = _extracted[~_extracted["level"].isin(NOT_TRAUMA) & (_extracted["status"] != "seeking")].reset_index(
+        drop=True
+    )
     assert set(sources["state"]) == set(STATES), (
         f"state_sources.csv must cover 51 states: {set(STATES) ^ set(sources['state'])}"
     )
@@ -191,7 +198,13 @@ def _():
     state_status["checked_adult"] = (
         state_status["reusable"].isin(["yes", "unclear"]) & (state_status["rows"] > 0) & state_status["current"]
     )
-    state_status["checked_peds"] = state_status["checked_adult"] & (state_status["covers_peds"] == "yes")
+    _peds_rows = designations[designations["kind"] == "peds"].groupby("state").size()
+    state_status["checked_peds"] = (
+        state_status["checked_adult"]
+        & (state_status["covers_peds"] == "yes")
+        & (_peds_rows.reindex(state_status.index, fill_value=0) > 0)
+        & ~state_status.index.isin(PEDS_LIST_INCOMPLETE)
+    )
     _dated = sources.loc[sources["state"].isin(state_status.index[state_status["checked_adult"]]), "list_date"]
     _dated = _dated[_dated != ""]
     source_counts = {
@@ -489,11 +502,29 @@ def _():
 
 
 @app.cell
-def _(hifld, pairs, sources, state_status):
+def _(designations, hifld, pairs, sources, state_status):
     _wide = pairs.pivot_table(index="key", columns="kind", values="state_level", aggfunc="first")
     _wide = _wide.reindex(columns=list(KINDS)).fillna("")
     _names = pairs.drop_duplicates("key").set_index("key")[["state", "list_name"]]
-    _keys = set(hifld.loc[(hifld["adult_hifld"] != "") | (hifld["peds_hifld"] != ""), "source_ID"]) | set(_wide.index)
+    # In a state with a current list but no pediatric list, a children's hospital it designates at Level I/II is
+    # still added (nothing is removed there).
+    _state_of = hifld.set_index("source_ID")["STATE"]
+    _adds = designations[
+        (designations["kind"] == "peds")
+        & designations["level"].replace(TIERS).isin(["I", "II", "unspecified"])
+        & designations["state"].map(state_status["checked_adult"])
+        & ~designations["state"].map(state_status["checked_peds"])
+    ]
+    _adds = _adds[(_adds["source_ID"] == "") | (_adds["source_ID"].map(_state_of) == _adds["state"])]
+    _adds = _adds.assign(
+        key=np.where(_adds["source_ID"] != "", _adds["source_ID"], "list:" + _adds["state"] + ":" + _adds["list_name"]),
+        level=_adds["level"].replace(TIERS),
+    )
+    _adds = _adds.assign(_rank=_adds["level"].map(rank)).sort_values("_rank").drop_duplicates("key").set_index("key")
+    _names = pd.concat([_names, _adds[["state", "list_name"]]])
+    _names = _names[~_names.index.duplicated()]
+    _keys = set(hifld.loc[(hifld["adult_hifld"] != "") | (hifld["peds_hifld"] != ""), "source_ID"])
+    _keys |= set(_wide.index) | set(_adds.index)
     corrected = pd.DataFrame(index=sorted(_keys))
     corrected = corrected.join(
         hifld.set_index("source_ID")[["NAME", "CITY", "STATE", "TYPE", "STATUS", "TRAUMA", "adult_hifld", "peds_hifld"]]
@@ -505,6 +536,9 @@ def _(hifld, pairs, sources, state_status):
         _checked = corrected["STATE"].map(state_status[f"checked_{_kind}"]).fillna(False).astype(bool)
         _state_value = _wide[_kind].reindex(corrected.index).fillna("")
         corrected[f"{_kind}_corrected"] = np.where(_checked, _state_value, corrected[f"{_kind}_hifld"])
+    _added = _adds["level"].reindex(corrected.index).fillna("")
+    _fill = (corrected["peds_corrected"] == "") & (_added != "")
+    corrected.loc[_fill, "peds_corrected"] = _added[_fill]
 
     def trauma_text(adult: str, peds: str) -> str:
         parts = [
@@ -551,7 +585,7 @@ def _(corrected, designations, hifld, state_status):
         "of which on the state list at Level I/II": int(
             _peds_before["source_ID"].isin(set(_peds_checked["source_ID"])).sum()
         ),
-        "pediatric Level I/II after correction, nationally": int(
+        "pediatric Level I/II in the corrected field, nationally": int(
             corrected["peds_corrected"].isin(["I", "II", "unspecified"]).sum()
         ),
     }
@@ -644,7 +678,7 @@ def _(files):
 
 
 @app.cell
-def _(bg, corrected, designations, hifld, state_status):
+def _(bg, corrected, hifld, state_status):
     def unit_vectors(lat: np.ndarray, lon: np.ndarray) -> np.ndarray:
         lat_r, lon_r = np.radians(lat), np.radians(lon)
         return np.column_stack([np.cos(lat_r) * np.cos(lon_r), np.cos(lat_r) * np.sin(lon_r), np.sin(lat_r)])
@@ -662,21 +696,15 @@ def _(bg, corrected, designations, hifld, state_status):
     _added = pd.read_csv(HERE / "added_locations.csv", dtype={"key": str})
     _added = _added.set_index("key")[["LATITUDE", "LONGITUDE", "state"]].rename(columns={"state": "STATE"})
     _coords = pd.concat([_coords, _added])
-    _peds_list = designations[(designations["kind"] == "peds") & designations["level"].replace(TIERS).isin(["I", "II"])]
-    _peds_extra = {
-        k if k else f"list:{s}:{n}"
-        for k, s, n in zip(_peds_list["source_ID"], _peds_list["state"], _peds_list["list_name"], strict=True)
-    }
-
     center_sets = {}
     for _kind in KINDS:
         _before = hifld.loc[hifld[f"{_kind}_spike"], "source_ID"]
+        _top_after = corrected[f"{_kind}_corrected"].isin(_top)
+        # Where HIFLD's value stands unchecked, keep the spike's filter on type and status.
+        _unchanged = corrected[f"{_kind}_corrected"] == corrected[f"{_kind}_hifld"]
         _checked = corrected["STATE"].map(state_status[f"checked_{_kind}"]).fillna(False).astype(bool)
-        _from_list = corrected.index[_checked & corrected[f"{_kind}_corrected"].isin(_top)]
-        _unchecked = set(_before) & set(corrected.index[~_checked])
-        _after = set(_from_list) | _unchecked
-        if _kind == "peds":
-            _after |= {k for k in _peds_extra if k in corrected.index and not _checked.get(k, False)}
+        _dropped = ~_checked & _unchanged & ~corrected.index.isin(set(_before))
+        _after = set(corrected.index[_top_after & ~_dropped])
         _missing = sorted(_after - set(_coords.index))
         assert not _missing, f"no coordinates for {_missing}; add them to added_locations.csv"
         center_sets[_kind] = {"before": sorted(_before), "after": sorted(_after)}
@@ -785,10 +813,11 @@ def _():
       level on a licensing form and the state doesn't publish the results. New Mexico's only official list is an
       archived 2013 map and North Dakota's a 2020 map that shows levels by marker colour; both are too old. These
       six keep HIFLD's values.
-    - **Thirteen states don't designate pediatric centers separately** (New Jersey among them), so their
-      pediatric records stay unchecked. There, the corrected list keeps HIFLD's pediatric records and adds
-      children's hospitals the state designates at Level I or II. New Jersey's 1-of-5 gap from the trauma-access
-      spike can't be confirmed from a state list for this reason.
+    - **Sixteen checked states have no usable pediatric list.** Fourteen don't designate pediatric centers
+      separately (New Jersey and Tennessee among them). In California and Kentucky the pediatric check found
+      designated centers missing from the state's list. Their pediatric records stay unchecked: the corrected
+      list keeps HIFLD's records and adds children's hospitals the state designates at Level I or II. A state list
+      can't confirm New Jersey's 1-of-5 gap from the trauma-access spike for this reason.
     - **Some sources aren't the state's own document.** Pennsylvania's list is the press release of the
       nonprofit the state law names as its accreditor; Colorado's, Kansas's, Missouri's and Wisconsin's come from
       the state's own map services because their pages blocked us or only show a map; Mississippi's PDF was taken
