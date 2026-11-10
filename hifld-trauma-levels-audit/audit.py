@@ -42,7 +42,14 @@ with app.setup:
     FITS = {"Metropolitan": (11.5, 0.703), "Micropolitan": (15.7, 0.614), "Small town": (28.9, 0.633), "Rural": (23.3, 0.711)}
     EXTRACTION_SAMPLE = 60
     # State tiers that aren't numbered, mapped to the nearest ACS level (see state_sources.csv notes).
-    TIERS = {"RTC": "II", "RTH": "II", "ATH": "III", "CTH": "IV", "TRF": "V", "TRH": "V", "CRPC": "I", "PARC": "I"}
+    TIERS = {
+        "RTC": "II", "RTH": "II", "ATH": "III", "CTH": "IV", "TRF": "V", "TRH": "V",  # Montana, Wyoming, South Dakota
+        "CRPC": "I",  # Tennessee's Comprehensive Regional Pediatric Center
+        "PARC": "I",  # Maryland's Primary Adult Resource Center (Shock Trauma)
+        "TERTIARY": "I", "SECONDARY": "II",  # Mississippi's pediatric tiers
+    }  # fmt: skip
+    # Tiers that mean a hospital takes part in the state system, not that it is a trauma center.
+    NOT_TRAUMA = {"TSH", "PRIMARY"}
     RUN_STARTED = time.perf_counter()
 
     def rank(level: str) -> int:
@@ -156,7 +163,8 @@ def _():
 @app.cell
 def _():
     sources = pd.read_csv(HERE / "state_sources.csv", dtype=str).fillna("")
-    designations = pd.read_csv(HERE / "state_designations.csv", dtype=str).fillna("")
+    _extracted = pd.read_csv(HERE / "state_designations.csv", dtype=str).fillna("")
+    designations = _extracted[~_extracted["level"].isin(NOT_TRAUMA)].reset_index(drop=True)
     assert set(sources["state"]) == set(STATES), f"state_sources.csv must cover 51 states: {set(STATES) ^ set(sources['state'])}"
     _by_state = sources.groupby("state").agg(
         reusable=("reusable", lambda s: "yes" if (s == "yes").all() else ("no" if (s == "no").all() else "unclear")),
@@ -273,6 +281,27 @@ def _(files):
     _parsed = [parse_trauma(t, ty) for t, ty in zip(hifld["TRAUMA"], hifld["TYPE"], strict=True)]
     hifld["adult_hifld"] = [a for a, _ in _parsed]
     hifld["peds_hifld"] = [p for _, p in _parsed]
+    # The trauma-access spike's own Level I/II reading, kept for the distance rerun's "before" list.
+
+    def spike_levels(text: str, hospital_type: str) -> tuple[bool, bool]:
+        """The trauma-access spike's reading (trauma-burn-center-access/access.py), copied unchanged."""
+        adult = peds = False
+        for part in re.split(r"[,/]", text.upper()):
+            if "REHAB" in part:
+                continue
+            top_level = bool(re.search(r"\bLEVEL II?\b", part)) or part.strip() == "RTC"
+            if part.strip() == "PEDIATRIC" or ("PEDIATRIC" in part and top_level):
+                peds = True
+            elif top_level and hospital_type == "CHILDREN":
+                peds = True
+            elif top_level:
+                adult = True
+        return adult, peds
+
+    _kept = (hifld["STATUS"] == "OPEN") & ~hifld["TYPE"].isin(["PSYCHIATRIC", "REHABILITATION", "CRITICAL ACCESS"])
+    _spike = [spike_levels(t or "", ty) for t, ty in zip(hifld["TRAUMA"], hifld["TYPE"], strict=True)]
+    hifld["adult_spike"] = _kept & np.array([a for a, _ in _spike])
+    hifld["peds_spike"] = _kept & np.array([p for _, p in _spike])
     _with_level = hifld[(hifld["adult_hifld"] != "") | (hifld["peds_hifld"] != "")]
     pd.crosstab(_with_level["adult_hifld"].replace("", "none"), _with_level["peds_hifld"].replace("", "none"))
     return (hifld,)
@@ -311,12 +340,15 @@ def _(designations, hifld, state_status):
     _bad_level = designations[~designations["level"].isin(LEVELS + list(TIERS))]
     assert _bad_level.empty, f"unexpected levels: {_bad_level[['state', 'list_name', 'level']].values.tolist()}"
 
-    _list = designations.assign(level=designations["level"].replace(TIERS))
+    # A row a state lists for a hospital across its border is judged by the home state's own list instead.
+    _record_state = designations["source_ID"].map(hifld.set_index("source_ID")["STATE"])
+    _home = (designations["source_ID"] == "") | (_record_state == designations["state"])
+    out_of_state_rows = designations[~_home]
+    _list = designations[_home].assign(level=designations["level"].replace(TIERS))
     _list = _list.assign(_rank=_list["level"].map(rank)).sort_values("_rank")
     # A row with no HIFLD match gets its own key; two rows matched to one record keep the higher level.
     _list["key"] = np.where(_list["source_ID"] != "", _list["source_ID"], "list:" + _list["state"] + ":" + _list["list_name"])
     _list = _list.drop_duplicates(["key", "kind"])
-    _state_of = hifld.set_index("source_ID")["STATE"]
 
     _pairs = []
     for _kind in KINDS:
@@ -343,9 +375,6 @@ def _(designations, hifld, state_status):
         ["correct", "wrong level", "missing, blank", "missing, absent"],
         default="stale",
     )
-    # Border cases: a list row matched to a record in a neighbouring state is counted in the list's state.
-    _record_state = pairs["key"].map(_state_of)
-    pairs["hifld_state"] = _record_state.fillna("")
 
     _meta = hifld.set_index("source_ID")[["TYPE", "STATUS"]]
     _designated = pairs[(pairs["state_level"] != "") & pairs["in_hifld"]].join(_meta, on="key")
@@ -359,8 +388,8 @@ def _(designations, hifld, state_status):
     BUCKETS = ["correct", "wrong level", "missing, blank", "missing, absent", "stale"]
     national = pairs.groupby(["kind", "bucket"]).size().unstack(fill_value=0).reindex(columns=BUCKETS, fill_value=0)
     national["mistyped"] = mistyped.groupby("kind").size().reindex(national.index, fill_value=0)
-    national
-    return BUCKETS, mistyped, national, pairs
+    mo.vstack([national, mo.md(f"{len(out_of_state_rows)} list rows name a hospital in another state and are left to that state's list.")])
+    return BUCKETS, mistyped, national, out_of_state_rows, pairs
 
 
 @app.cell
@@ -458,11 +487,7 @@ def _(hifld, pairs, sources, state_status):
 @app.cell
 def _(corrected, designations, hifld, state_status):
     # Pediatric Level I/II centers before (HIFLD, read the trauma-access spike's way) and after the correction.
-    _peds_before = hifld[
-        (hifld["STATUS"] == "OPEN")
-        & ~hifld["TYPE"].isin(["PSYCHIATRIC", "REHABILITATION", "CRITICAL ACCESS"])
-        & hifld["peds_hifld"].isin(["I", "II", "unspecified"])
-    ]
+    _peds_before = hifld[hifld["peds_spike"]]
     _peds_list = designations[(designations["kind"] == "peds") & designations["level"].replace(TIERS).isin(["I", "II"])]
     _peds_checked = _peds_list[_peds_list["state"].map(state_status["checked_peds"])]
     pediatric_counts = {
@@ -545,7 +570,7 @@ def _(bg, corrected, designations, hifld, state_status):
         return np.column_stack([np.cos(lat_r) * np.cos(lon_r), np.cos(lat_r) * np.sin(lon_r), np.sin(lat_r)])
 
     def minutes_to_nearest(centers: pd.DataFrame) -> np.ndarray:
-        tree = KDTree(unit_vectors(centers["LATITUDE"].to_numpy(), centers["LONGITUDE"].to_numpy()))
+        tree = KDTree(unit_vectors(centers["LATITUDE"].to_numpy(float), centers["LONGITUDE"].to_numpy(float)))
         chord, _ = tree.query(unit_vectors(bg["lat"].to_numpy(), bg["lon"].to_numpy()))
         km = 2 * EARTH_KM * np.arcsin(np.clip(chord / 2, 0, 1))
         a = bg["rurality"].map({k: v[0] for k, v in FITS.items()})
@@ -553,7 +578,6 @@ def _(bg, corrected, designations, hifld, state_status):
         return (a + b * km).to_numpy()
 
     _top = ["I", "II", "unspecified"]
-    _spike_kept = (hifld["STATUS"] == "OPEN") & ~hifld["TYPE"].isin(["PSYCHIATRIC", "REHABILITATION", "CRITICAL ACCESS"])
     _coords = hifld.set_index("source_ID")[["LATITUDE", "LONGITUDE", "STATE"]]
     _added = pd.read_csv(HERE / "added_locations.csv", dtype={"key": str})
     _added = _added.set_index("key")[["LATITUDE", "LONGITUDE", "state"]].rename(columns={"state": "STATE"})
@@ -566,7 +590,7 @@ def _(bg, corrected, designations, hifld, state_status):
 
     center_sets = {}
     for _kind in KINDS:
-        _before = hifld.loc[_spike_kept & hifld[f"{_kind}_hifld"].isin(_top), "source_ID"]
+        _before = hifld.loc[hifld[f"{_kind}_spike"], "source_ID"]
         _checked = corrected["STATE"].map(state_status[f"checked_{_kind}"]).fillna(False).astype(bool)
         _from_list = corrected.index[_checked & corrected[f"{_kind}_corrected"].isin(_top)]
         _unchecked = set(_before) & set(corrected.index[~_checked])
@@ -614,6 +638,54 @@ def _(bg):
     shift_by_state.to_csv(OUT / "distance_shift_by_state.csv", index=False)
     shift_by_state.sort_values("peds change (points)")
     return (shift_by_state,)
+
+
+@app.cell
+def _(by_state, state_status):
+    # Share of each state's checked records that HIFLD gets right, adult and pediatric.
+    _share = by_state["share correct"].unstack("kind").reindex(state_status.index[state_status["checked_adult"]])
+    _share = _share.sort_values("adult")
+    _fig, _ax = plt.subplots(figsize=(10, 4.2))
+    _x = np.arange(len(_share))
+    _ax.bar(_x - 0.2, _share["adult"], 0.4, label="adult levels")
+    _ax.bar(_x + 0.2, _share.get("peds", pd.Series(np.nan, index=_share.index)), 0.4, label="pediatric levels")
+    _ax.set_xticks(_x, _share.index, fontsize=7, rotation=90)
+    _ax.set_ylabel("share of records correct")
+    _ax.set_ylim(0, 1)
+    _ax.legend(fontsize=8)
+    _ax.set_title("HIFLD hospitals-3 v1.1.0 trauma levels against each state's designation list")
+    _fig.tight_layout()
+    _fig.savefig(OUT / "share_correct_by_state.png", dpi=130)
+    _fig
+    return
+
+
+@app.cell
+def _(
+    distance_shares,
+    extraction_accuracy,
+    national,
+    pediatric_counts,
+    people_checks,
+    source_counts,
+    top_levels,
+):
+    summary = {
+        "sources": source_counts,
+        "extraction_check": extraction_accuracy,
+        "records_by_bucket": {k: {c: int(v) for c, v in row.items()} for k, row in national.iterrows()},
+        "level_I_II": {k: {c: int(v) for c, v in row.items()} for k, row in top_levels.iterrows()},
+        "pediatric": pediatric_counts,
+        "distance": {
+            f"{kind} {when}": {c: (float(v) if isinstance(v, float) else int(v)) for c, v in row.items()}
+            for (kind, when), row in distance_shares.iterrows()
+        },
+        "people": people_checks,
+        "seconds": round(time.perf_counter() - RUN_STARTED),
+    }
+    (OUT / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
+    summary
+    return
 
 
 if __name__ == "__main__":
