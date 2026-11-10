@@ -1,0 +1,44 @@
+[project]
+name = "tessera-substation-finder"
+version = "0.1.0"
+description = "Can open TESSERA satellite embeddings find electric substations?"
+requires-python = ">=3.12"
+dependencies = [
+    "duckdb>=2.0.0",
+    "geopandas>=1.2.0",
+    "httpx>=0.28.1",
+    "marimo>=0.25.2",
+    "matplotlib>=3.11.2",
+    "numpy>=2.5.4",
+    "pandas>=3.1.1",
+    "pyarrow>=26.0.1",
+    "pyogrio>=0.13.0",
+    "rasterio>=1.5.2",
+    "scikit-learn>=1.9.1",
+    "scipy>=1.18.1",
+    "shapely>=2.2.0",
+    "torch>=2.15.0",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.17.4",
+    "ty>=0.0.99",
+]
+
+[tool.ruff]
+line-length = 100
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "ANN"]
+# A bare expression at the end of a marimo cell is what the cell displays, and marimo
+# generates cell functions without annotations.
+ignore = ["B018", "ANN"]
