@@ -127,7 +127,7 @@ the SFHA. Substations: 15 on the substation, 1 on a dam powerhouse about 100 m f
 - **"No NFHL" is unknown, not safe.** These are communities with paper maps or none. Zone D is
   also unknown.
 - **The vintage is the panel's effective date**, not the date of the flood study, which can be
-  older. 2,115 of the 9,012 points outside every digital study still fall on an indexed panel.
+  older. 2,127 of the 9,012 points outside every digital study still fall on an indexed panel.
 - **A point is not a footprint.** Six of 25 sampled SFHA hospitals are only partly in the SFHA.
 - **Substation points** can be taps, plants or misplaced. The spot check found 5 to 9 of 25 not on a
   substation, depending on how you count dam powerhouses. Counts for substations are an upper
