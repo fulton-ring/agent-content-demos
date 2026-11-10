@@ -19,7 +19,7 @@ needs the preserved Community Layer (HIFLD Next's copy, which this notebook read
 
 Needs [uv](https://docs.astral.sh/uv/) and internet access, no key or account. It runs
 `notebook.py` (a [marimo](https://marimo.io) notebook) as a script and saves the output to
-`results/last-run.txt`. A first run took 7 to 27 minutes in our runs, mostly the NFHL point checks;
+`results/last-run.txt`. A first run took 17 to 37 minutes in our runs, mostly the NFHL point checks;
 a second run the same day reuses `data/` and takes seconds. `uv run marimo edit notebook.py`
 opens the notebook with its tables.
 
@@ -36,9 +36,10 @@ All public, downloaded at run time into `data/` (not committed):
   queries against layers 22 and 28 (Flood Hazard Zones).
 - **NFIP Community Status Book** from OpenFEMA.
 
-## Results (pull of 2026-11-06)
+## Results (pull of 2026-11-10)
 
-From `results/last-run.txt`, of 2,725,989 claims:
+From `results/last-run.txt`, of 2,725,989 claims. Every number below is the same as the
+first run on 2026-11-06, before OpenFEMA's removal date:
 
 | Source | Claims placed | Share |
 |---|---|---|
@@ -79,12 +80,19 @@ has a flood zone. The NFHL plus a crosswalk places 95.65% of claims, up from 95.
 under their CID: New York 603, Maine 435, Texas 281, Vermont 110, Minnesota 107. Full list
 in `results/status-book-no-nfhl-by-state.csv`. (The earlier analysis said 3,141.)
 
-**ArcGIS Online.** On 2026-11-06 FEMA's ArcGIS Online copy (item
-`4b712b99d43d41cb9328e94891520a63`, *NFIP Community Layer _flattened_ 2024v1*) was public
-and answered with 29,898 features, the same count as No Overlaps Whole. Whether it survives
-November 9 is sub-issue #221, which re-runs this after that date.
+**ArcGIS Online survived November 9.** Checked 2026-11-10, FEMA's ArcGIS Online copy (item
+`4b712b99d43d41cb9328e94891520a63`, *NFIP Community Layer _flattened_ 2024v1*) is still
+public, answers a count query with 29,898 features (the same as No Overlaps Whole and as on
+2026-11-06) and returns rows with polygons. OpenFEMA's three `NfipCommunityLayer*` endpoints
+are gone in substance: they still answer HTTP 200 and still report the old counts (51,943,
+29,898, 37,918), but every query and bulk download returns zero rows. A script that checks
+only the status code or the count would think they are up. See
+`results/arcgis-online-check.json`.
 
-**Run time:** 1,598 s for the full fresh run from a clean checkout (an earlier run took 1,050 s; the NFHL server's speed varies). `results/last-run.txt` is a same-day rerun on that run's cached data, so it shows 4 s.
+**Run time:** 2,217 s for the full fresh run from a clean checkout on 2026-11-10 (earlier
+runs took 1,050 and 1,598 s; the NFHL server's speed varies). That run's NFHL point checks
+timed out for 4 communities (73 claims); `results/last-run.txt` is the same-day rerun on its
+cached data, which retried them and took 16 s.
 
 ## Files
 
