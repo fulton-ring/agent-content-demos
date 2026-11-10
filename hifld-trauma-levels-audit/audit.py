@@ -562,6 +562,30 @@ def _(corrected, designations, hifld, state_status):
 @app.cell(hide_code=True)
 def _():
     mo.md(r"""
+    Because the pediatric disagreements drive the distance result, a separate pass checked every one of them
+    (each hospital where HIFLD and the state list disagree on a pediatric Level I/II designation) against the state
+    list, the hospital's own announcements and, for reading only, the ACS listing. Its verdicts are in
+    `peds_check.csv`.
+    """)
+    return
+
+
+@app.cell
+def _():
+    peds_check = pd.read_csv(HERE / "peds_check.csv", dtype=str).fillna("")
+    peds_check_counts = {
+        "pediatric disagreements checked": len(peds_check),
+        "our reading of the state list right": int((peds_check["our_extraction_right"] == "yes").sum()),
+        "HIFLD match right (or no record needed)": int(peds_check["match_right"].isin(["yes", "na"]).sum()),
+        "hospital is a pediatric Level I/II center": int((peds_check["is_peds_I_II"] == "yes").sum()),
+    }
+    peds_check_counts
+    return (peds_check_counts,)
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
     ## Does the fix change who looks far from care?
 
     The trauma-access spike put 12.8% of people beyond an hour's drive of a Level I/II adult trauma center and
@@ -727,6 +751,7 @@ def _(
     extraction_accuracy,
     national,
     pediatric_counts,
+    peds_check_counts,
     people_checks,
     source_counts,
     top_levels,
@@ -734,6 +759,7 @@ def _(
     summary = {
         "sources": source_counts,
         "extraction_check": extraction_accuracy,
+        "pediatric_disagreement_check": peds_check_counts,
         "records_by_bucket": {k: {c: int(v) for c, v in row.items()} for k, row in national.iterrows()},
         "level_I_II": {k: {c: int(v) for c, v in row.items()} for k, row in top_levels.iterrows()},
         "pediatric": pediatric_counts,
