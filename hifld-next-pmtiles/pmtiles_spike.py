@@ -217,9 +217,10 @@ def _():
     ## 3. Download the GeoParquet and rebuild each layer as PMTiles
 
     We rebuild with the same tool and options HIFLD Next uses (tippecanoe 2.49, via FlatGeobuf,
-    since tippecanoe doesn't read Parquet), and with GDAL's own PMTiles driver, which ships inside
-    the `pyogrio` Python wheel and needs no system install. GDAL gets the same maximum zoom that
-    tippecanoe picked. Build times are wall-clock on this machine; the GeoParquet read is included.
+    since tippecanoe doesn't read Parquet). For comparison we also build three layers with GDAL's
+    own PMTiles driver, which ships inside the `pyogrio` Python wheel and needs no system install
+    (set `PMTILES_GDAL_ALL=1` to build all eight). GDAL gets the same maximum zoom tippecanoe
+    picked. Build times are wall-clock on this machine and include reading the GeoParquet.
     """)
     return
 
@@ -241,6 +242,9 @@ def _(chosen):
         with path.open("rb") as handle:
             return Reader(MmapSource(handle)).header()
 
+    # GDAL is slow (about 33 minutes for all eight layers on our machine), so by default it builds
+    # three layers: the smallest point layer, a mid-sized one and the line layer.
+    GDAL_LAYERS = {"hospitals-3", "local-law-enforcement-locations", "transmission-lines-1"}
     builds = []
     for _row in chosen.itertuples():
         parquet = DATA / f"{_row.dataset}.parquet"
@@ -256,17 +260,20 @@ def _(chosen):
         tippecanoe_seconds = time.perf_counter() - _started
         max_zoom = header(SITE / f"{_row.dataset}.pmtiles")["max_zoom"]
 
-        _started = time.perf_counter()
-        frame = gpd.read_parquet(parquet).to_crs(4326)
-        gdal_file = DATA / f"{_row.dataset}.gdal.pmtiles"
-        gdal_file.unlink(missing_ok=True)
-        pyogrio.write_dataframe(
-            frame,
-            gdal_file,
-            driver="PMTiles",
-            dataset_options={"MINZOOM": "0", "MAXZOOM": str(max_zoom)},
-        )
-        gdal_seconds = time.perf_counter() - _started
+        gdal_mb = gdal_seconds = None
+        if _row.dataset in GDAL_LAYERS or os.environ.get("PMTILES_GDAL_ALL"):
+            _started = time.perf_counter()
+            frame = gpd.read_parquet(parquet).to_crs(4326)
+            gdal_file = DATA / f"{_row.dataset}.gdal.pmtiles"
+            gdal_file.unlink(missing_ok=True)
+            pyogrio.write_dataframe(
+                frame,
+                gdal_file,
+                driver="PMTiles",
+                dataset_options={"MINZOOM": "0", "MAXZOOM": str(max_zoom)},
+            )
+            gdal_seconds = time.perf_counter() - _started
+            gdal_mb = gdal_file.stat().st_size / 1e6
         published = http.head(_row.pmtiles_url).headers
         builds.append(
             {
@@ -278,7 +285,7 @@ def _(chosen):
                 "tippecanoe_mb": (SITE / f"{_row.dataset}.pmtiles").stat().st_size / 1e6,
                 "tippecanoe_s": tippecanoe_seconds,
                 "max_zoom": max_zoom,
-                "gdal_mb": gdal_file.stat().st_size / 1e6,
+                "gdal_mb": gdal_mb,
                 "gdal_s": gdal_seconds,
             }
         )
@@ -290,15 +297,19 @@ def _(chosen):
 
 @app.cell
 def _(build_table):
-    totals = build_table[["geoparquet_mb", "hifld_pmtiles_mb", "tippecanoe_mb", "gdal_mb"]].sum()
+    totals = build_table[["geoparquet_mb", "hifld_pmtiles_mb", "tippecanoe_mb"]].sum()
+    both = build_table.dropna(subset=["gdal_s"])
     mo.md(
-        f"Across the {len(build_table)} layers: {build_table.features.sum():,} features, "
-        f"{totals.geoparquet_mb:.0f} MB of GeoParquet, {totals.tippecanoe_mb:.0f} MB of PMTiles from "
-        f"tippecanoe (HIFLD Next's published files: {totals.hifld_pmtiles_mb:.0f} MB) and "
-        f"{totals.gdal_mb:.0f} MB from GDAL. tippecanoe took {build_table.tippecanoe_s.sum():.0f} s "
-        f"in all, GDAL {build_table.gdal_s.sum():.0f} s. GDAL keeps every feature at every zoom "
-        "instead of thinning dense points, so its files run larger and slower to draw at low zoom; "
-        "tippecanoe stays the better tool when it can be installed."
+        f"Across the {len(build_table)} layers: {build_table.features.sum():,} features and "
+        f"{totals.geoparquet_mb:.0f} MB of GeoParquet became {totals.tippecanoe_mb:.0f} MB of "
+        f"PMTiles in {build_table.tippecanoe_s.sum():.0f} s of tippecanoe "
+        f"(HIFLD Next's published files: {totals.hifld_pmtiles_mb:.0f} MB, so our rebuild "
+        f"reproduces theirs). On the {len(both)} layers built both ways, GDAL took "
+        f"**{both.gdal_s.sum() / both.tippecanoe_s.sum():.0f}x as long** "
+        f"({both.gdal_s.sum():.0f} s against {both.tippecanoe_s.sum():.0f} s) and made files "
+        f"{both.gdal_mb.sum() / both.tippecanoe_mb.sum():.1f}x the size, because it keeps every "
+        "feature at every zoom where tippecanoe thins dense points. tippecanoe stays the tool "
+        "to use; GDAL is the fallback where nothing can be installed."
     )
     return
 
@@ -383,19 +394,24 @@ def _(nginx):
     def open_map(_context, url: str, timeout_s: float = 90) -> dict:  # noqa: ANN001
         """Open the map, wait until it is idle, and count the PMTiles requests and bytes."""
         _page = _context.new_page()
-        fetched = {"requests": 0, "bytes": 0, "from_cache": 0}
+        # Chrome's own network events give the bytes on the wire for each request, including
+        # cross-origin ones; responses served from the browser cache report no bytes.
+        cdp = _context.new_cdp_session(_page)
+        cdp.send("Network.enable")
+        pmtiles_requests: set[str] = set()
+        fetched = {"requests": 0, "bytes": 0}
 
-        def count(response) -> None:  # noqa: ANN001
-            if ".pmtiles" not in response.url:
-                return
-            fetched["requests"] += 1
-            if response.from_service_worker or response.status == 304:
-                return
-            sizes = response.request.sizes()
-            fetched["bytes"] += sizes["responseBodySize"]
-            fetched["from_cache"] += sizes["responseBodySize"] == 0
+        def on_request(event: dict) -> None:
+            if ".pmtiles" in event["request"]["url"]:
+                pmtiles_requests.add(event["requestId"])
+                fetched["requests"] += 1
 
-        _page.on("response", count)
+        def on_finished(event: dict) -> None:
+            if event["requestId"] in pmtiles_requests:
+                fetched["bytes"] += event["encodedDataLength"]
+
+        cdp.on("Network.requestWillBeSent", on_request)
+        cdp.on("Network.loadingFinished", on_finished)
         _started = time.perf_counter()
         _page.goto(url)
         _page.wait_for_function("window.mapIdle === true", timeout=timeout_s * 1000)
