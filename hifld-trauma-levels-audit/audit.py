@@ -41,6 +41,8 @@ with app.setup:
     # "fits"), fitted on Valhalla drive times in Maine and New Jersey: minutes = a + b * km, by RUCA class.
     FITS = {"Metropolitan": (11.5, 0.703), "Micropolitan": (15.7, 0.614), "Small town": (28.9, 0.633), "Rural": (23.3, 0.711)}
     EXTRACTION_SAMPLE = 60
+    # HIFLD's trauma levels date from 2023-2024; a list older than this can't judge them.
+    OLDEST_LIST = "2022-01-01"
     # State tiers that aren't numbered, mapped to the nearest ACS level (see state_sources.csv notes).
     TIERS = {
         "RTC": "II", "RTH": "II", "ATH": "III", "CTH": "IV", "TRF": "V", "TRH": "V",  # Montana, Wyoming, South Dakota
@@ -49,6 +51,7 @@ with app.setup:
         # Mississippi's pediatric tiers: a Secondary center may be a Level III adult center and keeps children only
         # for orthopedic injuries (15 Miss. Code R. 3-1-7.2.1), so it maps to III, not II.
         "TERTIARY": "I", "SECONDARY": "III",
+        "PTC": "unspecified",  # Florida designates Pediatric Trauma Centers with no level
     }  # fmt: skip
     # Tiers that mean a hospital takes part in the state system, not that it is a trauma center: Maine's Trauma
     # System Hospitals, and Mississippi's Primary Pediatric tier, which every designated hospital holds.
@@ -157,8 +160,9 @@ def _():
     and recorded its date, its terms of use and whether it designates pediatric centers separately. A list is
     *reusable* when it is an official public list and nothing in the site's terms forbids reuse; *unclear* when
     the site claims copyright or limits reuse without addressing facts like these (lists of facts aren't
-    copyrightable in the US, but we flag them). We use reusable and unclear lists and leave out states with no
-    official list or with terms that forbid reuse; those states keep HIFLD's values and are counted as unchecked.
+    copyrightable in the US, but we flag them). We use reusable and unclear lists dated 2022 or later (HIFLD's
+    levels date from 2023–2024), and undated lists still posted as current. States with no official list, with
+    terms that forbid reuse, or with only an older list keep HIFLD's values and are counted as unchecked.
     """)
     return
 
@@ -176,7 +180,10 @@ def _():
     )
     _rows = designations.groupby("state").size()
     state_status = _by_state.assign(rows=_rows.reindex(_by_state.index, fill_value=0))
-    state_status["checked_adult"] = state_status["reusable"].isin(["yes", "unclear"]) & (state_status["rows"] > 0)
+    state_status["current"] = (state_status["list_date"] == "") | (state_status["list_date"] >= OLDEST_LIST)
+    state_status["checked_adult"] = (
+        state_status["reusable"].isin(["yes", "unclear"]) & (state_status["rows"] > 0) & state_status["current"]
+    )
     state_status["checked_peds"] = state_status["checked_adult"] & (state_status["covers_peds"] == "yes")
     _dated = sources.loc[sources["state"].isin(state_status.index[state_status["checked_adult"]]), "list_date"]
     _dated = _dated[_dated != ""]
@@ -184,6 +191,7 @@ def _():
         "states and DC": len(state_status),
         "reusable official list": int((state_status["reusable"] == "yes").sum()),
         "official list, terms unclear": int((state_status["reusable"] == "unclear").sum()),
+        "official list, but older than 2022": int((~state_status["current"] & (state_status["rows"] > 0)).sum()),
         "no usable list": int((~state_status["checked_adult"]).sum()),
         "checked for adult levels": int(state_status["checked_adult"].sum()),
         "checked for pediatric levels": int(state_status["checked_peds"].sum()),
@@ -326,8 +334,11 @@ def _():
     - **missing, absent:** the state designates it and HIFLD has no record of the hospital at all.
     - **stale:** HIFLD gives a level but the state's list doesn't have the hospital (dropped, closed, or never
       designated).
+    - **stale, duplicate record:** a stale record within 500 m of a record the state does designate: HIFLD has the
+      same campus twice and gives both the level.
 
-    A provisional designation counts as designated. Separately, a designated hospital is **mistyped** when its
+    A provisional designation counts as designated, and a pediatric designation with no level (Florida's, and
+    HIFLD's bare `PEDIATRIC`) matches a Level I or II. Separately, a designated hospital is **mistyped** when its
     HIFLD record is marked closed, or typed long-term care, psychiatric or rehabilitation, or (for Level I/II)
     critical access: any of these drops it from a trauma analysis that filters on `TYPE` and `STATUS`, as the
     trauma-access spike did.
@@ -370,7 +381,13 @@ def _(designations, hifld, state_status):
     pairs["in_hifld"] = ~pairs["key"].str.startswith("list:")
     pairs["bucket"] = np.select(
         [
-            (pairs["hifld_level"] != "") & (pairs["hifld_level"] == pairs["state_level"]),
+            (pairs["hifld_level"] != "")
+            & (
+                (pairs["hifld_level"] == pairs["state_level"])
+                # A pediatric designation with no level matches a Level I or II on the other side.
+                | (pairs["hifld_level"].isin(["I", "II"]) & (pairs["state_level"] == "unspecified"))
+                | ((pairs["hifld_level"] == "unspecified") & pairs["state_level"].isin(["I", "II"]))
+            ),
             (pairs["hifld_level"] != "") & (pairs["state_level"] != ""),
             (pairs["state_level"] != "") & pairs["in_hifld"],
             pairs["state_level"] != "",
@@ -378,6 +395,16 @@ def _(designations, hifld, state_status):
         ["correct", "wrong level", "missing, blank", "missing, absent"],
         default="stale",
     )
+    # A stale record sitting on the same campus as a designated one (within 500 m) is a duplicate record.
+    _xy = hifld.set_index("source_ID")[["LATITUDE", "LONGITUDE"]]
+    for _kind in KINDS:
+        _on_list = pairs[(pairs["kind"] == _kind) & (pairs["state_level"] != "") & pairs["in_hifld"]]
+        _stale = pairs[(pairs["kind"] == _kind) & (pairs["bucket"] == "stale")]
+        _a = np.radians(_xy.loc[_on_list["key"]].to_numpy(float))
+        _b = np.radians(_xy.loc[_stale["key"]].to_numpy(float))
+        _cos = np.sin(_b[:, :1]) * np.sin(_a[:, 0]) + np.cos(_b[:, :1]) * np.cos(_a[:, 0]) * np.cos(_b[:, 1:] - _a[:, 1])
+        _km = EARTH_KM * np.arccos(np.clip(_cos, -1, 1)).min(axis=1)
+        pairs.loc[_stale.index[_km < 0.5], "bucket"] = "stale, duplicate record"
 
     _meta = hifld.set_index("source_ID")[["TYPE", "STATUS"]]
     _designated = pairs[(pairs["state_level"] != "") & pairs["in_hifld"]].join(_meta, on="key")
@@ -388,7 +415,7 @@ def _(designations, hifld, state_status):
         | (_top & (_designated["TYPE"] == "CRITICAL ACCESS"))
     )
     mistyped = _designated[_designated["mistyped"]]
-    BUCKETS = ["correct", "wrong level", "missing, blank", "missing, absent", "stale"]
+    BUCKETS = ["correct", "wrong level", "missing, blank", "missing, absent", "stale", "stale, duplicate record"]
     national = pairs.groupby(["kind", "bucket"]).size().unstack(fill_value=0).reindex(columns=BUCKETS, fill_value=0)
     national["mistyped"] = mistyped.groupby("kind").size().reindex(national.index, fill_value=0)
     mo.vstack([national, mo.md(f"{len(out_of_state_rows)} list rows name a hospital in another state and are left to that state's list.")])
@@ -620,11 +647,12 @@ def _(bg, corrected, designations, hifld, state_status):
 
 
 @app.cell
-def _(bg):
+def _(bg, hifld):
     # Where the corrected list moves children and adults most, by state.
+    _abbrev = dict(zip(hifld["ST_FIPS"].astype(str).str.zfill(2), hifld["STATE"], strict=False))
     _rows = []
     for _fips, _g in bg.groupby("STATEFP"):
-        _row = {"STATEFP": _fips}
+        _row = {"state": _abbrev.get(_fips, _fips)}
         for _kind, _weight in (("adult", "pop"), ("peds", "children")):
             for _when in ("before", "after"):
                 _row[f"{_kind} beyond 60, {_when}"] = round(
