@@ -434,9 +434,7 @@ def _(designations, hifld, state_status):
     mo.vstack(
         [
             national,
-            mo.md(
-                f"{len(out_of_state_rows)} list rows name a hospital in another state and are left to that state."
-            ),
+            mo.md(f"{len(out_of_state_rows)} list rows name a hospital in another state and are left to that state."),
         ]
     )
     return BUCKETS, mistyped, national, out_of_state_rows, pairs
