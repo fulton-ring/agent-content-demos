@@ -73,7 +73,7 @@ at all on the other three. On DTE's own 2023 storm, the counties EAGLE-I showed 
   same gap-filled, BRDF-corrected radiance as public PNG images with a published color map
   (180 bins up to 38.2 nW/cm²/sr). `nightlight.py` turns colors back into radiance and drops
   pixels the VIIRS cloud mask (also on GIBS) rates under 95% confident clear. 61 nights × 2
-  layers for the DTE grid is 27 MB. We checked World Bank's `blackmarblepy` and Google Earth
+  layers for the DTE grid is 11.5 MB. We checked World Bank's `blackmarblepy` and Google Earth
   Engine first; both need an account.
 - **DTE's territory: HIFLD Next Electric Retail Service Territories.** DTE's polygon is
   69,876 km², built from every county where DTE reports customers, including the Upper
@@ -96,8 +96,8 @@ at all on the other three. On DTE's own 2023 storm, the counties EAGLE-I showed 
 
 Needs [uv](https://docs.astral.sh/uv/). No keys, no paid services. The first run downloads
 about 3.5 GB into `data/` (set `DATA_DIR` to put it elsewhere), mostly the two EAGLE-I files
-and Heimdall's county table; on our machine that took about 6 minutes, and later runs take
-under 30 seconds. To read the notebooks interactively: `uv run marimo edit restoration.py`.
+and Heimdall's county table; from a fresh clone the whole run took 13 minutes, and later
+runs take under 30 seconds. To read the notebooks interactively: `uv run marimo edit restoration.py`.
 
 ## What didn't work, and what this doesn't show
 
