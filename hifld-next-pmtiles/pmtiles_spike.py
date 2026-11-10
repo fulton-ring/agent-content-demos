@@ -4,6 +4,7 @@ __generated_with = "0.25.1"
 app = marimo.App(width="medium")
 
 with app.setup:
+    import getpass
     import json
     import os
     import re
@@ -374,6 +375,7 @@ def _(build_table, chosen):
 
     config = (HERE / "nginx.conf").read_text()
     config = config.replace("@ROOT@", str(SITE.resolve())).replace("@RUN@", str(RUN.resolve()))
+    config = config.replace("@USER@", getpass.getuser())
     (RUN / "nginx.conf").write_text(config)
 
     def start_nginx() -> subprocess.Popen:
