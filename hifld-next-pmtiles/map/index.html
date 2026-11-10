@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>HIFLD Next PMTiles map</title>
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.css">
+  <script src="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.js"></script>
+  <script src="https://unpkg.com/pmtiles@4.3.0/dist/pmtiles.js"></script>
+  <style>
+    html, body, #map { margin: 0; height: 100%; background: #f4f1ea; font: 13px system-ui, sans-serif; }
+    #legend { position: absolute; top: 10px; left: 10px; background: #fffd; padding: 8px 10px; border-radius: 6px; }
+    #legend div { display: flex; align-items: center; gap: 6px; margin: 2px 0; }
+    #legend span { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  </style>
+</head>
+<body>
+<div id="map"></div>
+<div id="legend"><b>HIFLD Next, read straight from PMTiles files</b></div>
+<script>
+// The page reads a layer list (layers.json by default, or ?layers=<url>) and a view (?view=lon,lat,zoom).
+// Every layer is a single .pmtiles file fetched with HTTP range requests: no tile server.
+const params = new URLSearchParams(location.search);
+const layersUrl = params.get("layers") || "layers.json";
+const [lon, lat, zoom] = (params.get("view") || "-96,38.5,3.5").split(",").map(Number);
+
+const protocol = new pmtiles.Protocol();
+maplibregl.addProtocol("pmtiles", protocol.tile);
+window.mapErrors = [];
+
+async function start() {
+  const layers = await (await fetch(layersUrl, { cache: "no-store" })).json();
+  const map = new maplibregl.Map({
+    container: "map", center: [lon, lat], zoom, attributionControl: false,
+    style: { version: 8, sources: {}, layers: [{ id: "bg", type: "background", paint: { "background-color": "#f4f1ea" } }] },
+  });
+  window.map = map;
+  map.on("error", (e) => window.mapErrors.push(String(e.error && e.error.message || e.error)));
+  await new Promise((resolve) => map.on("load", resolve));
+  for (const layer of layers) {
+    // HIFLD Next's files name their tile layer after a temporary build file, so read it from the archive.
+    const archive = new pmtiles.PMTiles(layer.url);
+    protocol.add(archive);
+    const sourceLayer = (await archive.getMetadata()).vector_layers[0].id;
+    map.addSource(layer.id, { type: "vector", url: `pmtiles://${layer.url}` });
+    const common = { id: layer.id, source: layer.id, "source-layer": sourceLayer };
+    if (layer.kind === "fill") {
+      map.addLayer({ ...common, type: "line", paint: { "line-color": layer.color, "line-width": 0.6 } });
+    } else if (layer.kind === "line") {
+      map.addLayer({ ...common, type: "line", paint: { "line-color": layer.color, "line-width": 0.8 } });
+    } else {
+      map.addLayer({ ...common, type: "circle", paint: { "circle-color": layer.color, "circle-radius": 2, "circle-opacity": 0.8 } });
+    }
+    if (layer.legend) {
+      document.getElementById("legend").insertAdjacentHTML("beforeend",
+        `<div><span style="background:${layer.color}"></span>${layer.legend}</div>`);
+    }
+  }
+  await new Promise((resolve) => map.once("idle", resolve));
+  window.mapIdle = true;
+}
+
+// Which file versions the rendered tiles of one layer came from (used by the update test).
+window.versionsSeen = (layerId) => {
+  const features = window.map.queryRenderedFeatures({ layers: [layerId] });
+  return [...new Set(features.map((f) => f.properties.layer_version).filter(Boolean))].sort();
+};
+
+start().catch((e) => { window.mapErrors.push(String(e)); window.mapIdle = true; });
+</script>
+</body>
+</html>
