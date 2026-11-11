@@ -1,0 +1,754 @@
+[
+ {
+  "parts": [
+   {
+    "content": "How many students were enrolled in Wyoming's public schools in the 2022-23 school year?",
+    "timestamp": "2026-11-09T20:48:47.936328Z",
+    "part_kind": "user-prompt"
+   },
+   {
+    "instructions": [
+     {
+      "id": "agent",
+      "dynamic": false,
+      "content_hash": "4c88a94372db72e03c692c5aa4c5d095d0baf937cda3ff7783d266c699959c4b",
+      "part_kind": "instruction-digest"
+     },
+     {
+      "content": "You are connected to the Urban Institute's Education Data Portal, which harmonises federal education data (CCD, CRDC, IPEDS, EdFacts, SAIPE, College Scorecard, MEPS, PSEO, and others) for schools, school districts, and colleges.\n\nCHOOSING A TOOL\n- Totals, averages or counts by group — get_summary. It aggregates in the API and groups by year automatically, so ONE call covers a whole time series. Its path, var and by come from describe_dataset, which prints the exact call — they are not guessable from the data path.\n- A named school, district or college — resolve_entity first, to turn the name into an ID to filter on.\n- Specific rows — get_data, always with fields=.\n- \"Largest / smallest N\" — get_data with ordering=-<field> for highest first, ordering=<field> for lowest.\n- Unfamiliar with the data — search_datasets, then describe_dataset.\n\nALWAYS PASS fields= TO get_data. These tables are 50-96 columns wide; requesting only the columns you need is typically an 8-17x reduction and is usually the difference between an answer and a refusal.\n\nFILTERS: only fields marked [FILTER] in describe_dataset work. The API silently ignores an unsupported filter and returns UNFILTERED data, so check before assuming a filter applied. Filter by state using FIPS codes — see lookup_codes(format_name='fips').\n\nRESULTS ARE COMPLETE OR REFUSED, never silently truncated, so counting and averaging over what you receive is valid. A refusal reports the true size and how to narrow it — follow it rather than retrying the same query.\n\nPASS THE SOURCE ON. Every data result ends with a provenance block naming the federal source and carrying a preformatted Cite string. The data is open under ODC-By, which asks for attribution wherever figures are reported — so name the source with the numbers, and reproduce that Cite string rather than composing one of your own.",
+      "dynamic": false,
+      "on_change": "append",
+      "name": null,
+      "id": "toolset:educationdata.urban.org",
+      "part_kind": "instruction"
+     }
+    ],
+    "part_kind": "instruction-baseline"
+   }
+  ],
+  "timestamp": "2026-11-09T20:48:47.936509Z",
+  "instructions": "You answer questions about public data using only the tools of the connected data server. Look the answer up; never answer from memory. Report figures exactly as the data gives them and cite where they came from. If the tools can't answer it, set found to false.\n\nYou are connected to the Urban Institute's Education Data Portal, which harmonises federal education data (CCD, CRDC, IPEDS, EdFacts, SAIPE, College Scorecard, MEPS, PSEO, and others) for schools, school districts, and colleges.\n\nCHOOSING A TOOL\n- Totals, averages or counts by group — get_summary. It aggregates in the API and groups by year automatically, so ONE call covers a whole time series. Its path, var and by come from describe_dataset, which prints the exact call — they are not guessable from the data path.\n- A named school, district or college — resolve_entity first, to turn the name into an ID to filter on.\n- Specific rows — get_data, always with fields=.\n- \"Largest / smallest N\" — get_data with ordering=-<field> for highest first, ordering=<field> for lowest.\n- Unfamiliar with the data — search_datasets, then describe_dataset.\n\nALWAYS PASS fields= TO get_data. These tables are 50-96 columns wide; requesting only the columns you need is typically an 8-17x reduction and is usually the difference between an answer and a refusal.\n\nFILTERS: only fields marked [FILTER] in describe_dataset work. The API silently ignores an unsupported filter and returns UNFILTERED data, so check before assuming a filter applied. Filter by state using FIPS codes — see lookup_codes(format_name='fips').\n\nRESULTS ARE COMPLETE OR REFUSED, never silently truncated, so counting and averaging over what you receive is valid. A refusal reports the true size and how to narrow it — follow it rather than retrying the same query.\n\nPASS THE SOURCE ON. Every data result ends with a provenance block naming the federal source and carrying a preformatted Cite string. The data is open under ODC-By, which asks for attribution wherever figures are reported — so name the source with the numbers, and reproduce that Cite string rather than composing one of your own.",
+  "kind": "request",
+  "run_id": "01a1c212-173f-773f-8e59-7ec69be3abfd",
+  "conversation_id": "01a1c212-173f-773f-8e59-7ec7000582a4",
+  "metadata": null,
+  "state": "complete"
+ },
+ {
+  "parts": [
+   {
+    "content": "",
+    "id": null,
+    "signature": "CAQSsAQKEggTEAIYAjgBQgh0aGlua2luZxIM9dVr1cskhW3m3lU3Ggzo2oyVkJGDjtLBNeQiMEGO9dKf14s+NOlue153Zpzu9hwTiOte43rNqYxrWz6q7pTBhSvjDPzX1F/D+Jh/sSrLA1G8OLTzYB2IknefotYls4V+a8RF0yXWS6nCLFUdHr1YgSNkNBPhxOY5was3+XG13RnI2ryqSMzrx3EdQIFRbVPHlW25SbtdcpdFSkYmTB9zzYoQR7e5kOg2Z6yVP9BBGni7SRR0WpGw5GIN2rFfC8ANI9E+NGR9NPDfh8+2rn2cRxUodU4IU2b2qMvgDYIrZPhdXrWLwC/KRkaq6j9snIjN8M1I+LeVrh/u1VnkjolOyaCGFbR3l1LiY9xFThx7+e5AHfCg53LcMuqsPf05O8uMWg5MLtI094GHCvVf15Hi7r0A8fzO1suikp/i15JC/Np6uOr5SYFEtOmNN3YaOQZCmf/CNO2vn2uTKK1S9ukbO/TwXFONpfawvsL39OVFu2HgyRs0ck55HiHcZiQcZPbw5vxeLi0OB1KuR6frnZVYQsgNIzNtrMzMbH9ILX7BxIi6bnwd7F/CwBJOqLumRiwHCJnVPP83AcK2Z8DWSnC56MhvMM0nHHURT5UO0TkECu19kRr3XyG+iK0v6P6qmxIclbCLnNN5GtpalDMy5XfRJrv8B4/MiFresqrQY1SUBfOHfMVOOnzYMh/N/NeU4rAp72RCi/Bm0DeUmRgB.eyJlbmRwb2ludF9zbHVnIjoiYW50aHJvcGljL2NsYXVkZS1oYWlrdS01LjUtMjAyNjEwMDd8Z29vZ2xlLXZlcnRleC9nbG9iYWwifQ",
+    "provider_name": "openrouter",
+    "provider_details": {
+     "format": "anthropic-claude-v1",
+     "index": 0,
+     "type": "reasoning.text"
+    },
+    "part_kind": "thinking"
+   },
+   {
+    "tool_name": "search_datasets",
+    "args": "{\"level\": \"schools\", \"source\": \"ccd\", \"topic\": \"enrollment\"}",
+    "tool_call_id": "toolu_vrtx_01PvpHbuvy3p81dwNgBqD9Pw",
+    "tool_kind": null,
+    "id": null,
+    "provider_name": null,
+    "provider_details": null,
+    "part_kind": "tool-call"
+   },
+   {
+    "tool_name": "lookup_codes",
+    "args": "{\"format_name\": \"fips\", \"codes\": \"56\"}",
+    "tool_call_id": "toolu_vrtx_01ATuoGGQxxfYBKVq17Euoug",
+    "tool_kind": null,
+    "id": null,
+    "provider_name": null,
+    "provider_details": null,
+    "part_kind": "tool-call"
+   }
+  ],
+  "usage": {
+   "input_tokens": 5123,
+   "cache_write_tokens": 0,
+   "cache_write_1h_tokens": 0,
+   "cache_read_tokens": 0,
+   "output_tokens": 194,
+   "output_reasoning_tokens": 23,
+   "input_audio_tokens": 0,
+   "cache_audio_read_tokens": 0,
+   "output_audio_tokens": 0,
+   "audio_seconds": 0.0,
+   "details": {
+    "is_byok": 0,
+    "audio_tokens": 0,
+    "reasoning_tokens": 23,
+    "image_tokens": 0
+   },
+   "cost": "0.0006093"
+  },
+  "model_name": "anthropic/claude-haiku-5.5",
+  "model_id": "openrouter:anthropic/claude-haiku-5.5",
+  "timestamp": "2026-11-09T20:48:49.419239Z",
+  "kind": "response",
+  "provider_name": "openrouter",
+  "provider_url": "https://openrouter.ai/api/v1",
+  "canonical_system": null,
+  "provider_details": {
+   "finish_reason": "tool_use",
+   "downstream_provider": "Google",
+   "cost": 0.0006093,
+   "upstream_inference_cost": 0.0006093,
+   "upstream_inference_prompt_cost": 0.0005123,
+   "upstream_inference_completions_cost": 0.000097,
+   "is_byok": false,
+   "timestamp": "2026-11-09T20:48:47Z"
+  },
+  "provider_response_id": "gen-1794257327-DgrbPmK0Ex8hn0AQBCUP",
+  "finish_reason": "tool_call",
+  "run_id": "01a1c212-173f-773f-8e59-7ec69be3abfd",
+  "conversation_id": "01a1c212-173f-773f-8e59-7ec7000582a4",
+  "metadata": null,
+  "workspace_ref": null,
+  "history_digest": null,
+  "failed_attempts": null,
+  "state": "complete"
+ },
+ {
+  "parts": [
+   {
+    "tool_name": "search_datasets",
+    "content": "Found 4 dataset(s). Fill in the {placeholders} and pass the result to get_data as `path`:\n\n    {grade} = a grade SEGMENT, not a bare number: grade-pk, grade-k, grade-1 … grade-12, or grade-99 for all grades\n    {year} = a four-digit year, e.g. 2022 (the fall of the academic year)\n\n  schools/ccd/enrollment/{year}/{grade}\n      Years: 1986–2024\n      This endpoint contains student enrollment data for each public school by grade. Only operational schools serving one or more grades are required to report enrollment and only these are included in this endpoint.\n\n  schools/ccd/enrollment/{year}/{grade}/race\n      Years: 1986–2024\n      This endpoint contains student enrollment data for each public school by grade and race. Only operational schools serving one or more grades are required to report enrollment and only these are included in this endpoint.\n\n  schools/ccd/enrollment/{year}/{grade}/sex\n      Years: 1986–2024\n      This endpoint contains student enrollment data for each public school by grade and sex. Only operational schools serving one or more grades are required to report enrollment and only these are included in this endpoint.\n\n  schools/ccd/enrollment/{year}/{grade}/race/sex\n      Years: 1986–2024\n      This endpoint contains student enrollment data for each public school by grade, race, and sex. Only operational schools serving one or more grades are required to report enrollment and only these are included in this endpoint.\n",
+    "tool_call_id": "toolu_vrtx_01PvpHbuvy3p81dwNgBqD9Pw",
+    "tool_kind": null,
+    "metadata": null,
+    "timestamp": "2026-11-09T20:48:49.500205Z",
+    "outcome": "success",
+    "retry": null,
+    "part_kind": "tool-return"
+   },
+   {
+    "tool_name": "lookup_codes",
+    "content": "Values for format 'fips':\n\n  56 = Wyoming",
+    "tool_call_id": "toolu_vrtx_01ATuoGGQxxfYBKVq17Euoug",
+    "tool_kind": null,
+    "metadata": null,
+    "timestamp": "2026-11-09T20:48:49.790435Z",
+    "outcome": "success",
+    "retry": null,
+    "part_kind": "tool-return"
+   }
+  ],
+  "timestamp": "2026-11-09T20:48:49.790975Z",
+  "instructions": "You answer questions about public data using only the tools of the connected data server. Look the answer up; never answer from memory. Report figures exactly as the data gives them and cite where they came from. If the tools can't answer it, set found to false.\n\nYou are connected to the Urban Institute's Education Data Portal, which harmonises federal education data (CCD, CRDC, IPEDS, EdFacts, SAIPE, College Scorecard, MEPS, PSEO, and others) for schools, school districts, and colleges.\n\nCHOOSING A TOOL\n- Totals, averages or counts by group — get_summary. It aggregates in the API and groups by year automatically, so ONE call covers a whole time series. Its path, var and by come from describe_dataset, which prints the exact call — they are not guessable from the data path.\n- A named school, district or college — resolve_entity first, to turn the name into an ID to filter on.\n- Specific rows — get_data, always with fields=.\n- \"Largest / smallest N\" — get_data with ordering=-<field> for highest first, ordering=<field> for lowest.\n- Unfamiliar with the data — search_datasets, then describe_dataset.\n\nALWAYS PASS fields= TO get_data. These tables are 50-96 columns wide; requesting only the columns you need is typically an 8-17x reduction and is usually the difference between an answer and a refusal.\n\nFILTERS: only fields marked [FILTER] in describe_dataset work. The API silently ignores an unsupported filter and returns UNFILTERED data, so check before assuming a filter applied. Filter by state using FIPS codes — see lookup_codes(format_name='fips').\n\nRESULTS ARE COMPLETE OR REFUSED, never silently truncated, so counting and averaging over what you receive is valid. A refusal reports the true size and how to narrow it — follow it rather than retrying the same query.\n\nPASS THE SOURCE ON. Every data result ends with a provenance block naming the federal source and carrying a preformatted Cite string. The data is open under ODC-By, which asks for attribution wherever figures are reported — so name the source with the numbers, and reproduce that Cite string rather than composing one of your own.",
+  "kind": "request",
+  "run_id": "01a1c212-173f-773f-8e59-7ec69be3abfd",
+  "conversation_id": "01a1c212-173f-773f-8e59-7ec7000582a4",
+  "metadata": null,
+  "state": "complete"
+ },
+ {
+  "parts": [
+   {
+    "tool_name": "describe_dataset",
+    "args": "{\"path\": \"schools/ccd/enrollment/{year}/{grade}\"}",
+    "tool_call_id": "toolu_vrtx_013155gFWSEBVoJxyxmCoD2r",
+    "tool_kind": null,
+    "id": null,
+    "provider_name": null,
+    "provider_details": null,
+    "part_kind": "tool-call"
+   }
+  ],
+  "usage": {
+   "input_tokens": 5897,
+   "cache_write_tokens": 0,
+   "cache_write_1h_tokens": 0,
+   "cache_read_tokens": 0,
+   "output_tokens": 69,
+   "output_reasoning_tokens": 0,
+   "input_audio_tokens": 0,
+   "cache_audio_read_tokens": 0,
+   "output_audio_tokens": 0,
+   "audio_seconds": 0.0,
+   "details": {
+    "is_byok": 0,
+    "audio_tokens": 0,
+    "reasoning_tokens": 0,
+    "image_tokens": 0
+   },
+   "cost": "0.0006242"
+  },
+  "model_name": "anthropic/claude-haiku-5.5",
+  "model_id": "openrouter:anthropic/claude-haiku-5.5",
+  "timestamp": "2026-11-09T20:48:50.462526Z",
+  "kind": "response",
+  "provider_name": "openrouter",
+  "provider_url": "https://openrouter.ai/api/v1",
+  "canonical_system": null,
+  "provider_details": {
+   "finish_reason": "tool_use",
+   "downstream_provider": "Google",
+   "cost": 0.0006242,
+   "upstream_inference_cost": 0.0006242,
+   "upstream_inference_prompt_cost": 0.0005897,
+   "upstream_inference_completions_cost": 0.0000345,
+   "is_byok": false,
+   "timestamp": "2026-11-09T20:48:49Z"
+  },
+  "provider_response_id": "gen-1794257329-qEzmnjvUoA4RU3yYfHlw",
+  "finish_reason": "tool_call",
+  "run_id": "01a1c212-173f-773f-8e59-7ec69be3abfd",
+  "conversation_id": "01a1c212-173f-773f-8e59-7ec7000582a4",
+  "metadata": null,
+  "workspace_ref": null,
+  "history_digest": null,
+  "failed_attempts": null,
+  "state": "complete"
+ },
+ {
+  "parts": [
+   {
+    "tool_name": "describe_dataset",
+    "content": "Dataset: schools/ccd/enrollment/{year}/{grade}\nYears available: 1986–2024\n\nDescription: This endpoint contains student enrollment data for each public school by grade. Only operational schools serving one or more grades are required to report enrollment and only these are included in this endpoint.\n\nSource: Common Core of Data (CCD)\n  The Common Core of Data is the US Department of Education's primary database on public elementary and secondary education. It provides directory and enrollment information at the school level and directory, enrollment, and finance data at the school district level.\n  More: https://nces.ed.gov/ccd/\n\nSample code (Urban's educationdata package):\n  R:\n    get_education_data(level = \"schools\",\n    source = \"ccd\",\n    topic = \"enrollment\",\n    filters = list(year = 2014, grade = 8))\n  Stata:\n    educationdata using \"school ccd enrollment\", sub(year=2014 grade=8)\n\n─────\n\nSUMMARIES (aggregate without downloading rows)\n\n  path: schools/ccd/enrollment\n  var : enrollment (the only one)\n  by  : ncessch, ncessch_num, leaid, fips, grade, race, sex\n  by  : also, via the pre-joined directory: title_i_eligible, school_level, school_type, school_status, bureau_indian_education, title_i_status, title_i_schoolwide, charter, magnet, shared_time, virtual, state_leaid, seasch, state_location, csa, cbsa, urban_centric_locale, congress_district_id\n  stat: sum, count, avg, min, max, median, stddev, variance\n\n  get_summary(path='schools/ccd/enrollment', var='enrollment', stat='sum', by='fips')\n\n  Every year is returned in one call — filter years only to narrow a large result.\nFound 9 variable(s):\n\n  year [FILTER]\n      Label: Academic year (fall semester)\n      Definition: Year that the academic year begins (e.g., the 2013–14 academic year is 2013)\n      Type: integer\n      Values: \"-1\" : \"Missing/not reported\",\"-2\" : \"Not applicable\",\"-3\" : \"Suppressed data\"\n\n  ncessch [FILTER]\n      Label: National Center for Education Statistics (NCES) identification number\n      Type: string\n      Format: string\n      Values: \"-1\" : \"Missing/not reported\",\"-2\" : \"Not applicable\",\"-3\" : \"Suppressed data\"\n\n  ncessch_num [FILTER]\n      Label: National Center for Education Statistics (NCES) identification number (numeric)\n      Type: integer\n      Values: \"-1\" : \"Missing/not reported\",\"-2\" : \"Not applicable\",\"-3\" : \"Suppressed data\"\n\n  leaid [FILTER]\n      Label: Local education agency identification number (NCES)\n      Type: string\n      Format: string\n      Values: \"-1\" : \"Missing/not reported\",\"-2\" : \"Not applicable\",\"-3\" : \"Suppressed data\"\n\n  fips [FILTER]\n      Label: Federal Information Processing Standards state code\n      Type: integer\n      Format: fips\n      Values: \"1\" : \"Alabama\",\"2\" : \"Alaska\",\"3\" : \"American Samoa\",\"4\" : \"Arizona\",\"5\" : \"Arkansas\",\"6\" : \"California\",\"7\" : \"Canal Zone\",\"8\" : \"Colorado\",\"9\" : \"Connecticut\",\"10\" : \"Delaware\",\"11\" : \"District of Columbia\",\"12\" : \"Florida\",\"13\" : \"Georgia\",\"14\" : \"Guam\",\"15\" : \"Hawaii\",\"16\" : \"Idaho\",\"17\" : \"Illinois\",\"18\" : \"Indiana\",\"19\" : \"Iowa\",\"20\" : \"Kansas\",\"21\" : \"Kentucky\",\"22\" : \"Louisiana\",\"23\" : \"Maine\",\"24\" : \"Maryland\",\"25\" : \"Massachusetts\",\"26\" : \"Michigan\",\"27\" : \"Minnesota\",\"28\" : \"Mississippi\",\"29\" : \"Missouri\",\"30\" : \"Montana\",\"31\" : \"Nebraska\",\"32\" : \"Nevada\",\"33\" : \"New Hampshire\",\"34\" : \"New Jersey\",\"35\" : \"New Mexico\",\"36\" : \"New York\",\"37\" : \"North Carolina\",\"38\" : \"North Dakota\",\"39\" : \"Ohio\",\"40\" : \"Oklahoma\",\"41\" : \"Oregon\",\"42\" : \"Pennsylvania\",\"43\" : \"Puerto Rico\",\"44\" : \"Rhode Island\",\"45\" : \"South Carolina\",\"46\" : \"South Dakota\",\"47\" : \"Tennessee\",\"48\" : \"Texas\",\"49\" : \"Utah\",\"50\" : \"Vermont\",\"51\" : \"Virginia\",\"52\" : \"Virgin Islands of the US\",\"53\" : \"Washington\",\"54\" : \"West Virginia\",\"55\" : \"Wisconsin\",\"56\" : \"Wyoming\",\"58\" : \"Department of Defense Dependent Schools (overseas)\",\"59\" : \"Bureau of Indian Education\",\"60\" : \"American Samoa\",\"61\" : \"Department of Defense Dependent Schools (domestic)\",\"63\" : \"Department of Defense Education Activity\",\"64\" : \"Federated States of Micronesia\",\"65\" : \"Mariana Islands waters (including Guam)\",\"66\" : \"Guam\",\"67\" : \"Johnston Atoll\",\"68\" : \"Marshall Islands\",\"69\" : \"Northern Mariana Islands\",\"70\" : \"Palau\",\"71\" : \"Midway Islands\",\"72\" : \"Puerto Rico\",\"74\" : \"US Minor Outlying Islands\",\"75\" : \"Atlantic coast from North Carolina to Florida, and the coasts of Puerto Rico and Virgin Islands\",\"76\" : \"Navassa Island\",\"78\" : \"Virgin Islands of the US\",\"79\" : \"Wake Island\",\"81\" : \"Baker Island\",\"84\" : \"Howland Island\",\"86\" : \"Jarvis Island\",\"89\" : \"Kingman Reef\",\"95\" : \"Palmyra Atoll\",\"-1\" : \"Missing/not reported\",\"-2\" : \"Not applicable\",\"-3\" : \"Suppressed data\"\n\n  grade [FILTER]\n      Label: Grade\n      Type: integer\n      Format: grade\n      Values: \"-1\" : \"Pre-K\",\"0\" : \"Kindergarten\",\"1\" : \"1\",\"2\" : \"2\",\"3\" : \"3\",\"4\" : \"4\",\"5\" : \"5\",\"6\" : \"6\",\"7\" : \"7\",\"8\" : \"8\",\"9\" : \"9\",\"10\" : \"10\",\"11\" : \"11\",\"12\" : \"12\",\"13\" : \"13\",\"14\" : \"Adult education\",\"15\" : \"Ungraded\",\"99\" : \"Total\",\"999\" : \"Not specified\"\n\n  race [FILTER]\n      Label: Race/ethnicity\n      Definition: There are variations in the way race is defined across years and files.\n        \n        Common Core of Data: The Common Core of Data used five racial categories through 2007 and has used seven categories since 2008.\n        \n        Civil Rights Data Collection: In the Civil Rights Data Collection, the race variable is consistently defined throughout all years.\n        \n        Integrated Postsecondary Education Data System: Before 2007, the Integrated Postsecondary Education Data System (IPEDS) used only the \"old\" racial or ethnic categories, and after 2009, IPEDS used only the \"new\" racial or ethnic categories. In IPEDS between 2007 and 2009, institutions could use the old categories, the new categories, or a mix of both to report completions data. The six old categories wereÂ  American Indian or Alaska Native; Asian or Pacific Islander; black, non-Hispanic; Hispanic; white, non-Hispanic; and nonresident alien. The eight new categories were American Indian or Alaska Native, Asian, black or African American, Hispanic or Latino, Native Hawaiian or Pacific Islander, white, two or more races, and nonresident alien. For these years, we used the IPEDS-derived options for the following instances: Asian/Native Hawaiian/Other Pacific Islander; American Indian or Alaska Native; Hispanic or Latino/Hispanic; black or African American/black, non-Hispanic; and white/white, non-Hispanic. Other options were left as is.\n      Type: integer\n      Format: race\n      Values: \"1\" : \"White\",\"2\" : \"Black\",\"3\" : \"Hispanic\",\"4\" : \"Asian\",\"5\" : \"American Indian or Alaska Native\",\"6\" : \"Native Hawaiian or other Pacific Islander\",\"7\" : \"Two or more races\",\"8\" : \"Nonresident alien\",\"9\" : \"Unknown\",\"20\" : \"Other\",\"99\" : \"Total\",\"-1\" : \"Missing/not reported\",\"-2\" : \"Not applicable\",\"-3\" : \"Suppressed data\"\n\n  sex [FILTER]\n      Label: Sex\n      Type: integer\n      Format: sex\n      Values: \"1\" : \"Male\",\"2\" : \"Female\",\"3\" : \"Gender Not-Identified\",\"9\" : \"Unknown\",\"99\" : \"Total\",\"-1\" : \"Missing/not reported\",\"-2\" : \"Not applicable\",\"-3\" : \"Suppressed data\"\n\n  enrollment\n      Label: Student enrollment\n      Type: integer\n      Values: \"-1\" : \"Missing/not reported\",\"-2\" : \"Not applicable\",\"-3\" : \"Suppressed data\"\n",
+    "tool_call_id": "toolu_vrtx_013155gFWSEBVoJxyxmCoD2r",
+    "tool_kind": null,
+    "metadata": null,
+    "timestamp": "2026-11-09T20:48:50.519552Z",
+    "outcome": "success",
+    "retry": null,
+    "part_kind": "tool-return"
+   }
+  ],
+  "timestamp": "2026-11-09T20:48:50.520009Z",
+  "instructions": "You answer questions about public data using only the tools of the connected data server. Look the answer up; never answer from memory. Report figures exactly as the data gives them and cite where they came from. If the tools can't answer it, set found to false.\n\nYou are connected to the Urban Institute's Education Data Portal, which harmonises federal education data (CCD, CRDC, IPEDS, EdFacts, SAIPE, College Scorecard, MEPS, PSEO, and others) for schools, school districts, and colleges.\n\nCHOOSING A TOOL\n- Totals, averages or counts by group — get_summary. It aggregates in the API and groups by year automatically, so ONE call covers a whole time series. Its path, var and by come from describe_dataset, which prints the exact call — they are not guessable from the data path.\n- A named school, district or college — resolve_entity first, to turn the name into an ID to filter on.\n- Specific rows — get_data, always with fields=.\n- \"Largest / smallest N\" — get_data with ordering=-<field> for highest first, ordering=<field> for lowest.\n- Unfamiliar with the data — search_datasets, then describe_dataset.\n\nALWAYS PASS fields= TO get_data. These tables are 50-96 columns wide; requesting only the columns you need is typically an 8-17x reduction and is usually the difference between an answer and a refusal.\n\nFILTERS: only fields marked [FILTER] in describe_dataset work. The API silently ignores an unsupported filter and returns UNFILTERED data, so check before assuming a filter applied. Filter by state using FIPS codes — see lookup_codes(format_name='fips').\n\nRESULTS ARE COMPLETE OR REFUSED, never silently truncated, so counting and averaging over what you receive is valid. A refusal reports the true size and how to narrow it — follow it rather than retrying the same query.\n\nPASS THE SOURCE ON. Every data result ends with a provenance block naming the federal source and carrying a preformatted Cite string. The data is open under ODC-By, which asks for attribution wherever figures are reported — so name the source with the numbers, and reproduce that Cite string rather than composing one of your own.",
+  "kind": "request",
+  "run_id": "01a1c212-173f-773f-8e59-7ec69be3abfd",
+  "conversation_id": "01a1c212-173f-773f-8e59-7ec7000582a4",
+  "metadata": null,
+  "state": "complete"
+ },
+ {
+  "parts": [
+   {
+    "content": "",
+    "id": null,
+    "signature": "CAQSpAYKEggTEAIYAjgBQgh0aGlua2luZxIMlF1fqyK+cJxsF+2GGgzJuPwem2QREwy3z84iML+sT6bvbtkaLLXMHuu9QJ47S2tpgJnzv9geeWs0vz7ppD3mafabotN+nIIWqsY0Hyq/BYRkC5rzKL0wx5m6LxbNwDBNjUWrvEILQXL5/QS4SnHfdRCQlPledl7LYypJRrojSkKTvH9hAnqUq8IxR0WwIZaYrzyvJgQ1JX6YABkcvueyArT1nHY1FLbXMLiozFwcz0Q0ptwJBghtEShZQdbd/Pabk+w6f2wtbvOoBCB6gkGE6Mnk5Lf8MVAeL74mOWL7uOxKOO887v6Q4jCttkaDsocRHov7kgB+nsNDBNbkjj/4mP0LJ8i8gJmvsuOs0q6z9R+rVWGawrOKNzWdZfzlH02YWAEMiZ5cWousS8VTIODnwOpnBl647pLyvpCVT75AGEXFv72z9Pri/tXGHzJttOQTOaQm44M+GR3wB2nmzJ1RVf3jkigYwPng2GStVbqxPdYK6cbIOBHP/rLjpFztFMLgQPh32ulTksLwyTX8ZqxcMSeJVt1oC5R0kHQ++dVcRVJIXDvORiE5EyeIRZ+i1XouxiOCEmlpRUixYZzjK5ZqlyVTlw5OJnsbmBJ8LlKmdGQqICxq/Ml3duh7uUp0G0ywW4RG+gy4F87f71HirQcOIgwfoIikkw8ph9jFBvdNMPdf924XBEyhQG3adZc0dkkeuL4dAqSH0nkE1phc9+C9oqLew51kUHxyIRPWalEiQ2Cp944/WlQss7bSBN1ZB7YMj2ZWNmk+HnBMu2FcBGX4WK+q3qpMIJEiJDuaEhMLKkKCP3Y8PHVhKY1u/vBc61kjUyKnIezTkEEMzheEy18NaqCxR9Gvk+wssXPaiNrfAfLuhTuhmZRHWeXtpwnv9xmMwKFYns62hkCvUgC/QN8/Puo/Ck7uITliObsCIedM3lGOggPDQLwFgILI+w1VojlJrnDJPcyGF7cY1QA8OaKEZpZ3BePaZkmK/czkBOkgYNdXGgeCp2wsiG/AGQOkyTz568pgp6pxmMzApAE3ThMYAQ==.eyJlbmRwb2ludF9zbHVnIjoiYW50aHJvcGljL2NsYXVkZS1oYWlrdS01LjUtMjAyNjEwMDd8Z29vZ2xlLXZlcnRleC9nbG9iYWwifQ",
+    "provider_name": "openrouter",
+    "provider_details": {
+     "format": "anthropic-claude-v1",
+     "index": 0,
+     "type": "reasoning.text"
+    },
+    "part_kind": "thinking"
+   },
+   {
+    "tool_name": "get_summary",
+    "args": "{\"path\": \"schools/ccd/enrollment\", \"var\": \"enrollment\", \"stat\": \"sum\", \"by\": \"fips\", \"filters\": \"fips=56,year=2022,grade=99\"}",
+    "tool_call_id": "toolu_vrtx_014ycEBGNzm8PYGMmgpeiHJK",
+    "tool_kind": null,
+    "id": null,
+    "provider_name": null,
+    "provider_details": null,
+    "part_kind": "tool-call"
+   }
+  ],
+  "usage": {
+   "input_tokens": 8961,
+   "cache_write_tokens": 0,
+   "cache_write_1h_tokens": 0,
+   "cache_read_tokens": 0,
+   "output_tokens": 251,
+   "output_reasoning_tokens": 88,
+   "input_audio_tokens": 0,
+   "cache_audio_read_tokens": 0,
+   "output_audio_tokens": 0,
+   "audio_seconds": 0.0,
+   "details": {
+    "is_byok": 0,
+    "audio_tokens": 0,
+    "reasoning_tokens": 88,
+    "image_tokens": 0
+   },
+   "cost": "0.0010216"
+  },
+  "model_name": "anthropic/claude-haiku-5.5",
+  "model_id": "openrouter:anthropic/claude-haiku-5.5",
+  "timestamp": "2026-11-09T20:48:51.931037Z",
+  "kind": "response",
+  "provider_name": "openrouter",
+  "provider_url": "https://openrouter.ai/api/v1",
+  "canonical_system": null,
+  "provider_details": {
+   "finish_reason": "tool_use",
+   "downstream_provider": "Google",
+   "cost": 0.0010216,
+   "upstream_inference_cost": 0.0010216,
+   "upstream_inference_prompt_cost": 0.0008961,
+   "upstream_inference_completions_cost": 0.0001255,
+   "is_byok": false,
+   "timestamp": "2026-11-09T20:48:50Z"
+  },
+  "provider_response_id": "gen-1794257330-FgfwPcGg8cwViKUuThjz",
+  "finish_reason": "tool_call",
+  "run_id": "01a1c212-173f-773f-8e59-7ec69be3abfd",
+  "conversation_id": "01a1c212-173f-773f-8e59-7ec7000582a4",
+  "metadata": null,
+  "workspace_ref": null,
+  "history_digest": null,
+  "failed_attempts": null,
+  "state": "complete"
+ },
+ {
+  "parts": [
+   {
+    "tool_name": "get_summary",
+    "content": "The Education Data Portal rejected this summary: Your requested query was too large. Consider limiting the scope of your query.\n\nEverything else about the query was accepted, so fix just that argument and retry. describe_dataset('schools/ccd/enrollment') lists the valid var and by values.",
+    "tool_call_id": "toolu_vrtx_014ycEBGNzm8PYGMmgpeiHJK",
+    "tool_kind": null,
+    "metadata": null,
+    "timestamp": "2026-11-09T20:49:21.079530Z",
+    "outcome": "success",
+    "retry": null,
+    "part_kind": "tool-return"
+   }
+  ],
+  "timestamp": "2026-11-09T20:49:21.080242Z",
+  "instructions": "You answer questions about public data using only the tools of the connected data server. Look the answer up; never answer from memory. Report figures exactly as the data gives them and cite where they came from. If the tools can't answer it, set found to false.\n\nYou are connected to the Urban Institute's Education Data Portal, which harmonises federal education data (CCD, CRDC, IPEDS, EdFacts, SAIPE, College Scorecard, MEPS, PSEO, and others) for schools, school districts, and colleges.\n\nCHOOSING A TOOL\n- Totals, averages or counts by group — get_summary. It aggregates in the API and groups by year automatically, so ONE call covers a whole time series. Its path, var and by come from describe_dataset, which prints the exact call — they are not guessable from the data path.\n- A named school, district or college — resolve_entity first, to turn the name into an ID to filter on.\n- Specific rows — get_data, always with fields=.\n- \"Largest / smallest N\" — get_data with ordering=-<field> for highest first, ordering=<field> for lowest.\n- Unfamiliar with the data — search_datasets, then describe_dataset.\n\nALWAYS PASS fields= TO get_data. These tables are 50-96 columns wide; requesting only the columns you need is typically an 8-17x reduction and is usually the difference between an answer and a refusal.\n\nFILTERS: only fields marked [FILTER] in describe_dataset work. The API silently ignores an unsupported filter and returns UNFILTERED data, so check before assuming a filter applied. Filter by state using FIPS codes — see lookup_codes(format_name='fips').\n\nRESULTS ARE COMPLETE OR REFUSED, never silently truncated, so counting and averaging over what you receive is valid. A refusal reports the true size and how to narrow it — follow it rather than retrying the same query.\n\nPASS THE SOURCE ON. Every data result ends with a provenance block naming the federal source and carrying a preformatted Cite string. The data is open under ODC-By, which asks for attribution wherever figures are reported — so name the source with the numbers, and reproduce that Cite string rather than composing one of your own.",
+  "kind": "request",
+  "run_id": "01a1c212-173f-773f-8e59-7ec69be3abfd",
+  "conversation_id": "01a1c212-173f-773f-8e59-7ec7000582a4",
+  "metadata": null,
+  "state": "complete"
+ },
+ {
+  "parts": [
+   {
+    "content": "",
+    "id": null,
+    "signature": "CAQSiQcKEggTEAIYAjgBQgh0aGlua2luZxIMalbh6TJaWkKCI/vCGgw4XgavRS5IVKFMpBoiMK9njI+7GKdRDiam1NqM0+pUZLcqayDaNLcPHpKZz9rmynMiOZgERaNnVPp6gGljeiqkBinV8kP6JyaRR4cIgnNhCVaf/yWZJBC2Orb7Cr7Mo3rDgBRsZKiV49XNYmfNKoOKtJ/HUMH0OprQHLKOngJL+bHeNav7uhwB9W+iuFVen2tFKgsgU8crXMidETBWhukfTstT/zMspZZJO1vST10ER8o3F/ecV7a06WABY8aIR7at71+H7KGG9a3Mlz3I0SKWxp3Tj8ebY79i2/MdYbcYGNzt8xNc66qqX2UrwheMPjDbRByR1UvBRI59WMlupIoGN501y2h7Rqh3O5A7c3yEcMIkSLDooYTkXb8M0u0tkvqy5BO0qHYslGK4SsTjQ2QlXYMX5dxBKNT0BdMYxK6Nts+DmfEYRCDSruapacCBdKDfwpb3kMlCL83B3JqBNDc55rqQwHzxtzxxdBqb6h5PJC6rXBAPeggCITwQac1iPO7vT4h+6BwJ5x0Svnv5lsJL+RDVB2TYbN/6bBCunJeqfIjuIhbNdxGuR4+yZI8/ur73xCP6W/rgNkMlgQ8mrKIijpcBcQHbW1kC8wpE1d1AzY3NAtweGf/aqDKWtaNduFftf9719Cgk4+kbtjDFbhsrOoXkl8qTbuYqldhEP/HraBvCeKYnQ9W2Eya1FX3SP2vR4nxX+jyZcY7yV7fgj9qdDGhqtmgTQOefpLrMlKX5VX/x5VCeNTyZSIrH+Ht3nbC9Rc9kfBj48qHIePKx3gqmANGkSZMFoUFn7MLt5FzJiO+DmGUN8kYad2bUC0opMRFO3A0T1wXDy6iwmVGBdr7FHau4onM+DJiLPdtFu8ROIXpzApYSU+Na/5JqLDZnXgq+JhE7I+dttGRZLlNbctmwKrG4/QyFVUzp+9tNEJdF+IKM1fz64Pk98F4/cEne4bdtrEaYozl9VqWugkvc9vFiYmcq8G8qTyRga1WKvARUlvPOiET4B8Q/tlI0pI7McTGWXESt7OAcEwZ/anox9IH5HGW/WtpMtfCOrbEfruYXtLmGcE7AcQkeaq+YKSXEawo/ybtEkTby/Spda6/Q6ez5fTUvtp1Nlz4HtJ19V3LV+ANmBmYIgq8PhFbBLMejLfVkXRY4URgB.eyJlbmRwb2ludF9zbHVnIjoiYW50aHJvcGljL2NsYXVkZS1oYWlrdS01LjUtMjAyNjEwMDd8Z29vZ2xlLXZlcnRleC9nbG9iYWwifQ",
+    "provider_name": "openrouter",
+    "provider_details": {
+     "format": "anthropic-claude-v1",
+     "index": 0,
+     "type": "reasoning.text"
+    },
+    "part_kind": "thinking"
+   },
+   {
+    "tool_name": "get_data",
+    "args": "{\"path\": \"schools/ccd/enrollment/2022/grade-99/\", \"filters\": \"fips=56\", \"fields\": \"ncessch,school_name,enrollment\"}",
+    "tool_call_id": "toolu_vrtx_011UJC8ipMEoHYvuXYqK7HXw",
+    "tool_kind": null,
+    "id": null,
+    "provider_name": null,
+    "provider_details": null,
+    "part_kind": "tool-call"
+   }
+  ],
+  "usage": {
+   "input_tokens": 9307,
+   "cache_write_tokens": 0,
+   "cache_write_1h_tokens": 0,
+   "cache_read_tokens": 0,
+   "output_tokens": 246,
+   "output_reasoning_tokens": 120,
+   "input_audio_tokens": 0,
+   "cache_audio_read_tokens": 0,
+   "output_audio_tokens": 0,
+   "audio_seconds": 0.0,
+   "details": {
+    "is_byok": 0,
+    "audio_tokens": 0,
+    "reasoning_tokens": 120,
+    "image_tokens": 0
+   },
+   "cost": "0.0010537"
+  },
+  "model_name": "anthropic/claude-haiku-5.5",
+  "model_id": "openrouter:anthropic/claude-haiku-5.5",
+  "timestamp": "2026-11-09T20:49:23.458740Z",
+  "kind": "response",
+  "provider_name": "openrouter",
+  "provider_url": "https://openrouter.ai/api/v1",
+  "canonical_system": null,
+  "provider_details": {
+   "finish_reason": "tool_use",
+   "downstream_provider": "Google",
+   "cost": 0.0010537,
+   "upstream_inference_cost": 0.0010537,
+   "upstream_inference_prompt_cost": 0.0009307,
+   "upstream_inference_completions_cost": 0.000123,
+   "is_byok": false,
+   "timestamp": "2026-11-09T20:49:21Z"
+  },
+  "provider_response_id": "gen-1794257361-oUpP8KjzQnl3HnAGK7Ux",
+  "finish_reason": "tool_call",
+  "run_id": "01a1c212-173f-773f-8e59-7ec69be3abfd",
+  "conversation_id": "01a1c212-173f-773f-8e59-7ec7000582a4",
+  "metadata": null,
+  "workspace_ref": null,
+  "history_digest": null,
+  "failed_attempts": null,
+  "state": "complete"
+ },
+ {
+  "parts": [
+   {
+    "tool_name": "get_data",
+    "content": "Unknown column(s): fields=school_name. The API ignores these rather than reporting them — an unknown fields= column returns blank, and an unknown ordering= column returns UNRANKED rows that would still be presented as a ranking. Call describe_dataset(path='schools/ccd/enrollment/2022/grade-99/') for the real column names.",
+    "tool_call_id": "toolu_vrtx_011UJC8ipMEoHYvuXYqK7HXw",
+    "tool_kind": null,
+    "metadata": null,
+    "timestamp": "2026-11-09T20:49:23.512813Z",
+    "outcome": "success",
+    "retry": null,
+    "part_kind": "tool-return"
+   }
+  ],
+  "timestamp": "2026-11-09T20:49:23.513328Z",
+  "instructions": "You answer questions about public data using only the tools of the connected data server. Look the answer up; never answer from memory. Report figures exactly as the data gives them and cite where they came from. If the tools can't answer it, set found to false.\n\nYou are connected to the Urban Institute's Education Data Portal, which harmonises federal education data (CCD, CRDC, IPEDS, EdFacts, SAIPE, College Scorecard, MEPS, PSEO, and others) for schools, school districts, and colleges.\n\nCHOOSING A TOOL\n- Totals, averages or counts by group — get_summary. It aggregates in the API and groups by year automatically, so ONE call covers a whole time series. Its path, var and by come from describe_dataset, which prints the exact call — they are not guessable from the data path.\n- A named school, district or college — resolve_entity first, to turn the name into an ID to filter on.\n- Specific rows — get_data, always with fields=.\n- \"Largest / smallest N\" — get_data with ordering=-<field> for highest first, ordering=<field> for lowest.\n- Unfamiliar with the data — search_datasets, then describe_dataset.\n\nALWAYS PASS fields= TO get_data. These tables are 50-96 columns wide; requesting only the columns you need is typically an 8-17x reduction and is usually the difference between an answer and a refusal.\n\nFILTERS: only fields marked [FILTER] in describe_dataset work. The API silently ignores an unsupported filter and returns UNFILTERED data, so check before assuming a filter applied. Filter by state using FIPS codes — see lookup_codes(format_name='fips').\n\nRESULTS ARE COMPLETE OR REFUSED, never silently truncated, so counting and averaging over what you receive is valid. A refusal reports the true size and how to narrow it — follow it rather than retrying the same query.\n\nPASS THE SOURCE ON. Every data result ends with a provenance block naming the federal source and carrying a preformatted Cite string. The data is open under ODC-By, which asks for attribution wherever figures are reported — so name the source with the numbers, and reproduce that Cite string rather than composing one of your own.",
+  "kind": "request",
+  "run_id": "01a1c212-173f-773f-8e59-7ec69be3abfd",
+  "conversation_id": "01a1c212-173f-773f-8e59-7ec7000582a4",
+  "metadata": null,
+  "state": "complete"
+ },
+ {
+  "parts": [
+   {
+    "tool_name": "get_data",
+    "args": "{\"path\": \"schools/ccd/enrollment/2022/grade-99/\", \"filters\": \"fips=56\", \"fields\": \"ncessch,enrollment\"}",
+    "tool_call_id": "toolu_vrtx_01PFUxCgzHArSAhcyCJDmtra",
+    "tool_kind": null,
+    "id": null,
+    "provider_name": null,
+    "provider_details": null,
+    "part_kind": "tool-call"
+   }
+  ],
+  "usage": {
+   "input_tokens": 9670,
+   "cache_write_tokens": 0,
+   "cache_write_1h_tokens": 0,
+   "cache_read_tokens": 0,
+   "output_tokens": 121,
+   "output_reasoning_tokens": 0,
+   "input_audio_tokens": 0,
+   "cache_audio_read_tokens": 0,
+   "output_audio_tokens": 0,
+   "audio_seconds": 0.0,
+   "details": {
+    "is_byok": 0,
+    "audio_tokens": 0,
+    "reasoning_tokens": 0,
+    "image_tokens": 0
+   },
+   "cost": "0.0010275"
+  },
+  "model_name": "anthropic/claude-haiku-5.5",
+  "model_id": "openrouter:anthropic/claude-haiku-5.5",
+  "timestamp": "2026-11-09T20:49:24.415554Z",
+  "kind": "response",
+  "provider_name": "openrouter",
+  "provider_url": "https://openrouter.ai/api/v1",
+  "canonical_system": null,
+  "provider_details": {
+   "finish_reason": "tool_use",
+   "downstream_provider": "Google",
+   "cost": 0.0010275,
+   "upstream_inference_cost": 0.0010275,
+   "upstream_inference_prompt_cost": 0.000967,
+   "upstream_inference_completions_cost": 0.0000605,
+   "is_byok": false,
+   "timestamp": "2026-11-09T20:49:23Z"
+  },
+  "provider_response_id": "gen-1794257363-lZa5tOytXQh7HVDQ42y4",
+  "finish_reason": "tool_call",
+  "run_id": "01a1c212-173f-773f-8e59-7ec69be3abfd",
+  "conversation_id": "01a1c212-173f-773f-8e59-7ec7000582a4",
+  "metadata": null,
+  "workspace_ref": null,
+  "history_digest": null,
+  "failed_attempts": null,
+  "state": "complete"
+ },
+ {
+  "parts": [
+   {
+    "tool_name": "get_data",
+    "content": "Returned 361 record(s) — complete result set.\n\nncessch,enrollment\n560000900145,12\n560001000156,9\n560001500243,2\n560001600045,0\n560073000001,1095\n560073000002,676\n560073000003,34\n560073000004,275\n560073000005,215\n560073000006,232\n560073000007,4\n560073000011,25\n560073000014,258\n560073000017,20\n560073000020,355\n560073000066,77\n560073000216,246\n560073000453,49\n560073000535,244\n560073000542,95\n560073000550,2\n560096000162,383\n560096000367,40\n560103000026,422\n560103000028,332\n560103000124,187\n560103000147,56\n560103000541,646\n560109000036,133\n560109000038,101\n560126000041,158\n560126000042,92\n560126000043,149\n560126000044,42\n560142000046,360\n560142000049,133\n560142000365,370\n560142000428,252\n560142000477,49\n560142000478,74\n560146000054,235\n560146000055,185\n560146000056,308\n560147000019,363\n560147000057,1187\n560147000058,664\n560147000064,195\n560147000067,416\n560147000068,23\n560147000069,212\n560147000070,388\n560147000071,118\n560147000072,15\n560147000073,259\n560147000076,258\n560147000349,367\n560147000409,373\n560147000410,666\n560147000429,189\n560147000435,278\n560147000436,294\n560147000454,41\n560147000479,146\n560147000546,406\n560147000568,544\n560147000580,1234\n560170000084,3\n560170000085,76\n560170000087,6\n560170000088,187\n560170000385,85\n560170000387,115\n560170000390,135\n560198000090,1283\n560198000091,1513\n560198000092,167\n560198000093,861\n560198000094,647\n560198000095,654\n560198000096,228\n560198000097,333\n560198000098,324\n560198000099,224\n560198000100,170\n560198000102,172\n560198000104,327\n560198000105,88\n560198000106,301\n560198000108,88\n560198000109,111\n560198000110,306\n560198000111,129\n560198000112,274\n560198000113,316\n560198000114,3\n560198000115,239\n560198000116,106\n560198000117,83\n560198000118,373\n560198000119,288\n560198000120,10\n560198000371,333\n560198000396,343\n560198000426,374\n560198000438,327\n560198000448,1187\n560198000480,353\n560198000547,194\n560198000563,469\n560198000567,522\n560198000574,101\n560207000121,629\n560207000122,292\n560207000125,13\n560207000126,295\n560207000351,465\n560207000430,7\n560207000521,311\n560207000560,37\n560214000127,513\n560214000128,234\n560214000129,8\n560214000130,6\n560214000132,13\n560214000135,10\n560214000352,283\n560214000368,379\n560214000540,9\n560214000553,245\n560215000037,151\n560215000137,324\n560215000141,205\n560237000150,242\n560237000405,195\n560237000407,173\n560237000564,334\n560237000566,294\n560267000151,53\n560267000366,40\n560267000432,89\n560276000152,747\n560276000153,322\n560276000155,198\n560276000376,47\n560276000414,441\n560276000433,308\n560276000462,289\n560276000463,304\n560282000370,62\n560282000498,250\n560282000552,84\n560283000159,11\n560283000160,154\n560283000544,126\n560283000545,81\n560283000561,7\n560287000074,4\n560287000154,51\n560287000163,599\n560287000198,406\n560287000452,430\n560287000539,237\n560299000167,105\n560299000168,305\n560299000169,272\n560299000171,113\n560299000172,116\n560299000373,72\n560299000464,263\n560299000475,16\n560299000482,39\n560299000483,83\n560299000488,250\n560299000585,23\n560317000174,147\n560317000176,219\n560317000378,103\n560318000179,126\n560318000379,57\n560318000499,28\n560331000180,203\n560331000181,197\n560331000185,242\n560377000187,342\n560377000191,265\n560377000380,212\n560377000417,232\n560377000449,113\n560377000586,30\n560403000358,14\n560403000555,320\n560403000557,264\n560406000193,62\n560406000202,891\n560406000203,455\n560406000204,416\n560406000205,105\n560406000206,378\n560406000207,290\n560406000381,108\n560406000404,338\n560412000208,36\n560412000209,315\n560412000210,197\n560412000211,74\n560412000213,204\n560412000504,268\n560423000214,299\n560423000215,234\n560423000218,7\n560423000219,302\n560426000222,235\n560426000357,243\n560426000418,247\n560438000139,102\n560445000226,271\n560445000386,142\n560445000441,183\n560450000227,244\n560450000558,504\n560451000133,149\n560451000183,466\n560451000229,2051\n560451000231,1794\n560451000232,795\n560451000233,711\n560451000236,287\n560451000237,323\n560451000240,405\n560451000245,309\n560451000247,396\n560451000249,459\n560451000250,391\n560451000251,355\n560451000252,309\n560451000253,189\n560451000256,243\n560451000257,330\n560451000262,183\n560451000377,387\n560451000389,444\n560451000420,288\n560451000444,344\n560451000445,338\n560451000451,443\n560451000469,8\n560451000470,796\n560483000015,170\n560483000263,224\n560483000264,178\n560483000265,206\n560486000267,340\n560486000268,247\n560486000269,4\n560486000270,471\n560486000559,30\n560509000272,22\n560509000273,271\n560509000274,185\n560509000275,196\n560509000277,188\n560509000392,8\n560509000533,0\n560509000573,15\n560509000591,28\n560516000196,19\n560516000278,592\n560516000279,419\n560516000280,20\n560516000281,210\n560516000282,302\n560516000283,314\n560522000220,380\n560522000286,776\n560522000287,541\n560522000562,34\n560522000570,209\n560522000571,159\n560522000572,220\n560522000575,158\n560530200293,51\n560530200294,1502\n560530200295,769\n560530200296,586\n560530200297,20\n560530200298,197\n560530200305,212\n560530200359,102\n560530200419,525\n560530200421,177\n560530200427,384\n560530200489,48\n560530200523,5\n560530200524,40\n560530200565,433\n560568000569,82\n560569000311,143\n560569000312,258\n560569000314,230\n560569000395,208\n560569000446,133\n560569000447,159\n560569000472,25\n560569000554,7\n560569500140,20\n560569500189,72\n560569500316,302\n560569500317,295\n560569500320,37\n560569500322,298\n560569500360,1092\n560569500361,843\n560569500397,314\n560569500474,326\n560570000323,116\n560570000362,198\n560570000510,70\n560576200164,42\n560576200324,748\n560576200326,4\n560576200329,16\n560576200332,207\n560576200399,557\n560576200425,290\n560576200439,228\n560576200528,1\n560576200582,313\n560582000393,105\n560583000289,293\n560583000313,296\n560583000335,822\n560583000336,703\n560583000337,40\n560583000339,45\n560583000340,10\n560583000341,188\n560583000512,34\n560583000583,366\n560609000342,174\n560609000363,478\n560609000401,73\n560624000343,388\n560624000344,249\n560624000577,172\n560624000578,161\n560624000579,168\n568018000031,1\n568018000584,0\n568018000592,1\n568018000593,0\n568025000048,0\n568025000587,0\n568025000588,0\n568025000589,0\n568025000590,0\n568025000594,0\n568025100534,3\n568025100538,14\n568025200350,19\n568025300548,12\n568025500576,14\n\n─────\nSource: Common Core of Data (CCD) — via Urban Institute Education Data Portal\nYears available: 1986–2024 | This query: 2022\nLicense: Open Data Commons Attribution License (ODC-By v1.0)\nAPI URL: https://educationdata.urban.org/api/v1/schools/ccd/enrollment/2022/grade-99/?fips=56&fields=ncessch%2Cenrollment\nCite: Common Core of Data, via Education Data Portal v. 0.27.0, Urban Institute, under the ODC Attribution License.\nAttribution is required under ODC-By: name the source alongside these figures, and reproduce the Cite line above rather than composing one.",
+    "tool_call_id": "toolu_vrtx_01PFUxCgzHArSAhcyCJDmtra",
+    "tool_kind": null,
+    "metadata": null,
+    "timestamp": "2026-11-09T20:49:24.756996Z",
+    "outcome": "success",
+    "retry": null,
+    "part_kind": "tool-return"
+   }
+  ],
+  "timestamp": "2026-11-09T20:49:24.757534Z",
+  "instructions": "You answer questions about public data using only the tools of the connected data server. Look the answer up; never answer from memory. Report figures exactly as the data gives them and cite where they came from. If the tools can't answer it, set found to false.\n\nYou are connected to the Urban Institute's Education Data Portal, which harmonises federal education data (CCD, CRDC, IPEDS, EdFacts, SAIPE, College Scorecard, MEPS, PSEO, and others) for schools, school districts, and colleges.\n\nCHOOSING A TOOL\n- Totals, averages or counts by group — get_summary. It aggregates in the API and groups by year automatically, so ONE call covers a whole time series. Its path, var and by come from describe_dataset, which prints the exact call — they are not guessable from the data path.\n- A named school, district or college — resolve_entity first, to turn the name into an ID to filter on.\n- Specific rows — get_data, always with fields=.\n- \"Largest / smallest N\" — get_data with ordering=-<field> for highest first, ordering=<field> for lowest.\n- Unfamiliar with the data — search_datasets, then describe_dataset.\n\nALWAYS PASS fields= TO get_data. These tables are 50-96 columns wide; requesting only the columns you need is typically an 8-17x reduction and is usually the difference between an answer and a refusal.\n\nFILTERS: only fields marked [FILTER] in describe_dataset work. The API silently ignores an unsupported filter and returns UNFILTERED data, so check before assuming a filter applied. Filter by state using FIPS codes — see lookup_codes(format_name='fips').\n\nRESULTS ARE COMPLETE OR REFUSED, never silently truncated, so counting and averaging over what you receive is valid. A refusal reports the true size and how to narrow it — follow it rather than retrying the same query.\n\nPASS THE SOURCE ON. Every data result ends with a provenance block naming the federal source and carrying a preformatted Cite string. The data is open under ODC-By, which asks for attribution wherever figures are reported — so name the source with the numbers, and reproduce that Cite string rather than composing one of your own.",
+  "kind": "request",
+  "run_id": "01a1c212-173f-773f-8e59-7ec69be3abfd",
+  "conversation_id": "01a1c212-173f-773f-8e59-7ec7000582a4",
+  "metadata": null,
+  "state": "complete"
+ },
+ {
+  "parts": [
+   {
+    "content": "",
+    "id": null,
+    "signature": "CAQSjggKEggTEAIYAjgBQgh0aGlua2luZxIMk8eD2CVm+8/XAGcUGgyHKq19eta+ztBe+HsiMHvKVbyc8NpPHB29//IREx4TUgeXTqed2IvWnPTsWrRixYcl83+EVNTUyBRx8RnGcyqpB0XfbB1AuiDjJHp4T0s+E6yQTXvMTPsuZbs4VTQ0S3LQCD8FFs0MWOaClCbj8VfItX5tR2oimCXlOhKmQxDsnr3JhmtpB1f/DAoAvZ6vmrwZdnxhav2pP6Z4YpGlp5bxz5MKEJ08Vh1z7CLHWkm9Zoc9rF+OhmZsGh3f2731fY+YIQW5b42i6RnSl1PXweJH8wSwdpodoMogvYww8zkf/h3N4lYCRvIDrlj46809p8ubBZ8SCP3ETJfnId9NV6z7uGnZdL0dwm24HBG5IYRMkuTgtCQ6bniru5k2F1qnrfLgp9KXGZxXVxp90IEOWTKcmNJNtgSds9bwJYg9KQtEPCMr/gcfZ/firbDvmSzDhP7db+jj/jcEawXoWOqcYGqs+0hA+NJwwTtX9yrzhvZjLrGrQ+YJmhY4jtskXdTT6n2EFk907i6DejUzzSUVotc6agZgM/iYo815t/VpKYRUYXhim8Rk1utusl7bnxnJ/bmsxpMHcvyMqzuJ3ze00vf4QEiQNxwUBykGXCE0c6qwcyitv28akgmp3Vxtyy0Vey3OcX1d314SB/3Sce77/7jB85BZDsyvPpW4MIWdwGOiNvOBm0t/fNnhTLzhGoXWUPtG1pMJpRO9xYwPLUTTxtU4Ma9bwDA7IkKsHCJLW6LcfyPq1wPltXAeHHNfOyb3ITDP3sENq7kaKH4DQsX0A0YAJvlV+i2Yl5KrF4QZXwC7bx6SAMxUQtS/bJCiYqdeb8F/TVp3HJ9OwR6hIor3QLmufgdK9PQt8tpNW7RpMGfmRuAFwQukB9CfTqrngQiRI+S3lF57x3px42w4cv8r/RuTpYMvOB4OaxNzlGPqZAPtSs7DoQ+PGNalIqJT2Nm8BkHKX/9GHP0bSSyFEdk7pMrzl6JwL0LfupntIaXXhivckkKv1LwLusaT1lPa2fBdXmrNx7NjagFNPhvmSmID+qJGfLrUVqpYoser3B2zpVJwK8NUhc2CDCF5+IAR7qb32GoLE37nJcg1XRgS1sRwOw9oxBnBKZ1jFYI495pLoyjYJHa5s1/MzXr294GvjrUzNpaYaBw1HUIE4Z0iVybR3j/UsxfDNWXPu6gaxAFU6nWfpfiyk1nOSxhGxaexq6D1CZDVvtF/LarqHuAP8nfdzyelIZGOym8eOGtDCzuDTdi02jAM+o3XmyX63ZpU8Psn3oSiNVIqXywCaCkrwOq5MnDIlzNGRjaaUs38jpXsjVJjUIJwgHAR4gmBZooYAQ==.eyJlbmRwb2ludF9zbHVnIjoiYW50aHJvcGljL2NsYXVkZS1oYWlrdS01LjUtMjAyNjEwMDd8Z29vZ2xlLXZlcnRleC9nbG9iYWwifQ",
+    "provider_name": "openrouter",
+    "provider_details": {
+     "format": "anthropic-claude-v1",
+     "index": 0,
+     "type": "reasoning.text"
+    },
+    "part_kind": "thinking"
+   },
+   {
+    "tool_name": "get_summary",
+    "args": "{\"path\": \"schools/ccd/enrollment\", \"var\": \"enrollment\", \"stat\": \"sum\", \"by\": \"grade\", \"filters\": \"fips=56,year=2022\"}",
+    "tool_call_id": "toolu_vrtx_018F3uEoWv7M1kNdbwtYQLFU",
+    "tool_kind": null,
+    "id": null,
+    "provider_name": null,
+    "provider_details": null,
+    "part_kind": "tool-call"
+   }
+  ],
+  "usage": {
+   "input_tokens": 12591,
+   "cache_write_tokens": 0,
+   "cache_write_1h_tokens": 0,
+   "cache_read_tokens": 0,
+   "output_tokens": 308,
+   "output_reasoning_tokens": 150,
+   "input_audio_tokens": 0,
+   "cache_audio_read_tokens": 0,
+   "output_audio_tokens": 0,
+   "audio_seconds": 0.0,
+   "details": {
+    "is_byok": 0,
+    "audio_tokens": 0,
+    "reasoning_tokens": 150,
+    "image_tokens": 0
+   },
+   "cost": "0.0014131"
+  },
+  "model_name": "anthropic/claude-haiku-5.5",
+  "model_id": "openrouter:anthropic/claude-haiku-5.5",
+  "timestamp": "2026-11-09T20:49:26.832882Z",
+  "kind": "response",
+  "provider_name": "openrouter",
+  "provider_url": "https://openrouter.ai/api/v1",
+  "canonical_system": null,
+  "provider_details": {
+   "finish_reason": "tool_use",
+   "downstream_provider": "Google",
+   "cost": 0.0014131,
+   "upstream_inference_cost": 0.0014131,
+   "upstream_inference_prompt_cost": 0.0012591,
+   "upstream_inference_completions_cost": 0.000154,
+   "is_byok": false,
+   "timestamp": "2026-11-09T20:49:25Z"
+  },
+  "provider_response_id": "gen-1794257365-qTzSgaLxahG34PQp4l1N",
+  "finish_reason": "tool_call",
+  "run_id": "01a1c212-173f-773f-8e59-7ec69be3abfd",
+  "conversation_id": "01a1c212-173f-773f-8e59-7ec7000582a4",
+  "metadata": null,
+  "workspace_ref": null,
+  "history_digest": null,
+  "failed_attempts": null,
+  "state": "complete"
+ },
+ {
+  "parts": [
+   {
+    "tool_name": "get_summary",
+    "content": "The Education Data Portal rejected this summary: Invalid value for fips\n\nEverything else about the query was accepted, so fix just that argument and retry. describe_dataset('schools/ccd/enrollment') lists the valid var and by values.",
+    "tool_call_id": "toolu_vrtx_018F3uEoWv7M1kNdbwtYQLFU",
+    "tool_kind": null,
+    "metadata": null,
+    "timestamp": "2026-11-09T20:49:27.778036Z",
+    "outcome": "success",
+    "retry": null,
+    "part_kind": "tool-return"
+   }
+  ],
+  "timestamp": "2026-11-09T20:49:27.778635Z",
+  "instructions": "You answer questions about public data using only the tools of the connected data server. Look the answer up; never answer from memory. Report figures exactly as the data gives them and cite where they came from. If the tools can't answer it, set found to false.\n\nYou are connected to the Urban Institute's Education Data Portal, which harmonises federal education data (CCD, CRDC, IPEDS, EdFacts, SAIPE, College Scorecard, MEPS, PSEO, and others) for schools, school districts, and colleges.\n\nCHOOSING A TOOL\n- Totals, averages or counts by group — get_summary. It aggregates in the API and groups by year automatically, so ONE call covers a whole time series. Its path, var and by come from describe_dataset, which prints the exact call — they are not guessable from the data path.\n- A named school, district or college — resolve_entity first, to turn the name into an ID to filter on.\n- Specific rows — get_data, always with fields=.\n- \"Largest / smallest N\" — get_data with ordering=-<field> for highest first, ordering=<field> for lowest.\n- Unfamiliar with the data — search_datasets, then describe_dataset.\n\nALWAYS PASS fields= TO get_data. These tables are 50-96 columns wide; requesting only the columns you need is typically an 8-17x reduction and is usually the difference between an answer and a refusal.\n\nFILTERS: only fields marked [FILTER] in describe_dataset work. The API silently ignores an unsupported filter and returns UNFILTERED data, so check before assuming a filter applied. Filter by state using FIPS codes — see lookup_codes(format_name='fips').\n\nRESULTS ARE COMPLETE OR REFUSED, never silently truncated, so counting and averaging over what you receive is valid. A refusal reports the true size and how to narrow it — follow it rather than retrying the same query.\n\nPASS THE SOURCE ON. Every data result ends with a provenance block naming the federal source and carrying a preformatted Cite string. The data is open under ODC-By, which asks for attribution wherever figures are reported — so name the source with the numbers, and reproduce that Cite string rather than composing one of your own.",
+  "kind": "request",
+  "run_id": "01a1c212-173f-773f-8e59-7ec69be3abfd",
+  "conversation_id": "01a1c212-173f-773f-8e59-7ec7000582a4",
+  "metadata": null,
+  "state": "complete"
+ },
+ {
+  "parts": [
+   {
+    "content": "",
+    "id": null,
+    "signature": "CAQSzAcKEggTEAIYAjgBQgh0aGlua2luZxIMAqnXrL17N4jmQh5QGgzdKVCyvgQaNKls9ToiMI0mF8r+08GP7/Qapo8zN5pQmgQIToI7VWA8BGsYRuVoT13uWKA5F95vxUfKX58A7irnBqWV9Z68RjhRnVImtpWPkdPe2kVW36Jt/WQSh/E1vx57np9gWLEetHOvaGpUA4uShwJCYfVm/pxlNP5+GWKu29ZATkpFShD3ENg9vHknD0ISNVnrcL8xBmo/HIaYNFNIP3fddCSb0/gS0dDM3zXp/DzmSBJXB8FYYm4sCxNjFHovR5d8ME8vL0L/Gf57/CddajFjU+J+GuLYxVGA5d0nQddwoCAqtMYmC5WRtza73AHcMoBTmI8qvlRbeww61eQEgNXf69F87r/f/cAbqVUzRkNCOzvdGAwnjLlZFuzs3XbVJ5+7ohOQmosLAQqOTrhhVIA/cWluH+jcrhWaJ+x16KPebL1WE7lls4VVRmk5l7QP98uX69xKKzkMPlRhUnWX3IwHVFlYylbSUL3DuZqfqETA1V5MRWpkCB75fsD2iODkWgHxlWkaATozPz3G7tP8akMOUgtUlVhVbUKgbSQONznbIpeBta7Ab5MbCor1MkeF+n1sSI+nQ4Qrvm0CaZsizIUO0NkTRdUOAhFZBvUrezVH022f3sfPtSuKf9ULczuPaMQriCRMxw43KFSIhWzO14ZsGwSGVdQ64+dJVcQDMKle7rYe55+thu9xdKsG05X/61Q64xnpjoFe6AXhn8ggearczxZVAao9Pl2+FIlc+OjATQZl/lUhJ1bxvZ4bCxUEl97i+RhwyuuAICfkikAXaH3daYrArdkIxbDMUKcfebiutiI5Uno3AGqKWJ0ldRguzBMtvqthXlV/59PY8hYwELCggyoK0xFBVdNqBYShI7wdDzHbkFqh4NUUcJL7tcyl5EPH2pK36C5bxGE9MRGG4BECiLnrej/axmEUEQ5DaJk2IVUzat4D8QC6eCIei9Vd/i3nwywY52tETaR5Zk72qbcg+obuY/5hel0J0iHxNwugD/AAnozy+23fc7ZWnuW9QJAsgRYVCJDtwY+Z7Z/wXkMq9PeqZ6A5iXwC8ekQIV0m6/+JeF4g4w9Q9cT4TB6mRwDVSUHT1YX8Lu+Rzpi9/labVYhGin5j6NEi3L45v+AdNpZL6FRmQNREvjyW/LP04qmg+GqpqDPfsmf7iQI4maFnqZ2Ud0/xt8p/umOVepgmkIn6BpUskNpMI1+so6eSbMTC0ZNf7n+uldp2mkufunulN3MBpe8YAQ==.eyJlbmRwb2ludF9zbHVnIjoiYW50aHJvcGljL2NsYXVkZS1oYWlrdS01LjUtMjAyNjEwMDd8Z29vZ2xlLXZlcnRleC9nbG9iYWwifQ",
+    "provider_name": "openrouter",
+    "provider_details": {
+     "format": "anthropic-claude-v1",
+     "index": 0,
+     "type": "reasoning.text"
+    },
+    "part_kind": "thinking"
+   },
+   {
+    "tool_name": "get_summary",
+    "args": "{\"path\": \"schools/ccd/enrollment\", \"var\": \"enrollment\", \"stat\": \"sum\", \"by\": \"fips\", \"filters\": \"year=2022,grade=99\"}",
+    "tool_call_id": "toolu_vrtx_01HQvatTvFJyyGRpMDGvMwL8",
+    "tool_kind": null,
+    "id": null,
+    "provider_name": null,
+    "provider_details": null,
+    "part_kind": "tool-call"
+   }
+  ],
+  "usage": {
+   "input_tokens": 12980,
+   "cache_write_tokens": 0,
+   "cache_write_1h_tokens": 0,
+   "cache_read_tokens": 0,
+   "output_tokens": 294,
+   "output_reasoning_tokens": 136,
+   "input_audio_tokens": 0,
+   "cache_audio_read_tokens": 0,
+   "output_audio_tokens": 0,
+   "audio_seconds": 0.0,
+   "details": {
+    "is_byok": 0,
+    "audio_tokens": 0,
+    "reasoning_tokens": 136,
+    "image_tokens": 0
+   },
+   "cost": "0.001445"
+  },
+  "model_name": "anthropic/claude-haiku-5.5",
+  "model_id": "openrouter:anthropic/claude-haiku-5.5",
+  "timestamp": "2026-11-09T20:49:29.425659Z",
+  "kind": "response",
+  "provider_name": "openrouter",
+  "provider_url": "https://openrouter.ai/api/v1",
+  "canonical_system": null,
+  "provider_details": {
+   "finish_reason": "tool_use",
+   "downstream_provider": "Google",
+   "cost": 0.001445,
+   "upstream_inference_cost": 0.001445,
+   "upstream_inference_prompt_cost": 0.001298,
+   "upstream_inference_completions_cost": 0.000147,
+   "is_byok": false,
+   "timestamp": "2026-11-09T20:49:27Z"
+  },
+  "provider_response_id": "gen-1794257367-xNi6GA79PDWV2iOtozow",
+  "finish_reason": "tool_call",
+  "run_id": "01a1c212-173f-773f-8e59-7ec69be3abfd",
+  "conversation_id": "01a1c212-173f-773f-8e59-7ec7000582a4",
+  "metadata": null,
+  "workspace_ref": null,
+  "history_digest": null,
+  "failed_attempts": null,
+  "state": "complete"
+ },
+ {
+  "parts": [
+   {
+    "tool_name": "get_summary",
+    "content": "The Education Data Portal rejected this summary: Invalid year argument\n\nEverything else about the query was accepted, so fix just that argument and retry. describe_dataset('schools/ccd/enrollment') lists the valid var and by values.",
+    "tool_call_id": "toolu_vrtx_01HQvatTvFJyyGRpMDGvMwL8",
+    "tool_kind": null,
+    "metadata": null,
+    "timestamp": "2026-11-09T20:49:30.153000Z",
+    "outcome": "success",
+    "retry": null,
+    "part_kind": "tool-return"
+   }
+  ],
+  "timestamp": "2026-11-09T20:49:30.153577Z",
+  "instructions": "You answer questions about public data using only the tools of the connected data server. Look the answer up; never answer from memory. Report figures exactly as the data gives them and cite where they came from. If the tools can't answer it, set found to false.\n\nYou are connected to the Urban Institute's Education Data Portal, which harmonises federal education data (CCD, CRDC, IPEDS, EdFacts, SAIPE, College Scorecard, MEPS, PSEO, and others) for schools, school districts, and colleges.\n\nCHOOSING A TOOL\n- Totals, averages or counts by group — get_summary. It aggregates in the API and groups by year automatically, so ONE call covers a whole time series. Its path, var and by come from describe_dataset, which prints the exact call — they are not guessable from the data path.\n- A named school, district or college — resolve_entity first, to turn the name into an ID to filter on.\n- Specific rows — get_data, always with fields=.\n- \"Largest / smallest N\" — get_data with ordering=-<field> for highest first, ordering=<field> for lowest.\n- Unfamiliar with the data — search_datasets, then describe_dataset.\n\nALWAYS PASS fields= TO get_data. These tables are 50-96 columns wide; requesting only the columns you need is typically an 8-17x reduction and is usually the difference between an answer and a refusal.\n\nFILTERS: only fields marked [FILTER] in describe_dataset work. The API silently ignores an unsupported filter and returns UNFILTERED data, so check before assuming a filter applied. Filter by state using FIPS codes — see lookup_codes(format_name='fips').\n\nRESULTS ARE COMPLETE OR REFUSED, never silently truncated, so counting and averaging over what you receive is valid. A refusal reports the true size and how to narrow it — follow it rather than retrying the same query.\n\nPASS THE SOURCE ON. Every data result ends with a provenance block naming the federal source and carrying a preformatted Cite string. The data is open under ODC-By, which asks for attribution wherever figures are reported — so name the source with the numbers, and reproduce that Cite string rather than composing one of your own.",
+  "kind": "request",
+  "run_id": "01a1c212-173f-773f-8e59-7ec69be3abfd",
+  "conversation_id": "01a1c212-173f-773f-8e59-7ec7000582a4",
+  "metadata": null,
+  "state": "complete"
+ },
+ {
+  "parts": [
+   {
+    "content": "",
+    "id": null,
+    "signature": "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.eyJlbmRwb2ludF9zbHVnIjoiYW50aHJvcGljL2NsYXVkZS1oYWlrdS01LjUtMjAyNjEwMDd8Z29vZ2xlLXZlcnRleC9nbG9iYWwifQ",
+    "provider_name": "openrouter",
+    "provider_details": {
+     "format": "anthropic-claude-v1",
+     "index": 0,
+     "type": "reasoning.text"
+    },
+    "part_kind": "thinking"
+   },
+   {
+    "content": "{\"found\": true, \"answer\": \"Wyoming's public schools reported 92,495 students in total enrollment (all grades) for the 2022-23 school year (fall 2022 CCD collection), across 361 schools. I summed the school-level records myself because the portal's aggregate query was rejected.\", \"value\": 92495, \"source_url\": \"https://educationdata.urban.org/api/v1/schools/ccd/enrollment/2022/grade-99/?fips=56&fields=ncessch%2Cenrollment\", \"citation\": \"Common Core of Data, via Education Data Portal v. 0.27.0, Urban Institute, under the ODC Attribution License.\"}",
+    "id": null,
+    "provider_name": null,
+    "provider_details": null,
+    "citations": null,
+    "part_kind": "text"
+   }
+  ],
+  "usage": {
+   "input_tokens": 13354,
+   "cache_write_tokens": 0,
+   "cache_write_1h_tokens": 0,
+   "cache_read_tokens": 0,
+   "output_tokens": 10337,
+   "output_reasoning_tokens": 10119,
+   "input_audio_tokens": 0,
+   "cache_audio_read_tokens": 0,
+   "output_audio_tokens": 0,
+   "audio_seconds": 0.0,
+   "details": {
+    "is_byok": 0,
+    "audio_tokens": 0,
+    "reasoning_tokens": 10119,
+    "image_tokens": 0
+   },
+   "cost": "0.0065039"
+  },
+  "model_name": "anthropic/claude-haiku-5.5",
+  "model_id": "openrouter:anthropic/claude-haiku-5.5",
+  "timestamp": "2026-11-09T20:50:07.187037Z",
+  "kind": "response",
+  "provider_name": "openrouter",
+  "provider_url": "https://openrouter.ai/api/v1",
+  "canonical_system": null,
+  "provider_details": {
+   "finish_reason": "end_turn",
+   "downstream_provider": "Google",
+   "cost": 0.0065039,
+   "upstream_inference_cost": 0.0065039,
+   "upstream_inference_prompt_cost": 0.0013354,
+   "upstream_inference_completions_cost": 0.0051685,
+   "is_byok": false,
+   "timestamp": "2026-11-09T20:49:30Z"
+  },
+  "provider_response_id": "gen-1794257370-Xswgf0z0Hje4UgMUcQsR",
+  "finish_reason": "stop",
+  "run_id": "01a1c212-173f-773f-8e59-7ec69be3abfd",
+  "conversation_id": "01a1c212-173f-773f-8e59-7ec7000582a4",
+  "metadata": null,
+  "workspace_ref": null,
+  "history_digest": null,
+  "failed_attempts": null,
+  "state": "complete"
+ }
+]
