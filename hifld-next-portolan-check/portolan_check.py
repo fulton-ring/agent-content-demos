@@ -244,13 +244,14 @@ def _(mo):
     two copies of the catalog: `releases/<id>/…` and the bucket root. Portolan wants a self-contained tree with
     relative links. So every child, parent and root link "does not resolve" (PTL-LNK-006), every object looks
     orphaned (PTL-LNK-002), and the AGENTS.md and README.md links that every object has are rejected for being
-    absolute (PTL-FIL-002, -003). The files themselves are there: 1,381 of 1,383 objects have both. The root
+    absolute (PTL-FIL-002, -003). The files themselves are there: every object but the root has both. The root
     catalog has neither, and its relative links to them return 404 (PTL-FIL-001).
 
-    The rest are real metadata gaps. HIFLD Next declares itself a mirror (`portolan:mirror`), and a mirror must
-    record a sync time (`updated`) and a `via` link to the original source. 523 collections say `license: other`
+    The rest are real metadata gaps. Each collection names a federal producer and HIFLD Next as host, so
+    Portolan treats it as a mirror, and a mirror must record a sync time (`updated`) and a `via` link to the
+    original source. 523 collections say `license: other`
     with no link to licence text. Visualization rules want a thumbnail, a MapLibre style and `pmtiles:layers` on
-    the PMTiles link. The pipeline already writes all three, but only for the 8 raster collections.
+    the PMTiles link. The pipeline already writes all three, but only for 8 collections.
     Collection IDs contain slashes (`hifld/hospitals-3/hospitals-3/v1.0.0`), which is a warning, and the
     collection READMEs are one line that names neither licence nor source, also a warning.
     """)
@@ -748,7 +749,7 @@ def _(fixed, mo):
       files.
     - Mirror fields, licence link and README lines: 0.5 day.
     - Styles, `pmtiles:layers` and thumbnails for vector layers: 1 to 1.5 days, extending the code that already does
-      this for rasters.
+      this for 8 collections.
     - SHA2-256 checksums and a full byte-level data pass: 0.5 day, plus a run on a machine near the bucket.
     - Proper READMEs and AGENTS.md per layer, beyond the one-liners: open-ended.
 

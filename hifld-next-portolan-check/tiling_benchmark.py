@@ -290,7 +290,7 @@ def _(TIPPECANOE, WORK, describe_pmtiles, measured, pq, shutil, source_crs, sys,
         convert_script = (
             "import duckdb; c = duckdb.connect(); c.sql('LOAD spatial'); "
             f'c.sql("""COPY (SELECT * EXCLUDE ({drop}){replace}, {reproject} AS geometry '
-            f"FROM read_parquet({names!r}, union_by_name=true)) TO '{fgb}' "
+            f"FROM read_parquet({names!r}, union_by_name=true) WHERE {geometry} IS NOT NULL) TO '{fgb}' "
             f"WITH (FORMAT GDAL, DRIVER 'FlatGeobuf', SRS 'EPSG:4326'{geometry_type[layer['geometry']]})\"\"\")"
         )
         tylertoo = (
@@ -476,6 +476,27 @@ def _(OUT, TIPPECANOE_VERSION, json, mo, results):
             ],
         ]
     )
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    ## Reading the numbers, and what didn't work
+
+    - **The tools don't build the same tiles.** Each picks its own maximum zoom. tylertoo usually goes deeper on
+      points and lines and much shallower on small polygon layers: a handful of regions can stop at zoom 0, where
+      tippecanoe goes to zoom 10 or 11. Feature counts at a shared zoom differ for the same reason, since each
+      thins features differently. Compare speed per layer with the `*_zooms` columns beside it.
+    - **tylertoo only reads EPSG:4326 or 3857.** The census layers (NAD83) and some hydrography (Albers) fail
+      outright, so we add a DuckDB reprojection step and count it in tylertoo's time.
+    - **tylertoo usually uses more memory**, and its files are larger for points and smaller for big line layers.
+    - **Columns.** tylertoo drops binary columns (MVT can't hold them). tippecanoe drops columns that are empty in
+      every feature.
+    - **Our FlatGeobuf step failed on two layers in the published run:** the disk filled on the 34.8-million-point
+      layer, and PAD-US has rows with no geometry. The notebook now frees tylertoo's intermediate files first and
+      skips rows with no geometry, but those two layers weren't re-measured.
+    """)
     return
 
 
