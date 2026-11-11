@@ -734,7 +734,15 @@ def _(
     report_text = "\n".join(_lines) + "\n"
     (results / "report.md").write_text(report_text)
     plant0.drop(
-        columns=["quality", "other", "meter_bias", "test_noise", "vibration_noise", "load_true"]
+        columns=[
+            "quality",
+            "other",
+            "meter_bias",
+            "test_noise",
+            "vibration_noise",
+            "load_true",
+            "fails_at",
+        ]
     ).round(4).to_csv(results / "plant0_assets.csv", index=False)
     metrics = {
         "assets_per_plant_by_type": types["n"].to_dict(),

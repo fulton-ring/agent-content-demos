@@ -14,7 +14,7 @@ from a simulated plant built from published IEEE parameters, not from a real pla
 ## Run it
 
 ```bash
-./run.sh          # uv run notebook.py, about 80 seconds, no network or API keys needed
+./run.sh          # uv run notebook.py, about 1-2 minutes, no network or API keys needed
 ```
 
 To read it as a notebook: `uv run marimo edit notebook.py`. Output goes to `results/`
