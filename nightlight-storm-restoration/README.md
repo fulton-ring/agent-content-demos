@@ -50,7 +50,7 @@ All numbers come from `./run.sh` (see `outputs/summary_*.json`).
 
 | Test | Clear county nights | Spearman, darkness vs. share out | Clear in first 2 nights |
 |---|---|---|---|
-| DTE Aug 2023 (DR-4757), our GIBS method, 12 counties | 63 of 84 | −0.05 | 6 of 24 county nights |
+| DTE Aug 2023 (DR-4757), our GIBS method, 12 counties | 63 of 84 | −0.05 | 6 of 24 county nights (nights 0–1) |
 | DR-4757, Heimdall's night light, 9 declared counties | 45 | 0.24 | 44% |
 | DR-4721, Oklahoma, June 2023 | 131 | 0.48 | 82% |
 | DR-4728, Illinois, June 2023 | 74 | −0.25 | 41% |
@@ -96,7 +96,7 @@ at all on the other three. On DTE's own 2023 storm, the counties EAGLE-I showed 
 
 Needs [uv](https://docs.astral.sh/uv/). No keys, no paid services. The first run downloads
 about 3.5 GB into `data/` (set `DATA_DIR` to put it elsewhere), mostly the two EAGLE-I files
-and Heimdall's county table; from a fresh clone the whole run took 13 minutes, and later
+and Heimdall's county table; from a fresh clone the whole run took 10 to 13 minutes, and later
 runs take under 30 seconds. To read the notebooks interactively: `uv run marimo edit restoration.py`.
 
 ## What didn't work, and what this doesn't show

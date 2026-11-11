@@ -654,7 +654,7 @@ def _(mo):
     mo.md(r"""
     ## What didn't work, and what this doesn't show
 
-    - **The first three nights were cloudy.** VIIRS's cloud mask rates almost none of the
+    - **The first three nights were cloudy.** VIIRS's cloud mask rates none of the lit part of the
       territory clear on July 4, 5 and 6, and the raw images agree. By the first clear night
       DTE says about 91% of affected customers were already back, so night light cannot check
       the part of the curve that mattered most, the hours when meter reporting fell.
