@@ -79,7 +79,9 @@ def _(mo):
        a full scan of held-out 0.1° tiles for precision.
     5. Run the CNN where HIFLD Next transmission lines end more than 1 km from any OSM
        substation, and check the top-scoring sites by hand on aerial photos.
-    6. Record time, downloads and cost.
+    6. Retrain the CNN with hard negatives (developed land and its own mistakes) and score
+       it the same way ([#247](https://github.com/fulton-ring/agent-content-demos/issues/247)).
+    7. Record time, downloads and cost.
     """)
     return
 
@@ -1654,7 +1656,17 @@ def _(
 
 
 @app.cell
-def _(hand, line_end_table, mo, recall_table, scan_table):
+def _(
+    hand,
+    hand_hn,
+    land_use_flags,
+    line_end_table,
+    mo,
+    recall_hn_table,
+    recall_table,
+    scan_hn_table,
+    scan_table,
+):
     _cnn = recall_table[(recall_table["model"] == "cnn") & (recall_table["region"] == "both")].iloc[
         0
     ]
@@ -1666,6 +1678,13 @@ def _(hand, line_end_table, mo, recall_table, scan_table):
     _fp = hand[hand["set"] == "scan detection"]["verdict"].value_counts()
     _flagged = int(line_end_table.iloc[-1]["flagged"])
     _places = int(line_end_table.iloc[-1]["places"])
+    _hn = recall_hn_table.set_index("model")
+    _sh = scan_hn_table.set_index(["model", "threshold"])
+    _before = _sh.xs("cnn", level="model").iloc[0]
+    _after = _sh.xs("cnn_hn", level="model")
+    _rule, _strict = _after.iloc[0], _after.loc[0.97]
+    _lu = land_use_flags.loc["all"]
+    _fp2 = hand_hn["verdict"].value_counts()
     mo.md(f"""
     ## 12. What this shows, and what didn't work
 
@@ -1690,10 +1709,31 @@ def _(hand, line_end_table, mo, recall_table, scan_table):
     commercial and industrial land). Most far ends are taps on another line, as
     `hifld-grid-gaps/` found, so there is usually nothing to find.
 
+    **Hard negatives help, but don't make a scanner yet.** Adding developed-land and
+    self-mined negatives cuts the share of the {int(_lu["places"])} held-out developed places
+    the CNN flags from {_lu["cnn"]:.0%} to {_lu["cnn_hn"]:.0%}. At the same
+    1%-of-random-patches rule, scan precision against OSM goes from
+    {_before["precision"]:.1%} to {_rule["precision"]:.1%}, with recall of
+    100–229 kV substations in the scan tiles at {_rule["recall 100-229 kV"]:.0%}. Because the
+    new model's scores separate better, a stricter cutoff now pays: at 0.97,
+    {_strict["precision"]:.0%} of {int(_strict["detections"])} detections are near an OSM
+    substation and {_strict["recall 100-229 kV"]:.0%} of 100–229 kV substations are still
+    found. That cutoff was picked from a sweep on the test tiles, so it is optimistic. On
+    held-out patches the new model keeps {_hn.loc["cnn_hn", "recall 230 kV+"]:.0%} of
+    230 kV+ and {_hn.loc["cnn_hn", "recall 100-229 kV"]:.0%} of 100–229 kV substations but
+    loses small ones ({_hn.loc["cnn_hn", "recall under 100 kV"]:.0%} under 100 kV, from
+    {_hn.loc["cnn", "recall under 100 kV"]:.0%}). Of 20 new "wrong" detections checked on
+    photos, {_fp2.get("substation", 0)} were substations: its mistakes moved from
+    developed land to farms, fields and woods.
+
     **What didn't work, or wasn't tried:**
 
-    - Precision. Random negatives are too easy; the model needs hard negatives (industrial
-      parks, quarries, parking lots, farmsteads) before a scan is worth a reviewer's time.
+    - Precision. Even with hard negatives, most detections at the 1% rule are not
+      substations; a reviewer would need the stricter cutoff and would still see about
+      {(1 - _strict["precision"]) / _strict["precision"]:.0f} wrong places for each right one.
+    - The one 230 kV+ substation in the scan tiles is missed by the second CNN at every
+      cutoff, which the first CNN found; one example says little, but large yards may now
+      look too much like the industrial land it was taught to reject.
     - Per-voltage precision. A detection has no voltage, so precision is overall only;
       recall is per class.
     - Small samples where it matters: the held-out set has only {int(_cnn["n 230 kV+"])}
