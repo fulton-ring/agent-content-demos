@@ -6,6 +6,7 @@ app = marimo.App(width="medium")
 
 @app.cell
 def _():
+    import gc
     import json
     import os
     import time
@@ -35,6 +36,7 @@ def _():
         ThreadPoolExecutor,
         box,
         duckdb,
+        gc,
         gpd,
         httpx,
         json,
@@ -329,7 +331,7 @@ def _(DATA_DIR, TESSERA, YEAR, downloaded, fetch, np, pd):
 
 
 @app.cell
-def _(Affine, ThreadPoolExecutor, httpx, https, np, tile_key, tiles, time):
+def _(Affine, ThreadPoolExecutor, gc, httpx, https, np, tile_key, tiles, time):
     READ = 40  # pixels read around each point
     range_bytes = [0]  # bytes fetched by range reads this run, for the cost section
     _client = httpx.Client(timeout=120, limits=httpx.Limits(max_connections=32))
@@ -378,8 +380,13 @@ def _(Affine, ThreadPoolExecutor, httpx, https, np, tile_key, tiles, time):
     def read_patches(
         points: list[tuple[float, float]], size: int = READ
     ) -> tuple[np.ndarray, np.ndarray, list[Affine]]:
-        with ThreadPoolExecutor(16) as ex:
-            out = list(ex.map(lambda p: read_patch(p[0], p[1], size), points))
+        out = []
+        for b in range(0, len(points), 500):
+            with ThreadPoolExecutor(16) as ex:
+                out += ex.map(lambda p: read_patch(p[0], p[1], size), points[b : b + 500])
+            # httpx responses sit in reference cycles, so their multi-megabyte buffers wait for
+            # the cycle collector, which rarely runs here; without this a fresh run grew past 13 GB.
+            gc.collect()
         return (
             np.stack([o[0] for o in out]),
             np.stack([o[1] for o in out]),
@@ -732,7 +739,7 @@ def _(Point, SEED, block_of, np, states, test_blocks, tiles):
 
 
 @app.cell
-def _(ThreadPoolExecutor, band_mean, band_std, np, probe_map, read_rows, tiles, torch):
+def _(ThreadPoolExecutor, band_mean, band_std, gc, np, probe_map, read_rows, tiles, torch):
     def read_tile(key: tuple[float, float]) -> tuple[np.ndarray, np.ndarray]:
         """A whole tile, read in bands of 100 rows in parallel."""
         h = int(tiles.loc[[key]].iloc[0]["height"])
@@ -740,6 +747,7 @@ def _(ThreadPoolExecutor, band_mean, band_std, np, probe_map, read_rows, tiles, 
         with ThreadPoolExecutor(8) as ex:
             parts = list(ex.map(lambda b: read_rows(key, *b), bands))
         s = np.concatenate([p[1] for p in parts])
+        gc.collect()  # free the cyclic httpx responses behind parts, as in read_patches
         return np.concatenate([p[0] for p in parts]), np.where(np.isfinite(s), s, 0).astype(
             np.float32
         )
@@ -1216,7 +1224,8 @@ def _(ALBERS, DATA_DIR, Path, duckdb, gpd, np, osm, overture_release, pd, states
         """)
         Path(f"{_path}.part").rename(_path)
     _raw = pd.read_parquet(_path)
-    _raw = _raw[_raw["power"].isna()]
+    # DuckDB writes rows in no fixed order; sort so the random draw below is repeatable.
+    _raw = _raw[_raw["power"].isna()].sort_values("id").reset_index(drop=True)
     _lu = gpd.GeoDataFrame(
         _raw[["id", "class"]],
         geometry=gpd.GeoSeries.from_wkb(_raw["wkb"].to_numpy()).representative_point(),
