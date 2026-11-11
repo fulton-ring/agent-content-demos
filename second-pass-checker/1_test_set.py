@@ -231,6 +231,7 @@ def _(errors, later_kept, later_passes, passes):
     )[columns]
     test_set["error_type"] = test_set["error_type"].fillna("pass")
     test_set["doubt"] = test_set["doubt"].fillna(False).astype(bool)
+    test_set["caught_by"] = test_set["caught_by"].astype(object).where(test_set["caught_by"].notna(), None)
     (DATA / "test_set.jsonl").write_text(
         "\n".join(json.dumps(r, ensure_ascii=False) for r in test_set.to_dict("records")) + "\n"
     )
