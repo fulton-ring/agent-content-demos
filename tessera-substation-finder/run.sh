@@ -3,4 +3,6 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 uv sync --quiet
+# The many parallel range reads fragment glibc's per-thread heaps; two arenas keep memory in bounds.
+export MALLOC_ARENA_MAX=2
 uv run substation_finder.py
