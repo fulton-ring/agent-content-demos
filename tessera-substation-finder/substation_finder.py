@@ -1330,9 +1330,11 @@ def _(
             block_of(land_use["lon"].to_numpy(), land_use["lat"].to_numpy()), list(test_blocks)
         )
     ]
+    # At most 150 per class and state, drawn at random.
     _lu = (
-        _lu.groupby(["region", "class"], group_keys=False)
-        .apply(lambda g: g.sample(n=min(150, len(g)), random_state=SEED))
+        _lu.sample(frac=1, random_state=SEED)
+        .groupby(["region", "class"])
+        .head(150)
         .reset_index(drop=True)
     )
     assert set(_lu["class"]) <= set(HARD_CLASSES)
