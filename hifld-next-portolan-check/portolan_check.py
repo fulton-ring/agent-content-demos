@@ -438,6 +438,7 @@ def _(Reader, ThreadPoolExecutor, gzip, math, urllib):
         reader = Reader(range_reader(url))
         header = reader.header()
         layers = [layer["id"] for layer in reader.metadata().get("vector_layers", [])]
+
         def tile_xy(lon_e7: int, lat_e7: int, n: int) -> tuple[int, int]:
             lat = math.radians(max(min(lat_e7 / 1e7, 85.05), -85.05))
             x = int((lon_e7 / 1e7 + 180) / 360 * n)
@@ -593,9 +594,7 @@ def _(
             doc["links"].append({"rel": "via", "href": via, "type": "text/html"})
         if doc.get("license") == "other":
             depth = len(folder.relative_to(FIXED_DIR).parts)
-            doc["links"].append(
-                {"rel": "license", "href": "../" * depth + "LICENSE.md", "type": "text/markdown"}
-            )
+            doc["links"].append({"rel": "license", "href": "../" * depth + "LICENSE.md", "type": "text/markdown"})
             fix_counts["license_link"] += 1
         for link in doc["links"]:
             info = pmtiles_info.get(link["href"]) if link["rel"] == "pmtiles" else None
@@ -606,13 +605,18 @@ def _(
             if not any("style" in a.get("roles", []) for a in doc["assets"].values()):
                 style = maplibre_style(doc["title"], link["href"], info["layers"], doc.get("hifld:geometry_type") or "")
                 add_file_asset(
-                    doc, folder, "styles/maplibre.json", json.dumps(style, indent=1).encode(),
-                    ["style", "default"], "application/vnd.mapbox.style+json",
+                    doc,
+                    folder,
+                    "styles/maplibre.json",
+                    json.dumps(style, indent=1).encode(),
+                    ["style", "default"],
+                    "application/vnd.mapbox.style+json",
                 )
                 fix_counts["styles"] += 1
             if not any("thumbnail" in a.get("roles", []) for a in doc["assets"].values()) and info["tiles"]:
-                add_file_asset(doc, folder, "thumbnail/thumbnail.png", draw_thumbnail(info["tiles"]),
-                               ["thumbnail"], "image/png")
+                add_file_asset(
+                    doc, folder, "thumbnail/thumbnail.png", draw_thumbnail(info["tiles"]), ["thumbnail"], "image/png"
+                )
                 fix_counts["thumbnails"] += 1
         if not any("thumbnail" in a.get("roles", []) for a in doc["assets"].values()):
             fix_counts["no_thumbnail"] += 1

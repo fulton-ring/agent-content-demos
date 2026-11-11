@@ -248,34 +248,102 @@ def _(TIPPECANOE, WORK, describe_pmtiles, measured, pq, shutil, source_crs, sys,
         drop = ", ".join(c for c in (geometry, "bbox") if c in pq.read_schema(files[0]).names)
         names = [str(f) for f in files]
         tt_out, tc_out, fgb = folder / "tylertoo.pmtiles", folder / "tippecanoe.pmtiles", folder / "input.fgb"
+        # tylertoo reads only EPSG:4326 or 3857, so other CRSs (census NAD83, Albers) get a timed reprojection first.
+        tylertoo_input = names
+        prep = {"seconds": 0.0, "peak_mb": None, "ok": True, "error": ""}
+        if crs not in ("EPSG:4326", "OGC:CRS84", "EPSG:3857"):
+            tylertoo_input = [str(folder / "input-4326.parquet")]
+            prep = measured(
+                [
+                    sys.executable,
+                    "-c",
+                    (
+                        "import duckdb; c = duckdb.connect(); c.sql('LOAD spatial'); "
+                        f'c.sql("""COPY (SELECT * EXCLUDE ({drop}), '
+                        f"ST_Transform({geometry}, '{crs}', 'EPSG:4326', always_xy := true) AS geometry "
+                        f"FROM read_parquet({names!r}, union_by_name=true)) "
+                        f'TO \'{tylertoo_input[0]}\' (FORMAT parquet)""")'
+                    ),
+                ]
+            )
         tylertoo_script = (
             "import sys, tylertoo; "
-            f"tylertoo.overview({names!r}, {str(folder / 'overview.parquet')!r}, max_zoom='auto'); "
+            f"tylertoo.overview({tylertoo_input!r}, {str(folder / 'overview.parquet')!r}, max_zoom='auto'); "
             f"tylertoo.export_pmtiles({str(folder / 'overview.parquet')!r}, {str(tt_out)!r}, layer_name='layer')"
         )
-        reproject = geometry if crs in ("EPSG:4326", "OGC:CRS84") else (
-            f"ST_Transform({geometry}, '{crs}', 'EPSG:4326', always_xy := true)"
+        reproject = (
+            geometry
+            if crs in ("EPSG:4326", "OGC:CRS84")
+            else (f"ST_Transform({geometry}, '{crs}', 'EPSG:4326', always_xy := true)")
         )
+        # FlatGeobuf as tippecanoe 2.49 reads it: one geometry type per file (lines and polygons made Multi, Z
+        # dropped) and no binary columns (written as hex text).
+        reproject = f"ST_Force2D({reproject})" if layer["geometry"] == "Point" else f"ST_Multi(ST_Force2D({reproject}))"
+        geometry_type = {"Point": "", "LineString": ", GEOMETRY_TYPE 'MULTILINESTRING'"}
+        geometry_type["Polygon"] = ", GEOMETRY_TYPE 'MULTIPOLYGON'"
+        binary = [
+            f.name
+            for f in pq.read_schema(files[0])
+            if str(f.type) in ("binary", "large_binary") and f.name not in (geometry, "bbox")
+        ]
+        replace = f" REPLACE ({', '.join(f'hex({b}) AS {b}' for b in binary)})" if binary else ""
         convert_script = (
             "import duckdb; c = duckdb.connect(); c.sql('LOAD spatial'); "
-            f"c.sql(\"\"\"COPY (SELECT * EXCLUDE ({drop}), {reproject} AS geometry "
+            f'c.sql("""COPY (SELECT * EXCLUDE ({drop}){replace}, {reproject} AS geometry '
             f"FROM read_parquet({names!r}, union_by_name=true)) TO '{fgb}' "
-            "WITH (FORMAT GDAL, DRIVER 'FlatGeobuf', SRS 'EPSG:4326')\"\"\")"
+            f"WITH (FORMAT GDAL, DRIVER 'FlatGeobuf', SRS 'EPSG:4326'{geometry_type[layer['geometry']]})\"\"\")"
         )
-        tylertoo = measured([sys.executable, "-c", tylertoo_script])
+        tylertoo = (
+            measured([sys.executable, "-c", tylertoo_script])
+            if prep["ok"]
+            else ({"seconds": None, "peak_mb": None, "ok": False, "error": "reprojection failed"})
+        )
         convert = measured([sys.executable, "-c", convert_script])
-        tippecanoe = measured(
-            [TIPPECANOE, "-q", "-zg", "--drop-densest-as-needed", "--extend-zooms-if-still-dropping", "--force",
-             "--maximum-zoom=14", "-l", "layer", "-o", str(tc_out), str(fgb)]
-        ) if convert["ok"] else {"seconds": None, "peak_mb": None, "ok": False, "error": "conversion failed"}
+        tippecanoe = (
+            measured(
+                [
+                    TIPPECANOE,
+                    "-q",
+                    "-zg",
+                    "--drop-densest-as-needed",
+                    "--extend-zooms-if-still-dropping",
+                    "--force",
+                    "--maximum-zoom=14",
+                    "-l",
+                    "layer",
+                    "-o",
+                    str(tc_out),
+                    str(fgb),
+                ]
+            )
+            if convert["ok"]
+            else {"seconds": None, "peak_mb": None, "ok": False, "error": "conversion failed"}
+        )
         row = {
-            "layer": layer["id"], "geometry": layer["geometry"], "why": layer["why"], "rows": rows,
-            "parquet_mb": layer["parquet_bytes"] / 1e6, "crs": crs,
-            "tylertoo_s": tylertoo["seconds"], "tylertoo_peak_mb": tylertoo["peak_mb"],
-            "convert_s": convert["seconds"], "convert_peak_mb": convert["peak_mb"],
-            "tippecanoe_s": tippecanoe["seconds"], "tippecanoe_peak_mb": tippecanoe["peak_mb"],
-            "errors": " | ".join(f"{k}: {r['error']}" for k, r in
-                                 (("tylertoo", tylertoo), ("convert", convert), ("tippecanoe", tippecanoe)) if r["error"]),
+            "layer": layer["id"],
+            "geometry": layer["geometry"],
+            "why": layer["why"],
+            "rows": rows,
+            "parquet_mb": layer["parquet_bytes"] / 1e6,
+            "crs": crs,
+            "reproject_s": prep["seconds"],
+            "reproject_peak_mb": prep["peak_mb"],
+            "tylertoo_s": tylertoo["seconds"],
+            "tylertoo_peak_mb": tylertoo["peak_mb"],
+            "convert_s": convert["seconds"],
+            "convert_peak_mb": convert["peak_mb"],
+            "tippecanoe_s": tippecanoe["seconds"],
+            "tippecanoe_peak_mb": tippecanoe["peak_mb"],
+            "errors": " | ".join(
+                f"{k}: {r['error']}"
+                for k, r in (
+                    ("reproject", prep),
+                    ("tylertoo", tylertoo),
+                    ("convert", convert),
+                    ("tippecanoe", tippecanoe),
+                )
+                if r["error"]
+            ),
         }
         if tylertoo["ok"] and tippecanoe["ok"]:
             tt, tc = describe_pmtiles(tt_out), describe_pmtiles(tc_out)
@@ -285,13 +353,18 @@ def _(TIPPECANOE, WORK, describe_pmtiles, measured, pq, shutil, source_crs, sys,
             tt_z, tc_z = describe_pmtiles(tt_out, zoom, shared), describe_pmtiles(tc_out, zoom, shared)
             source_fields = set(pq.read_schema(files[0]).names) - {geometry, "bbox"}
             row |= {
-                "tylertoo_mb": tt_out.stat().st_size / 1e6, "tippecanoe_mb": tc_out.stat().st_size / 1e6,
+                "tylertoo_mb": tt_out.stat().st_size / 1e6,
+                "tippecanoe_mb": tc_out.stat().st_size / 1e6,
                 "tylertoo_zooms": f"{tt['min_zoom']}-{tt['max_zoom']}",
                 "tippecanoe_zooms": f"{tc['min_zoom']}-{tc['max_zoom']}",
-                "tylertoo_tiles": tt["tiles"], "tippecanoe_tiles": tc["tiles"],
-                "compare_zoom": zoom, "compare_tiles": len(shared),
-                "tylertoo_features": tt_z["features_at_zoom"], "tippecanoe_features": tc_z["features_at_zoom"],
-                "tylertoo_features_maxzoom": tt["features_at_zoom"], "tylertoo_maxzoom_tiles": len(tt["tiles_at_zoom"]),
+                "tylertoo_tiles": tt["tiles"],
+                "tippecanoe_tiles": tc["tiles"],
+                "compare_zoom": zoom,
+                "compare_tiles": len(shared),
+                "tylertoo_features": tt_z["features_at_zoom"],
+                "tippecanoe_features": tc_z["features_at_zoom"],
+                "tylertoo_features_maxzoom": tt["features_at_zoom"],
+                "tylertoo_maxzoom_tiles": len(tt["tiles_at_zoom"]),
                 "tippecanoe_features_maxzoom": tc["features_at_zoom"],
                 "tippecanoe_maxzoom_tiles": len(tc["tiles_at_zoom"]),
                 "source_fields": len(source_fields),
@@ -311,13 +384,15 @@ def _(OUT, benchmark, pd, sample, time):
     for _layer in sample:
         _rows.append(benchmark(_layer))
         _r = _rows[-1]
+        # Written after every layer, so a run cut short keeps what it measured.
+        pd.DataFrame(_rows).to_csv(OUT / "tiling_benchmark.csv", index=False, float_format="%.3f")
         print(
-            f"{_r['layer'][:50]:50} {_r['geometry']:10} tylertoo {_r['tylertoo_s'] or 0:7.1f}s  "
+            f"{_r['layer'][:50]:50} {_r['geometry']:10} "
+            f"tylertoo {(_r['reproject_s'] or 0) + (_r['tylertoo_s'] or 0):7.1f}s  "
             f"convert+tippecanoe {(_r['convert_s'] or 0) + (_r['tippecanoe_s'] or 0):7.1f}s  {_r['errors'][:80]}",
             flush=True,
         )
     results = pd.DataFrame(_rows)
-    results.to_csv(OUT / "tiling_benchmark.csv", index=False, float_format="%.3f")
     print(f"benchmark finished in {time.time() - _t:.0f}s")
     results
     return (results,)
@@ -327,16 +402,21 @@ def _(OUT, benchmark, pd, sample, time):
 def _(OUT, TIPPECANOE_VERSION, json, mo, results):
     _ok = results.dropna(subset=["tylertoo_mb"]).copy()
     _ok["tippecanoe_path_s"] = _ok["convert_s"] + _ok["tippecanoe_s"]
+    _ok["tylertoo_path_s"] = _ok["reproject_s"] + _ok["tylertoo_s"]
     _ok["speedup_vs_tippecanoe"] = _ok["tippecanoe_s"] / _ok["tylertoo_s"]
-    _ok["speedup_vs_path"] = _ok["tippecanoe_path_s"] / _ok["tylertoo_s"]
+    _ok["speedup_vs_path"] = _ok["tippecanoe_path_s"] / _ok["tylertoo_path_s"]
     _ok["feature_ratio"] = _ok["tylertoo_features"] / _ok["tippecanoe_features"]
-    _diff = _ok[(_ok["fields_missing_tylertoo"] != _ok["fields_missing_tippecanoe"]) | ((_ok["feature_ratio"] - 1).abs() > 0.05)]
+    _diff = _ok[
+        (_ok["fields_missing_tylertoo"] != _ok["fields_missing_tippecanoe"]) | ((_ok["feature_ratio"] - 1).abs() > 0.05)
+    ]
     bench_summary = {
         "tippecanoe": TIPPECANOE_VERSION,
         "layers": len(results),
         "both_succeeded": len(_ok),
         "failures": results.loc[results["errors"] != "", ["layer", "errors"]].to_dict("records"),
+        "needed_reprojection_for_tylertoo": int((~results["crs"].isin(["EPSG:4326", "OGC:CRS84", "EPSG:3857"])).sum()),
         "total_tylertoo_s": round(_ok["tylertoo_s"].sum(), 1),
+        "total_tylertoo_path_s": round(_ok["tylertoo_path_s"].sum(), 1),
         "total_tippecanoe_s": round(_ok["tippecanoe_s"].sum(), 1),
         "total_tippecanoe_path_s": round(_ok["tippecanoe_path_s"].sum(), 1),
         "median_speedup_vs_tippecanoe": round(_ok["speedup_vs_tippecanoe"].median(), 2),
@@ -346,11 +426,17 @@ def _(OUT, TIPPECANOE_VERSION, json, mo, results):
             "convert": round(_ok["convert_peak_mb"].max()),
             "tippecanoe": round(_ok["tippecanoe_peak_mb"].max()),
         },
-        "total_mb": {"tylertoo": round(_ok["tylertoo_mb"].sum(), 1), "tippecanoe": round(_ok["tippecanoe_mb"].sum(), 1)},
+        "total_mb": {
+            "tylertoo": round(_ok["tylertoo_mb"].sum(), 1),
+            "tippecanoe": round(_ok["tippecanoe_mb"].sum(), 1),
+        },
         "layers_with_differences": len(_diff),
-        "largest": _ok.loc[_ok["why"] == "largest that fits",
-                           ["layer", "tylertoo_s", "tippecanoe_path_s", "tylertoo_peak_mb", "tippecanoe_peak_mb"]
-                           ].round(1).to_dict("records"),
+        "largest": _ok.loc[
+            _ok["why"] == "largest that fits",
+            ["layer", "tylertoo_s", "tippecanoe_path_s", "tylertoo_peak_mb", "tippecanoe_peak_mb"],
+        ]
+        .round(1)
+        .to_dict("records"),
     }
     (OUT / "tiling_summary.json").write_text(json.dumps(bench_summary, indent=1))
     print(json.dumps(bench_summary, indent=1))
@@ -359,8 +445,12 @@ def _(OUT, TIPPECANOE_VERSION, json, mo, results):
             mo.md(f"""
     ## Result
 
-    Both tools succeeded on **{len(_ok)} of {len(results)}** layers. Over those, tylertoo took
-    **{bench_summary["total_tylertoo_s"]:.0f} s** in total. tippecanoe took **{bench_summary["total_tippecanoe_s"]:.0f} s**,
+    Both tools succeeded on **{len(_ok)} of {len(results)}** layers.
+    **{bench_summary["needed_reprojection_for_tylertoo"]}** of the {len(results)} are stored in a CRS tylertoo won't
+    read (NAD83 for the census layers, Albers for some hydrography). They got a reprojection to EPSG:4326 first,
+    counted in tylertoo's time. Over the layers both tools finished, tylertoo took
+    **{bench_summary["total_tylertoo_path_s"]:.0f} s** in total.
+    tippecanoe took **{bench_summary["total_tippecanoe_s"]:.0f} s**,
     or **{bench_summary["total_tippecanoe_path_s"]:.0f} s** counting the GeoParquet-to-FlatGeobuf step it needs.
     The median layer was **{bench_summary["median_speedup_vs_path"]}x** faster with tylertoo than the full tippecanoe
     path, and **{bench_summary["median_speedup_vs_tippecanoe"]}x** against tippecanoe alone.
@@ -368,8 +458,19 @@ def _(OUT, TIPPECANOE_VERSION, json, mo, results):
     Per-layer differences in features (at the finest zoom both reach, over the tiles both wrote) or in which source
     columns survived: **{len(_diff)}** layers. The table below lists them.
     """),
-            _diff[["layer", "geometry", "compare_zoom", "tylertoo_features", "tippecanoe_features",
-                   "fields_missing_tylertoo", "fields_missing_tippecanoe", "tylertoo_zooms", "tippecanoe_zooms"]],
+            _diff[
+                [
+                    "layer",
+                    "geometry",
+                    "compare_zoom",
+                    "tylertoo_features",
+                    "tippecanoe_features",
+                    "fields_missing_tylertoo",
+                    "fields_missing_tippecanoe",
+                    "tylertoo_zooms",
+                    "tippecanoe_zooms",
+                ]
+            ],
         ]
     )
     return
