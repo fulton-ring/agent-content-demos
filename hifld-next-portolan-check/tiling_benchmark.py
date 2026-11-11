@@ -298,6 +298,9 @@ def _(TIPPECANOE, WORK, describe_pmtiles, measured, pq, shutil, source_crs, sys,
             if prep["ok"]
             else ({"seconds": None, "peak_mb": None, "ok": False, "error": "reprojection failed"})
         )
+        # Free tylertoo's intermediate files first: the largest layers don't fit on disk alongside them.
+        for intermediate in (folder / "overview.parquet", folder / "input-4326.parquet"):
+            intermediate.unlink(missing_ok=True)
         convert = measured([sys.executable, "-c", convert_script])
         tippecanoe = (
             measured(
