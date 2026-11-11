@@ -808,7 +808,7 @@ def _():
     mo.md(r"""
     ## What didn't work, and what this doesn't show
 
-    - **Four states have no list to check against.** Connecticut, Rhode Island and Vermont designate by American
+    - **Six states can't be checked.** Connecticut, Rhode Island and Vermont designate by American
       College of Surgeons verification and publish no list of their own; Oklahoma's hospitals report their own
       level on a licensing form and the state doesn't publish the results. New Mexico's only official list is an
       archived 2013 map and North Dakota's a 2020 map that shows levels by marker colour; both are too old. These

@@ -10,7 +10,7 @@ The HIFLD hospital layer (`hospitals-3` v1.1.0 on [HIFLD Next](https://hifld.pub
 ./run.sh
 ```
 
-It needs [uv](https://docs.astral.sh/uv/). The first run downloads about 240 MB into `data/` (`AUDIT_DATA_DIR` moves it) and takes under a minute; the notebook then runs in seconds. Outputs go to `outputs/` (`AUDIT_OUT_DIR`). To read the notebook with its tables, run `uv run marimo edit audit.py`.
+It needs [uv](https://docs.astral.sh/uv/). The first run downloads about 240 MB into `data/` (`AUDIT_DATA_DIR` moves it) and the first run takes about a minute and a half; later runs take about 10 seconds. Outputs go to `outputs/` (`AUDIT_OUT_DIR`). To read the notebook with its tables, run `uv run marimo edit audit.py`.
 
 ## Where the data comes from
 
