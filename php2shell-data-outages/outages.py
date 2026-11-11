@@ -18,9 +18,11 @@ def _():
 
     Nobody published a list of what went down, so we rebuild one from the outside:
 
-    1. **Endpoints.** `endpoints.csv` lists 247 data endpoints: the source URLs HIFLD Next's refresh check reads,
+    1. **Endpoints.** `endpoints.csv` lists 255 endpoints: the source URLs HIFLD Next's refresh check reads,
        US federal data pages, US state open-data portals, and the national statistics and open-data portals of
-       the countries that announced shutdowns.
+       the countries that announced shutdowns. Ten of them, such as Statistics Canada and Overheid.nl, were
+       named as offline in news coverage. They are the method's check: if it can't see those go down, it can't
+       see anything.
     2. **The archive record.** For each endpoint we ask the Wayback Machine's CDX index for every capture from
        October 14 to November 1, 2026, and save the raw answers in `cdx/`, so the numbers can be rebuilt after
        the archive changes.
@@ -442,6 +444,7 @@ def _(
     df["outage_shutdown_days"] = df["id"].isin(shut["id"])
     df["never_recovered_in_window"] = df["id"].isin(shut.loc[shut["next_good"].isna(), "id"])
     _hit = df[df["outage_shutdown_days"]]
+    _named = df["named_offline_in_coverage"].eq("yes")
 
     def median(s: pd.Series) -> float | None:
         s = s.dropna()
@@ -459,6 +462,9 @@ def _(
         "too_few_captures_to_tell": int((~_checked["can_tell"]).sum()),
         "share_too_few_captures": round(float((~_checked["can_tell"]).mean()), 3) if len(_checked) else None,
         "went_offline_shutdown_days": int(df["outage_shutdown_days"].sum()),
+        "named_in_coverage": int(_named.sum()),
+        "named_in_coverage_can_tell": int((_named & df["can_tell"]).sum()),
+        "named_in_coverage_seen_offline": int((_named & df["outage_shutdown_days"]).sum()),
         "went_offline_by_group": _hit.groupby("group").size().to_dict(),
         "went_offline_by_country": _hit.groupby("country").size().to_dict(),
         "median_outage_hours_at_least": median(shut.groupby("id")["hours_at_least"].sum()),
@@ -475,6 +481,7 @@ def _(
     (OUT / "summary.json").write_text(json.dumps(summary, indent=1, default=str))
     _cols = [
         "id",
+        "named_offline_in_coverage",
         "country",
         "group",
         "type",
@@ -520,7 +527,7 @@ def _(mo):
       failure. The baseline week tells you how often these sites fail anyway.
     - **Which endpoints are vulnerable.** We report software platforms only as counts and don't publish a list.
       Taking a vulnerable system offline was sound advice; the question is only what the public lost meanwhile.
-    - **Every public dataset.** 247 endpoints is a sample weighted to US federal data and to the main national
+    - **Every public dataset.** 255 endpoints is a sample weighted to US federal data and to the main national
       portals of the countries that announced shutdowns, not a census.
     """)
     return
