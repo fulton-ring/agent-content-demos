@@ -142,15 +142,21 @@ def _(CDX_DIR, CDX_URL, UA, WINDOW_FROM, WINDOW_TO, endpoints, json, requests, t
 
     fields = "timestamp,original,statuscode,mimetype,digest,length"
     missing_cdx = []
+    failures_in_row = 0
     for _row in endpoints.itertuples():
         _path = CDX_DIR / f"{_row.id:03d}.json"
         if _path.exists():
             continue
-        if len(missing_cdx) >= 5 and missing_cdx[-5:] == list(range(_row.id - 5, _row.id)):
+        if failures_in_row >= 5:
             missing_cdx.append(_row.id)  # the archive stopped answering; don't hammer it
             continue
         window = cdx_get({"url": _row.url, "from": WINDOW_FROM, "to": WINDOW_TO, "output": "json", "fl": fields})
         time.sleep(2)
+        if window is None:
+            missing_cdx.append(_row.id)
+            failures_in_row += 1
+            continue
+        failures_in_row = 0
         before = cdx_get(
             {
                 "url": _row.url,
@@ -162,9 +168,6 @@ def _(CDX_DIR, CDX_URL, UA, WINDOW_FROM, WINDOW_TO, endpoints, json, requests, t
             }
         )
         time.sleep(2)
-        if window is None:
-            missing_cdx.append(_row.id)
-            continue
         _saved = {"url": _row.url, "window": window, "last_good_before": before or [], "before_ok": before is not None}
         _path.write_text(json.dumps(_saved))
     print(f"CDX: {len(endpoints) - len(missing_cdx)} of {len(endpoints)} endpoints saved, {len(missing_cdx)} missing")
@@ -242,23 +245,25 @@ def _(CDX_DIR, REPLAY_URL, SHUTDOWN_START, UA, caps, json, pd, re, requests, tim
     _replay_path = CDX_DIR / "replays.json"
     replays: dict[str, dict[str, str]] = json.loads(_replay_path.read_text()) if _replay_path.exists() else {}
     _todo = [r for r in suspects.itertuples() if f"{r.id}:{r.timestamp}" not in replays][: max(0, 300 - len(replays))]
+    replay_errors = 0
     for _r in _todo:
+        if replay_errors >= 5:
+            break  # the archive stopped answering; unreplayed captures stay unknown and are retried next run
         try:
             _resp = requests.get(
                 f"{REPLAY_URL}/{_r.timestamp}id_/{_r.original}", headers=UA, timeout=60, allow_redirects=False
             )
-            _text = headline(_resp.text, _resp.headers.get("Location", ""))
-            replays[f"{_r.id}:{_r.timestamp}"] = {
-                "replay_status": str(_resp.status_code),
-                "maintenance": "yes" if MAINTENANCE.search(_text) else "no",
-                "excerpt": " ".join(_text.split())[:200],
-            }
-        except requests.RequestException as _e:
-            replays[f"{_r.id}:{_r.timestamp}"] = {
-                "replay_status": "error",
-                "maintenance": "unknown",
-                "excerpt": str(_e)[:200],
-            }
+        except requests.RequestException:
+            replay_errors += 1
+            time.sleep(2)
+            continue
+        replay_errors = 0
+        _text = headline(_resp.text, _resp.headers.get("Location", ""))
+        replays[f"{_r.id}:{_r.timestamp}"] = {
+            "replay_status": str(_resp.status_code),
+            "maintenance": "yes" if MAINTENANCE.search(_text) else "no",
+            "excerpt": " ".join(_text.split())[:200],
+        }
         time.sleep(2)
     _replay_path.write_text(json.dumps(replays, indent=1, sort_keys=True))
 
