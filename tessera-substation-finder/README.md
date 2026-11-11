@@ -3,7 +3,8 @@
 HIFLD Next has no public substation layer (DHS withdrew it in 2022, see [`hifld-grid-gaps/`](../hifld-grid-gaps/)), so
 studies fall back on OpenStreetMap, which has gaps. We tested whether [TESSERA](https://github.com/ucam-eo/tessera)'s
 free, CC0 10 m satellite embeddings can find substations in Tennessee (the TVA core) and New York, using OSM
-substations as the answer key. Issue [#195](https://github.com/fulton-ring/agent-content-demos/issues/195).
+substations as the answer key. Issue [#195](https://github.com/fulton-ring/agent-content-demos/issues/195); the
+hard-negative retraining is [#247](https://github.com/fulton-ring/agent-content-demos/issues/247).
 
 **Short answer: they recognise substations, but they can't search for new ones yet.** A small CNN finds 76% of
 held-out OSM substations (90% of those at 100 kV and above) while passing only about 1 in 100 random patches. But
@@ -11,6 +12,12 @@ when it scans whole tiles, only 8% of its detections are near an OSM substation.
 photos, none was a substation. They were houses, farms, quarries, schools and factories. Of the 20 highest-scoring
 places where a HIFLD Next line ends more than 1 km from any OSM substation, 1 was an unmapped switchyard and 2 were
 hydro dams.
+
+**Hard negatives (#247) make it about three times as precise, but not yet useful.** Retrained with 3,414 patches of
+developed land and its own mistakes, the CNN flags 6% of held-out industrial, commercial, school and housing places
+instead of 31%. At the same threshold rule, scan precision against OSM rises only from 7.9% to 9.5%. At a stricter
+cutoff (0.97) it is 24%, and 97% of the 100–229 kV substations in the scan tiles are still found. Of 20 new "wrong"
+detections checked on photos, none was a substation. They are now mostly farms, fields and woods, not built-up land.
 
 Everything is in one marimo notebook, [`substation_finder.py`](substation_finder.py).
 
@@ -35,6 +42,7 @@ All public, all downloaded at run time. Nothing downloaded is committed.
 | OSM `power=substation` with `voltage` tags | [Overture Maps](https://docs.overturemaps.org/) `base/infrastructure`, release `2026-09-23.0` | ODbL |
 | Transmission Lines | [HIFLD Next](https://hifld.publicenvirodata.org) GeoParquet `v1.0.0` | As published |
 | State boundaries | Census 2024 cartographic boundaries, 1:500k | Public domain |
+| OSM land use (industrial, commercial, retail, works, quarry, landfill, farmyard, school, residential) | Overture `base/land_use`, same release | ODbL |
 | Aerial photos for the hand check | NAIP 2021 to 2023 through [Microsoft Planetary Computer](https://planetarycomputer.microsoft.com/dataset/naip) | Public domain |
 
 We used TESSERA v1 because the v2 beta store on Source Cooperative covers only part of both states for 2024.
@@ -58,6 +66,11 @@ We used TESSERA v1 because the v2 beta store on Source Cooperative covers only p
   with no OSM substation within 300 m. The verdicts are in [`hand_check.csv`](hand_check.csv). It is keyed by a hash of
   each place, not its location, because the issue asks us not to publish a list of unmapped sites. The chips stay in
   `data/chips/`.
+- **Hard negatives (section 10):** all more than 1 km from any OSM substation and in training blocks only. 2,224
+  OSM land-use places (at most 150 per class and state, `power=*` excluded) and 1,190 detections scoring 0.5 or more
+  from the first CNN on 40 random training-block tiles. The same CNN is retrained from scratch on the first
+  model's samples plus these, with the same seed and the same threshold rule (1% of validation *random* negatives).
+  The 804 land-use places inside the 48 held-out scan tiles are a second test.
 
 ## Results
 
@@ -95,10 +108,37 @@ In total the CNN flags 139 of the 502 line-end places (`outputs/line_end_flags.c
 **Cost:** $0, with no account or key. 45.9 GB of range reads and 82 MB of other downloads from an empty `data/`,
 8.2 GB kept in `data/`, and 43 minutes on 4 cores from a clean checkout. See `outputs/summary.json`.
 
+**Hard negatives** (`outputs/hard_negatives_*.csv`). Held-out patches, both states, each model at its own 1% rule:
+
+| Model | Threshold | AUC | 230 kV+ (29) | 100–229 kV (341) | Under 100 kV (407) | No tag (204) | All (981) |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| First CNN | 0.957 | 0.983 | 0.90 | 0.90 | 0.68 | 0.69 | 0.76 |
+| With hard negatives | 0.806 | 0.966 | 0.93 | 0.92 | 0.56 | 0.58 | 0.70 |
+
+The same 48-tile scan (99 OSM substations: 1 at 230 kV+, 30 at 100–229 kV, 57 under 100 kV, 11 untagged):
+
+| Model, cutoff | Detections | Within 300 m of OSM | Precision | 230 kV+ | 100–229 kV | Under 100 kV | All |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| First CNN, 0.957 | 655 | 52 | 0.079 | 1/1 | 0.77 | 0.32 | 0.52 |
+| Hard negatives, 0.806 (1% rule) | 781 | 74 | 0.095 | 0/1 | 1.00 | 0.58 | 0.68 |
+| Hard negatives, 0.90 | 546 | 71 | 0.130 | 0/1 | 1.00 | 0.56 | 0.66 |
+| Hard negatives, 0.97 | 254 | 62 | 0.244 | 0/1 | 0.97 | 0.49 | 0.62 |
+| Hard negatives, 0.99 | 131 | 52 | 0.397 | 0/1 | 0.87 | 0.40 | 0.51 |
+
+Held-out developed places flagged (`hard_negatives_land_use_flags.csv`): 31% → 6% overall, for example industrial
+28% → 6%, schools 45% → 6% and housing 31% → 7%. Farmyards are still flagged often (2 of 8). Hand check: of 20
+random detections at the 1% rule with no OSM substation within 300 m, **0 were substations**. They were 12 farms,
+fields, woods or rural homes, 6 commercial or industrial sites and 2 town housing areas.
+
 ## What didn't work
 
-- **Precision.** The random negatives are mostly forest and fields, so the CNN learned "developed land with hard
-  surfaces". A useful scanner needs hard negatives such as industrial parks, quarries, parking lots and farmsteads.
+- **Precision, still.** Random negatives are mostly forest and fields, so the first CNN learned "developed land with
+  hard surfaces". Hard negatives fix most of that, but at the 1% rule 9 in 10 detections are still not substations.
+  The 0.97 cutoff was picked from a sweep on the test tiles, so 24% is optimistic. Even then a reviewer sees about
+  3 wrong places for each right one.
+- **Small yards got harder.** Held-out recall under 100 kV fell from 68% to 56%, and the one 230 kV+ substation in
+  the scan tiles is missed at every cutoff. One example says little, but large yards may now resemble the industrial
+  land the model was taught to reject.
 - **Small test samples where it matters:** only 29 held-out substations at 230 kV+, and 1 among the scanned tiles.
 - **Column-window reads.** A `.npy` row is contiguous, so a 40-pixel window needs one request per row. Through our
   connection that ran at about 200 requests a second. We read 40 whole rows per patch instead, which fetches 20 to 30
@@ -111,7 +151,9 @@ In total the CNN flags 139 of the 502 line-end places (`outputs/line_end_flags.c
 - One year (2024), two states, one embedding model, and OSM as the answer key. OSM itself was partly backfilled from
   the old HIFLD layer.
 - The hand check is 40 chips judged by the worker agent from photos, not a field visit.
-- We didn't test hard negatives, larger patches or TESSERA v2. Those are the next things to try.
+- We didn't test larger patches, a threshold tuned on held-out hard negatives, or TESSERA v2.
+- The first CNN's numbers depend on floating-point order. Running this notebook gives exactly the published #195
+  numbers, but one intermediate version gave 7.2% scan precision instead of 7.9% for the same model and data.
 
 ## What we looked at first
 
