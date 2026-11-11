@@ -1289,8 +1289,8 @@ def _(
         for _p in _d.itertuples():
             _r0 = int(np.clip(int((_p.lat - _y0) / _e) - READ // 2, 0, _c.shape[0] - READ))
             _c0 = int(np.clip(int((_p.lon - _x0) / _a) - READ // 2, 0, _c.shape[1] - READ))
-            _codes.append(_c[_r0 : _r0 + READ, _c0 : _c0 + READ])
-            _scales.append(_s[_r0 : _r0 + READ, _c0 : _c0 + READ])
+            _codes.append(_c[_r0 : _r0 + READ, _c0 : _c0 + READ].copy())
+            _scales.append(_s[_r0 : _r0 + READ, _c0 : _c0 + READ].copy())
             _rows.append(
                 {"lon": _p.lon, "lat": _p.lat, "region": _region, "kind": "first CNN's mistake"}
             )
