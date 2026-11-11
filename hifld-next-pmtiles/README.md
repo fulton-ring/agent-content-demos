@@ -18,7 +18,7 @@ breaks the layer outright.
 
 ```bash
 sudo apt install tippecanoe nginx-light   # or: brew install tippecanoe nginx
-./run.sh                                  # needs uv; about 12 minutes; downloads ~125 MB into data/
+./run.sh                                  # needs uv; about 12-15 minutes; downloads ~125 MB into data/ (plus ~200 MB of Chromium the first time unless CHROMIUM_PATH is set)
 ```
 
 `run.sh` runs the marimo notebook `pmtiles_spike.py` as a script, so every number in `outputs/`
