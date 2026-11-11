@@ -1283,7 +1283,7 @@ def _(
         _tf = tiles.loc[[_key]].iloc[0]["transform"]
         _maps = {_key: {"region": _region, "cnn": cnn_map(cnn, _c, _s), "transform": _tf}}
         _d = detections(_maps, {"cnn": 0.5})
-        _d = _d[_d.geometry.apply(lambda g: osm.distance(g).min()) > 1000]
+        _d = _d[np.array([osm.distance(g).min() > 1000 for g in _d.geometry], dtype=bool)]
         _d = _d.sort_values("score", ascending=False).head(60)
         _x0, _a, _b, _y0, _dd, _e = _tf
         for _p in _d.itertuples():
