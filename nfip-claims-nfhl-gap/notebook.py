@@ -620,13 +620,19 @@ def _(mo):
 
     FEMA also publishes the Community Layer as an ArcGIS Online feature service,
     *NFIP Community Layer (flattened) 2024v1*, with no stated end date. Each run checks
-    that the item still exists and its layer still answers a count query.
+    that the item still exists, its layer still answers a count query, and a query
+    for one feature returns a real row with a polygon.
+
+    A count alone isn't proof. After November 9, OpenFEMA's `NfipCommunityLayer*`
+    endpoints still answer HTTP 200, and its catalog and `$inlinecount` still report the
+    old record counts, but every query and bulk download comes back with no rows. So
+    the next cell also asks OpenFEMA for rows and records what it gets.
     """)
     return
 
 
 @app.cell
-def _(PULL_DATE, get, json):
+def _(OPENFEMA, PULL_DATE, get, json, pd):
     _item_id = "4b712b99d43d41cb9328e94891520a63"
     _item = get(f"https://www.arcgis.com/sharing/rest/content/items/{_item_id}", {"f": "json"})
     _item = _item.json()
@@ -643,7 +649,36 @@ def _(PULL_DATE, get, json):
         ).json()
         agol["feature_count"] = _count.get("count")
         agol["query_error"] = _count.get("error")
+        _one = get(
+            f"{_item['url']}/0/query",
+            {"where": "1=1", "outFields": "cis_cid", "resultRecordCount": "1", "f": "json"},
+        ).json()
+        _features = _one.get("features", [])
+        agol["sample_row_cid"] = _features[0]["attributes"].get("cis_cid") if _features else None
+        agol["sample_row_has_polygon"] = bool(_features and _features[0].get("geometry"))
     print("ArcGIS Online copy:", json.dumps(agol))
+
+    openfema_layer = []
+    for _name in [
+        "NfipCommunityLayerComprehensive",
+        "NfipCommunityLayerNoOverlapsWhole",
+        "NfipCommunityLayerNoOverlapsSplit",
+    ]:
+        _body = get(f"{OPENFEMA}/v1/{_name}", {"$top": "5", "$inlinecount": "allpages"}).json()
+        _csv = get(f"{OPENFEMA}/v1/{_name}.csv").text
+        openfema_layer.append(
+            {
+                "endpoint": _name,
+                "count_reported": _body["metadata"].get("count"),
+                "rows_returned_of_5": len(_body.get(_name, [])),
+                "bulk_csv_data_lines": max(len(_csv.strip().splitlines()) - 1, 0),
+                "deprecation_date": (_body["metadata"].get("DeprecationInformation") or {}).get(
+                    "depDate"
+                ),
+            }
+        )
+    agol["openfema_endpoints"] = openfema_layer
+    print(pd.DataFrame(openfema_layer).to_string(index=False))
     agol
     return (agol,)
 
