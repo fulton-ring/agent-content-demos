@@ -46,7 +46,33 @@ Actions runner (`archive-fetch.yml`, copied to `.github/workflows/` only while t
 
 ## Results
 
-RESULTS_PLACEHOLDER
+**Partial run (2026-11-11). Not final.** The archive answered for 203 of the 255 endpoints before the GitHub
+Actions job hit its time limit, and the second job never started. The 52 missing endpoints include 9 of the 10
+named in coverage. The 78 suspect captures that might be maintenance pages haven't been opened yet, because
+replays need the archive too. So maintenance pages served with a 200 status aren't counted below.
+
+From the 203 endpoints with archive answers:
+
+| | |
+|---|---|
+| Endpoints with archive answers | 203 of 255 (US 173, UK 15, CA 17, NL 11, FI 8, FR 8, DE 8, BE 7, DK 6, EU 2 in the full list) |
+| No capture at all, Oct 14 to Nov 1 | 70 |
+| No capture during the shutdown days (too few to tell) | 143 (70%) |
+| Outage starting in the shutdown days | 3 |
+| Median outage length, bounds | 0 to 20.7 hours |
+| Still bad at the end of the window | 0 |
+| Outages starting in the week before (background) | 1 |
+| Outages that had an outside copy | 3 of 3 |
+| Live on 2026-11-11 (all 255) | 235 up, 15 blocked our client, 3 down, 2 gone, 0 up without downloads |
+
+The method sees the one control it could check: the Statistics Canada home page returned a 503 to the archive at
+16:56 UTC on October 21 and was back by 04:53 UTC on October 23, which matches CBC's report. The other two
+outages are single bad captures: a 404 on the retired HIFLD Open hub, and a 404 on the German Federal
+Employment Agency's statistics site. Both look like ordinary noise.
+
+The capture record is the main limit. The archive made about 1,200 captures a day of these endpoints from
+October 14 to 17 and about 100 a day after that, so most endpoints have no capture during the shutdown days at
+all. On this sample, "almost nothing went down" can't be told apart from "the archive wasn't looking".
 
 Full numbers: `outputs/summary.json`. Per endpoint: `outputs/endpoint_results.csv`. Each outage with its
 bounds: `outputs/outages.csv`. The run's printout: `outputs/last-run.txt`.
