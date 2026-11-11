@@ -50,7 +50,7 @@ A founder has to read a spike and explain it in an article. These rules win over
 - Keep the logic where the reader sees it: in the notebook's cells, next to its output. Move code to a module only when two notebooks or an app share it, or a test needs it.
 - Write a function only when it's called more than once. A notebook step that runs once is a cell, not a function.
 - `run.sh` runs the notebooks as scripts (`uv run <notebook>.py`) or starts the app, so the published numbers come from the code the reader sees.
-- Budget: about 1,000 lines of Python and a README under 150 lines. The README says what it shows, how to run it and the headline numbers, and points to the notebooks or app for the rest.
+- Budget: about 1,000 lines of Python and a README under 150 lines. The README says what it shows, how to run it and the headline numbers, and points to the notebooks or app for the rest. This is a target, not a gate: if the spike needs more to answer its question, say in the README why it's over, and don't cut analyses to hit the number.
 - New scope found during the work or in review goes to a sub-issue, not into this PR.
 - Before `Ready for review`, ask: could a founder follow it in 15 minutes? If not, cut or split it.
 
