@@ -83,21 +83,24 @@ All numbers come from `outputs/`, written by the run.
 | Pixel probe | 0.958 | 0.59 | 0.38 | 0.22 | 0.07 | 0.26 |
 | CNN | 0.983 | 0.90 | 0.90 | 0.68 | 0.69 | 0.76 |
 
-The CNN is similar in both states: 75% in New York and 78% in Tennessee. Recall rises with fenced area, from 52%
-under 500 m² to 90% from 2,000 m² up ([`recall_by_area.png`](outputs/recall_by_area.png)). That supports the
-expectation that small distribution yards are harder, though even many of those were found.
+The CNN finds 75% in New York and 78% in Tennessee. Recall rises with fenced area, from 52% under 500 m² to 90% from
+2,000 m² up ([`recall_by_area.png`](outputs/recall_by_area.png)).
 
-**Scan of 48 held-out tiles** (`outputs/scan_precision_recall.csv`). These tiles hold 99 OSM substations: 1 at 230 kV+,
-30 at 100–229 kV, 57 under 100 kV and 11 untagged.
+**Scan of 48 held-out tiles** (`outputs/scan_precision_recall.csv` and `hard_negatives_scan.csv`). These tiles hold 99
+OSM substations: 1 at 230 kV+, 30 at 100–229 kV, 57 under 100 kV and 11 untagged. Recall is by voltage class; a
+detection has no voltage, so precision is overall only.
 
-| Model, cutoff | Detections | Within 300 m of OSM | Precision | Recall, all | 100–229 kV | Under 100 kV |
-|---|---:|---:|---:|---:|---:|---:|
-| Probe, 0.94 | 2,663 | 324 | 0.12 | 0.63 | 0.70 | 0.65 |
-| CNN, 0.957 | 655 | 52 | 0.08 | 0.52 | 0.77 | 0.32 |
-| CNN, 0.99 | 383 | 54 | 0.14 | 0.52 | 0.77 | 0.37 |
+| Model, cutoff | Detections | Within 300 m of OSM | Precision | 230 kV+ | 100–229 kV | Under 100 kV | All |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Probe, 0.94 (1% rule) | 2,663 | 324 | 0.122 | 1/1 | 0.70 | 0.65 | 0.63 |
+| CNN, 0.957 (1% rule) | 655 | 52 | 0.079 | 1/1 | 0.77 | 0.32 | 0.52 |
+| CNN, 0.99 | 383 | 54 | 0.141 | 0/1 | 0.77 | 0.37 | 0.52 |
+| Hard-negative CNN, 0.806 (1% rule) | 781 | 74 | 0.095 | 0/1 | 1.00 | 0.58 | 0.68 |
+| Hard-negative CNN, 0.90 | 546 | 71 | 0.130 | 0/1 | 1.00 | 0.56 | 0.66 |
+| Hard-negative CNN, 0.97 | 254 | 62 | 0.244 | 0/1 | 0.97 | 0.49 | 0.62 |
+| Hard-negative CNN, 0.99 | 131 | 52 | 0.397 | 0/1 | 0.87 | 0.40 | 0.51 |
 
-A detection has no voltage, so precision is overall only. The probe's higher precision comes from splitting each yard
-into many small detections.
+The probe's higher precision comes from splitting each yard into many small detections.
 
 **Hand check** (`hand_check.csv`): of 20 scan detections with no OSM substation nearby, **0 were substations**. All 20
 were ordinary land: homes, farms, quarries, schools, factories and forest. So precision against OSM is close to the
@@ -108,27 +111,11 @@ In total the CNN flags 139 of the 502 line-end places (`outputs/line_end_flags.c
 **Cost:** $0, with no account or key. 45.9 GB of range reads and 82 MB of other downloads from an empty `data/`,
 8.2 GB kept in `data/`, and 43 minutes on 4 cores from a clean checkout. See `outputs/summary.json`.
 
-**Hard negatives** (`outputs/hard_negatives_*.csv`). Held-out patches, both states, each model at its own 1% rule:
-
-| Model | Threshold | AUC | 230 kV+ (29) | 100–229 kV (341) | Under 100 kV (407) | No tag (204) | All (981) |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| First CNN | 0.957 | 0.983 | 0.90 | 0.90 | 0.68 | 0.69 | 0.76 |
-| With hard negatives | 0.806 | 0.966 | 0.93 | 0.92 | 0.56 | 0.58 | 0.70 |
-
-The same 48-tile scan (99 OSM substations: 1 at 230 kV+, 30 at 100–229 kV, 57 under 100 kV, 11 untagged):
-
-| Model, cutoff | Detections | Within 300 m of OSM | Precision | 230 kV+ | 100–229 kV | Under 100 kV | All |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| First CNN, 0.957 | 655 | 52 | 0.079 | 1/1 | 0.77 | 0.32 | 0.52 |
-| Hard negatives, 0.806 (1% rule) | 781 | 74 | 0.095 | 0/1 | 1.00 | 0.58 | 0.68 |
-| Hard negatives, 0.90 | 546 | 71 | 0.130 | 0/1 | 1.00 | 0.56 | 0.66 |
-| Hard negatives, 0.97 | 254 | 62 | 0.244 | 0/1 | 0.97 | 0.49 | 0.62 |
-| Hard negatives, 0.99 | 131 | 52 | 0.397 | 0/1 | 0.87 | 0.40 | 0.51 |
-
-Held-out developed places flagged (`hard_negatives_land_use_flags.csv`): 31% → 6% overall, for example industrial
-28% → 6%, schools 45% → 6% and housing 31% → 7%. Farmyards are still flagged often (2 of 8). Hand check: of 20
-random detections at the 1% rule with no OSM substation within 300 m, **0 were substations**. They were 12 farms,
-fields, woods or rural homes, 6 commercial or industrial sites and 2 town housing areas.
+**Hard negatives** (`outputs/hard_negatives_*.csv`). On held-out patches, at its own 1% rule (threshold 0.806), the
+retrained CNN finds 93% of 230 kV+ (first CNN 90%), 92% of 100–229 kV (90%), 56% under 100 kV (68%) and 70% overall
+(76%). Developed places flagged in the scan tiles (`hard_negatives_land_use_flags.csv`): 31% → 6%, for example
+schools 45% → 6%. Hand check: of 20 random 1%-rule detections with no OSM substation within 300 m, **0 were
+substations**: 12 farms, fields, woods or rural homes, 6 commercial or industrial sites and 2 town housing areas.
 
 ## What didn't work
 
@@ -139,29 +126,26 @@ fields, woods or rural homes, 6 commercial or industrial sites and 2 town housin
 - **Small yards got harder.** Held-out recall under 100 kV fell from 68% to 56%, and the one 230 kV+ substation in
   the scan tiles is missed at every cutoff. One example says little, but large yards may now resemble the industrial
   land the model was taught to reject.
-- **Small test samples where it matters:** only 29 held-out substations at 230 kV+, and 1 among the scanned tiles.
-- **Column-window reads.** A `.npy` row is contiguous, so a 40-pixel window needs one request per row. Through our
-  connection that ran at about 200 requests a second. We read 40 whole rows per patch instead, which fetches 20 to 30
-  times the bytes we keep. Source Cooperative ignored multi-range requests and returned the whole 130 MB file.
+- **Small samples where it matters:** 29 held-out substations at 230 kV+, and 1 in the scanned tiles.
+- **Column-window reads.** A window needs one HTTP request per `.npy` row (about 200 a second here), and multi-range
+  requests return the whole 130 MB file, so we read whole rows and fetch 20 to 30 times the bytes we keep.
 - **Line ends are mostly taps.** 452 of the 502 far ends touch another line, as `hifld-grid-gaps/` found nationally,
   so most of these places have no substation to find.
 
 ## What it doesn't show
 
-- One year (2024), two states, one embedding model, and OSM as the answer key. OSM itself was partly backfilled from
-  the old HIFLD layer.
-- The hand check is 40 chips judged by the worker agent from photos, not a field visit.
+- One year (2024), two states, one embedding model, and OSM (partly backfilled from old HIFLD) as the answer key.
+- The hand check is 60 chips judged by the worker agent from photos, not a field visit.
 - We didn't test larger patches, a threshold tuned on held-out hard negatives, or TESSERA v2.
 - The first CNN's numbers depend on floating-point order. Running this notebook gives exactly the published #195
   numbers, but one intermediate version gave 7.2% scan precision instead of 7.9% for the same model and data.
 
 ## What we looked at first
 
-- **`geotessera` and Source Cooperative's `tessera.py` reader** (kerchunk plus xarray). Both read the same row-granular
-  byte ranges. We use the published tile index (byte offsets, shapes and transforms) with plain `httpx` range
-  requests, which keeps the read visible in the notebook.
-- **`geoembeddings-facility-finder/`** for the overall design (classifier, held-out scan, NAIP hand check), and
-  **`us-substations-verified/`** and **`hifld-grid-gaps/`** for the OSM and HIFLD Next line-end code.
+- **`geotessera` and Source Cooperative's `tessera.py` reader** read the same row-granular byte ranges; we use the
+  published tile index with plain `httpx` range requests, which keeps the read visible in the notebook.
+- **`geoembeddings-facility-finder/`** for the design, and **`us-substations-verified/`** and **`hifld-grid-gaps/`**
+  for the OSM and HIFLD Next line-end code. Hard-negative mining is the standard detector-training technique.
 
-The notebook is about 1,280 lines, of which about 1,100 are code. That is over the 1,000-line budget, mostly from
-marimo's per-cell import and return lists and the aerial-chip drawing for the hand check.
+The notebook is about 1,750 lines, over the 1,000-line budget, mostly from marimo's per-cell import and return lists,
+the aerial-chip drawing and the hard-negative section (about 450 lines) that #247 asked to keep in this folder.
