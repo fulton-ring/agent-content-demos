@@ -129,7 +129,7 @@ def _(CDX_DIR, CDX_URL, UA, WINDOW_FROM, WINDOW_TO, endpoints, json, requests, t
         """One CDX query with a bounded retry; None if it never answered."""
         for attempt in range(3):
             try:
-                r = requests.get(CDX_URL, params=params, headers=UA, timeout=90)
+                r = requests.get(CDX_URL, params=params, headers=UA, timeout=45)
                 if r.status_code == 200:
                     return json.loads(r.text) if r.text.strip() else []
                 if r.status_code not in (429, 500, 502, 503, 504):
