@@ -155,7 +155,9 @@ def _(re):
         r"\b(?:19|20)\d{2}-\d{2}-\d{2}\b|\b\d{1,2}/\d{1,2}/(?:19|20)\d{2}\b|"
         r"\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.? (?:\d{1,2}, )?(?:19|20)\d{2}\b"
     )
-    CADENCE = re.compile(r"(?i)\b(daily|weekly|monthly|quarterly|annual(?:ly)?|yearly|every \w+ (?:days|months|years))\b")
+    CADENCE = re.compile(
+        r"(?i)\b(daily|weekly|monthly|quarterly|annual(?:ly)?|yearly|every \w+ (?:days|months|years))\b"
+    )
     COUNT = re.compile(r"(?i)\b\d[\d,]{2,} (?:records|features|rows|facilities|structures|polygons|sites|points)\b")
     HOLDER_DOMAINS = ("datalumos.org", "source.coop", "publicenvirodata.org", "nrp-nautilus.io", "colab.research")
 
@@ -312,7 +314,11 @@ def _(
 
     def deposit_fields(attrs: dict) -> dict:
         dates = {d["dateType"]: d["date"] for d in attrs.get("dates", [])}
-        related = [r["relatedIdentifier"] for r in attrs.get("relatedIdentifiers", []) if r.get("relatedIdentifierType") == "URL"]
+        related = [
+            r["relatedIdentifier"]
+            for r in attrs.get("relatedIdentifiers", [])
+            if r.get("relatedIdentifierType") == "URL"
+        ]
         return {
             # DataCite's "Issued" is the deposit's own year; the source's date, when kept, is the "Collected" date.
             "issued": None,
@@ -389,13 +395,35 @@ def _(Counter, deposit_fields, hifld_records, original_fields, pd, stac_fields):
         counts = {f: Counter(field_detail.loc[field_detail["field"] == f, column]) for f in FIELDS}
         return pd.DataFrame(counts).T.fillna(0).astype(int)
 
-    _original_has = field_detail.assign(has=field_detail["original"].astype(bool)).groupby("field", sort=False)["has"].sum()
-    field_table = pd.concat(
-        {"original has it": _original_has, "DataLumos deposit": tally("deposit vs original"), "HIFLD Next": tally("HIFLD Next vs original")},
-        axis=1,
-    ).fillna(0).astype(int)
+    _original_has = (
+        field_detail.assign(has=field_detail["deposit vs original"].isin(["kept", "changed", "lost"]))
+        .groupby("field", sort=False)["has"]
+        .sum()
+    )
+    _dates = field_detail[field_detail["field"] == "modified"]
+    _both = _dates["DataLumos deposit"].notna() & _dates["HIFLD Next"].notna()
+    copies_agree_on_date = {
+        "both_have_a_source_date": int(_both.sum()),
+        "same_date": int(
+            (_dates["DataLumos deposit"].astype(str).str[:10] == _dates["HIFLD Next"].astype(str).str[:10]).sum()
+        ),
+        "original_distinct_modified_dates": int(_dates["original"].astype(str).str[:10].nunique()),
+    }
+    print(copies_agree_on_date)
+    field_table = (
+        pd.concat(
+            [
+                _original_has.rename("original has it"),
+                tally("deposit vs original").add_prefix("DataLumos: "),
+                tally("HIFLD Next vs original").add_prefix("HIFLD Next: "),
+            ],
+            axis=1,
+        )
+        .fillna(0)
+        .astype(int)
+    )
     field_table
-    return FIELDS, field_detail, field_table
+    return FIELDS, copies_agree_on_date, field_detail, field_table
 
 
 @app.cell(hide_code=True)
@@ -404,6 +432,18 @@ def _(mo):
     Read the table per field across the 20 layers: how many original records had the field, then for each copy
     how many kept it (same value), changed it, lost it, or added it where the original had nothing. `in neither`
     means neither record had it. The full values are in `outputs/hifld_fields.csv`.
+
+    **What it shows.** The rescue lost nothing, because the original data.gov records had almost nothing to lose:
+    no source URL, no issued date, no record count, no checksum. Their one date, `modified`, is the moment DHS's
+    catalog was harvested into data.gov, the same day for every layer (see `original_distinct_modified_dates`
+    above), so it says nothing about the data. The copies *added* what currency checks need. HIFLD Next took the
+    source's issued and modified dates from HIFLD's own inventory and added feature counts, file checksums and a
+    version number. The DataLumos deposit kept a date in DataCite's `Collected` field (we count it as the
+    deposit's source date) and a version number.
+
+    **But the two copies disagree on the source's date** for most layers (`same_date` above). The depositor and
+    the HIFLD inventory recorded different dates for the same data, and neither says which date it means. Neither
+    copy keeps a link to the agency's own page, so check 1 has to start from scratch.
     """)
     return
 
@@ -467,7 +507,9 @@ def _(DATACITE, MAX_DRAWS, PER_HOLDER, SEED, datacite, get, random, re, requests
 @app.cell
 def _(HARVARD, PER_HOLDER, SEED, SOURCE_COOP, get, harvard_index, harvard_record):
     _drawn = harvard_index.sample(n=PER_HOLDER, random_state=SEED)
-    harvard_copies = [{"name": n, "record": harvard_record(p)} for n, p in zip(_drawn["name"], _drawn["metadata_path"], strict=True)]
+    harvard_copies = [
+        {"name": n, "record": harvard_record(p)} for n, p in zip(_drawn["name"], _drawn["metadata_path"], strict=True)
+    ]
 
     SOURCE_COOP_PRODUCTS = [
         "seerai/hifld",
@@ -504,7 +546,6 @@ def _(mo):
 
 @app.cell
 def _(
-    HIFLD,
     datalumos_copies,
     dcat_extras,
     harvard_copies,
@@ -533,7 +574,9 @@ def _(
     def from_datacite(d: dict) -> dict:
         a = d["attrs"]
         dates = {x["dateType"]: x["date"] for x in a.get("dates", [])}
-        related = [x["relatedIdentifier"] for x in a.get("relatedIdentifiers", []) if x.get("relatedIdentifierType") == "URL"]
+        related = [
+            x["relatedIdentifier"] for x in a.get("relatedIdentifiers", []) if x.get("relatedIdentifierType") == "URL"
+        ]
         return {
             "holder": "DataLumos",
             "copy": d["doi"],
@@ -554,14 +597,18 @@ def _(
         extras = dcat_extras(rec)
         urls = [ckan.get("url"), extras.get("landingPage")] + [x.get("url") for x in ckan.get("resources", [])]
         resource_urls = {x.get("url") for x in ckan.get("resources", [])}
-        fetched = [t for t in rec["signed_metadata"].get("collection_tasks", []) if t["request"]["url"] in resource_urls]
+        fetched = [
+            t for t in rec["signed_metadata"].get("collection_tasks", []) if t["request"]["url"] in resource_urls
+        ]
         source_url = next((u for u in urls if u), None)
         return {
             "holder": "Harvard data.gov archive",
             "copy": h["name"],
             "source_url": source_url,
             "source_modified": extras.get("modified"),
-            "capture_date": rec["bag_info"].split("Bagging-Date:")[1].strip()[:10] if "Bagging-Date" in rec["bag_info"] else None,
+            "capture_date": rec["bag_info"].split("Bagging-Date:")[1].strip()[:10]
+            if "Bagging-Date" in rec["bag_info"]
+            else None,
             "record_count": None,
             "cadence": extras.get("accrualPeriodicity"),
             "temporal": extras.get("temporal"),
@@ -593,7 +640,10 @@ def _(
     )
     for _c in copies:
         _c["source_status"] = probe(_c["source_url"]) if _c["source_url"] else None
-    print(f"{len(copies)} copies; DataLumos landing pages answer scripts with HTTP {probe(datalumos_copies[0]['attrs']['url'])}")
+    print(
+        f"{len(copies)} copies; a DataLumos landing page answers scripts with HTTP",
+        probe(datalumos_copies[0]["attrs"]["url"]),
+    )
     return (copies,)
 
 
@@ -614,7 +664,9 @@ def _(CADENCE, COUNT, DATE, copies, pd, text_urls):
     def score(c: dict) -> dict:
         text = c["text"]
         has_data = c["data"] in ("open", "closed")
-        upstream = "no" if c["upstream_gone"] else ("copy" if c["source_status"] and c["source_status"] < 400 else "hand")
+        upstream = (
+            "no" if c["upstream_gone"] else ("copy" if c["source_status"] and c["source_status"] < 400 else "hand")
+        )
         newest = "copy" if c["temporal"] else ("hand" if has_data or DATE.search(text) else "no")
         count = "copy" if c["record_count"] else ("hand" if has_data or COUNT.search(text) else "no")
         modified = "copy" if c["source_modified"] else ("hand" if DATE.search(text) else "no")
@@ -633,7 +685,19 @@ def _(CADENCE, COUNT, DATE, copies, pd, text_urls):
             source_url_in_text=bool(text_urls(text)),
         )
 
-    scores = pd.DataFrame([{"holder": c["holder"], "copy": c["copy"], "data": c["data"], **score(c)} for c in copies])
+    scores = pd.DataFrame(
+        [
+            {
+                "holder": c["holder"],
+                "copy": c["copy"],
+                "data": c["data"],
+                **score(c),
+                "source_url": c["source_url"],
+                "source_status": c["source_status"],
+            }
+            for c in copies
+        ]
+    )
     scores
     return CHECKS, scores
 
@@ -643,7 +707,9 @@ def _(CHECKS, pd, scores):
     HOLDERS = ["HIFLD Next", "DataLumos", "Source Cooperative", "Harvard data.gov archive"]
 
     def from_copy_counts(check: str) -> pd.Series:
-        return scores.groupby("holder")[check].apply(lambda s: f"{(s == 'copy').sum()} / {(s == 'hand').sum()} / {(s == 'no').sum()}")
+        return scores.groupby("holder")[check].apply(
+            lambda s: f"{(s == 'copy').sum()} / {(s == 'hand').sum()} / {(s == 'no').sum()}"
+        )
 
     check_table = pd.DataFrame({check: from_copy_counts(check) for check in CHECKS}).reindex(HOLDERS)
     overall_table = (
@@ -668,6 +734,23 @@ def _(mo):
 @app.cell
 def _(overall_table):
     overall_table
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    **What it shows.** The only copies that pass are Harvard's data.gov records whose DCAT-US metadata names the
+    source (USGS data-release DOIs, a Census file URL) and its `modified` date. Those happen to be one-off
+    releases that are unlikely to change. No HIFLD Next, DataLumos or Source Cooperative copy passes, for the same
+    reason: none has a source link in a field. HIFLD Next has the richest record-level metadata (feature counts,
+    source dates, declared date columns) but no source link and no capture date. Source Cooperative has
+    everything only in its READMEs, which a person has to read. DataLumos pages answer scripts with HTTP 403, so
+    even its files are by hand.
+
+    The checks that fail everywhere are **cadence** (no copy in any holder has an update-frequency field, though
+    DCAT-US defines one, `accrualPeriodicity`) and **a source link**. Those are the two fields a publisher saving a copy should add.
+    """)
     return
 
 
@@ -731,6 +814,7 @@ def _(
     FIELDS,
     HOLDERS,
     OUT,
+    copies_agree_on_date,
     STARTED,
     check_table,
     field_detail,
@@ -748,6 +832,7 @@ def _(
         "date_run": time.strftime("%Y-%m-%d"),
         "hifld_matching": match_stats,
         "hifld_fields": {f: field_table.loc[f].to_dict() for f in FIELDS},
+        "hifld_source_dates": copies_agree_on_date,
         "checks_copy_hand_no": check_table.to_dict(orient="index"),
         "overall": {h: overall_table.loc[h].to_dict() for h in HOLDERS + ["all copies"]},
         "no_upstream_171": no_upstream,
