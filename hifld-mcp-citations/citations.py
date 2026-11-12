@@ -670,10 +670,11 @@ def _(CACHE, LAYER_NAMES, LAYER_OF, duckdb, http, key, pl, re, runs):
         return str(path)
 
     def run_sql(text: str) -> list[tuple[bool, list[str], str]]:
-        # Every SELECT in the answer, cut at the first sentence break, code fence or newline.
+        # Every SELECT in the answer, cut at the first sentence break, a prose aside such as
+        # "(then filter…)", a code fence or a newline.
         found = []
         for m in re.finditer(
-            r"\bselect\b[\s\S]+?(?=\.\s+[A-Z(]|\s+\(then|```|\n|$)", text, re.IGNORECASE
+            r"\bselect\b[\s\S]+?(?=\.\s+[A-Z(]|;|\s+\([a-z]+\s|```|\n|$)", text, re.IGNORECASE
         ):
             sql = m.group(0).rstrip(" ;.")
             files = re.findall(r"https?://[^\s'\"]+\.parquet", sql)
@@ -684,7 +685,7 @@ def _(CACHE, LAYER_NAMES, LAYER_OF, duckdb, http, key, pl, re, runs):
             try:
                 for f in files:
                     sql = sql.replace(f, local_copy(f))
-                rows = duckdb.sql(sql).fetchmany(200)
+                rows = duckdb.sql(sql).fetchall()[:200]
             except Exception as exc:  # a recipe that doesn't run is a scored outcome
                 found.append((pinned, [], f"SQL failed: {type(exc).__name__}"))
                 continue
@@ -793,6 +794,22 @@ def _(scored):
         "matches_versions",
         "recipe_notes",
     ).sort("qid", "arm", "repeat")
+    return
+
+
+@app.cell
+def _(ARMS, OUT, mo, runs):
+    # One version-sensitive question, answered three ways (first repeat), as a reader sees it.
+    _by_arm = {r["arm"]: r for r in runs if r["qid"] == "h04" and r["repeat"] == 1}
+    _md = "\n\n".join(
+        f"### {a}\n\n{_by_arm[a].get('answer') or _by_arm[a].get('error')}"
+        for a in ARMS
+        if a in _by_arm
+    )
+    (OUT / "example_h04.md").write_text(
+        "# Sunrise Hospital bed count, answered three ways\n\n" + _md + "\n"
+    )
+    mo.md("**Example: Sunrise Hospital's bed count (h04), answered three ways**\n\n" + _md)
     return
 
 
