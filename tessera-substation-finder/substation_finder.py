@@ -1407,11 +1407,29 @@ def _(mo):
 
 @app.cell
 def _(
-    cnn_scores, codes, hard, hard_codes, hard_scales, np, samples, scales, time, timings, train_cnn
+    DATA_DIR,
+    cnn_scores,
+    codes,
+    hard,
+    hard_codes,
+    hard_scales,
+    np,
+    samples,
+    scales,
+    time,
+    timings,
+    train_cnn,
 ):
     _t = time.time()
     _n = len(samples)
-    _codes2 = np.concatenate([codes, hard_codes])
+    # The combined patches go in a memory-mapped file, not a second 2.3 GB array in memory.
+    _codes2 = np.lib.format.open_memmap(
+        DATA_DIR / "codes_with_hard_negatives.npy",
+        mode="w+",
+        dtype=np.int8,
+        shape=(_n + len(hard), *codes.shape[1:]),
+    )
+    _codes2[:_n], _codes2[_n:] = codes, hard_codes
     _scales2 = np.concatenate([scales, hard_scales])
     _y = np.r_[samples["label"].to_numpy(), np.zeros(len(hard))].astype(np.float32)
     _split = np.r_[samples["split"].to_numpy(), hard["split"].to_numpy()]
