@@ -75,6 +75,8 @@ Finnish Government, Canada's Cyber Centre) had captures only before their takedo
 **The other two outages look like noise:** a single 404 on the retired HIFLD Open hub, and a single 404 on the
 German Federal Employment Agency's statistics site, each good again within hours. The same statistics site
 served a maintenance page on October 26, after the shutdown days.
+One more 404 starts just after the cutoff: INSEE's statistics page at 02:15 UTC on October 24. It had the same
+kind of single 404 on October 20, in the week before, so we count it as background.
 
 **Everything seen going down came back within the window.** None of the 4 was still bad on November 1. Today two
 are up, one is the retired HIFLD Open hub (gone before the shutdowns too), and one blocks our client. Of the
@@ -82,7 +84,7 @@ four, two run Drupal and two show no PHP. We found no data page that came back w
 14 pages had download links we could test.
 
 **The capture record is the main limit.** The archive made about 4,500 captures a day of these endpoints from
-October 14 to 16, then 100 to 175 a day from October 18 on, shutdown days included. 68% of endpoints have no capture during October 21 to 23, and
+October 14 to 16, then about 100 to 175 a day from October 18 on, shutdown days included. 68% of endpoints have no capture during October 21 to 23, and
 49 of the 50 HIFLD Next sources have none. Among the national portals in the shutdown countries, 57 of 82 can't
 be told. So the answer to "did they all come back" is yes for every outage we could see, but "nobody published
 a list" holds for the archive too: most of what might have gone dark wasn't watched.
@@ -109,7 +111,8 @@ To reproduce these numbers exactly from the saved files, run
 - **Today:** up, down, gone (404/410), blocked (the site refused our client), or up without downloads (every
   data-file link on the page failed).
 
-We report software platforms only as counts, never per endpoint.
+The outputs report software platforms only as counts. The raw live check in `live/` records each endpoint's
+detected platform (Drupal, WordPress or similar), which anyone can see from a browser; don't republish it as a list.
 
 ## What we looked at first
 
