@@ -300,7 +300,7 @@ def _(mo):
 
 
 @app.cell
-def _(DATA_DIR, TESSERA, YEAR, downloaded, fetch, np, pd):
+def _(DATA_DIR, TESSERA, YEAR, downloaded, fetch, np, pd, states):
     _idx_path = DATA_DIR / f"tessera_{YEAR}_index.parquet"
     downloaded["tessera_index"] = fetch(f"{TESSERA}/index/tessera_{YEAR}.parquet", _idx_path)
     tiles = pd.read_parquet(
@@ -317,6 +317,13 @@ def _(DATA_DIR, TESSERA, YEAR, downloaded, fetch, np, pd):
             "transform",
         ],
     )
+    print(f"TESSERA {YEAR} tiles worldwide: {len(tiles):,}")
+    # Keep the tiles in a box around the two states; the full index takes about 1 GB of memory.
+    _b = states.to_crs(4326).total_bounds
+    tiles = tiles[
+        tiles["lon"].between(_b[0] - 0.1, _b[2] + 0.1)
+        & tiles["lat"].between(_b[1] - 0.1, _b[3] + 0.1)
+    ].copy()
     tiles["key"] = list(zip(tiles["lon"].round(2), tiles["lat"].round(2), strict=True))
     tiles = tiles.set_index("key")
 
@@ -326,7 +333,6 @@ def _(DATA_DIR, TESSERA, YEAR, downloaded, fetch, np, pd):
     def https(uri: str) -> str:
         return TESSERA + uri.split("/npy/v1", 1)[1]
 
-    print(f"TESSERA {YEAR} tiles worldwide: {len(tiles):,}")
     return https, tile_key, tiles
 
 

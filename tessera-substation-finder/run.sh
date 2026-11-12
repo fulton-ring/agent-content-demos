@@ -3,4 +3,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 uv sync --quiet
+# The parallel range reads run in many threads, and glibc gives each its own heap that keeps freed
+# tile buffers; two heaps keep a fresh run's memory close to a cached run's.
+export MALLOC_ARENA_MAX=2
 uv run substation_finder.py
