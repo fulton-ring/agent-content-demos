@@ -11,6 +11,7 @@ USGS_OGC = os.environ.get("USGS_OGC_URL", "https://api.waterdata.usgs.gov/ogcapi
 IEM_HADS = os.environ.get("IEM_HADS_URL", "https://mesonet.agron.iastate.edu/cgi-bin/request/hads.py")
 MAX_PAGES = 50
 MAX_TRIES = 5
+IEM_PAUSE_S = float(os.environ.get("IEM_PAUSE_S", "0.5"))
 
 
 def get(client: httpx.Client, url: str, params: dict[str, str] | None = None) -> httpx.Response:
@@ -18,10 +19,12 @@ def get(client: httpx.Client, url: str, params: dict[str, str] | None = None) ->
     for attempt in range(MAX_TRIES):
         try:
             resp = client.get(url, params=params, timeout=180)
-        except httpx.TransportError:
+        except httpx.TransportError as err:
+            print(f"retry {attempt + 1}: {type(err).__name__} {url}")
             time.sleep(2**attempt * 3)
             continue
         if resp.status_code == 429 or resp.status_code >= 500:
+            print(f"retry {attempt + 1}: HTTP {resp.status_code} {url}")
             time.sleep(int(resp.headers.get("retry-after", 0)) or 2**attempt * 5)
             continue
         resp.raise_for_status()
@@ -56,6 +59,9 @@ def iem_hads(client: httpx.Client, station: str, start: str, end: str) -> pl.Dat
     """
     params = {"stations": station, "sts": start, "ets": end, "what": "txt", "delim": "comma"}
     text = get(client, IEM_HADS, params).text
+    time.sleep(IEM_PAUSE_S)
+    if text.startswith("Error, no results found"):
+        text = "station,utc_valid\n"
     if not text.startswith("station"):
         raise RuntimeError(f"unexpected IEM response for {station}: {text[:200]}")
     wide = pl.read_csv(io.StringIO(text), infer_schema_length=0)
