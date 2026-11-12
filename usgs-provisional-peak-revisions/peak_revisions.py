@@ -20,7 +20,7 @@ def _():
     The Iowa Environmental Mesonet (IEM) has archived the values gages transmitted through NOAA's HADS system
     since about 2008. This notebook compares, for about 100 flood-prone gages and water years 2009 to the latest
     approved year, the annual peak gage height **as transmitted** (IEM) with the **approved** peak (USGS Water
-    Data OGC API v1, `continuous` collection), and the same for discharge where IEM has it (2024 onward).
+    Data OGC API v1, `continuous` collection), and the same for discharge where IEM has it (a few gages, mostly 2022 onward).
 
     IEM holds what the gage sent. USGS can edit values after transmission (delete a spike, apply a datum
     correction) before or while they show on its website, and those edits may not reach HADS. So "as
@@ -87,7 +87,8 @@ def _(mo):
     ## 1. Pick the gages
 
     We want gages that flood and that have long IEM archives. A gage is a candidate if IEM's archive for it
-    starts by the 2009 water year, it transmits gage height (`HG`) as its main variable, and it is an NWS
+    starts by the end of 2010 (late 2007 in the Midwest states, November 2010 in most others, so those gages
+    cover water years 2011 on), it transmits gage height (`HG`) as its main variable, and it is an NWS
     forecast point (`HAS_HML`). For each of 20 states spread across the country, including the ice-affected
     north (MN, ND, WI, MI, ME, VT, MT, NY), we shuffle the candidates with a fixed seed and keep the first five
     that NOAA's NWPS service maps to a USGS gage with a minor flood stage. We add the gages the question names:
@@ -351,10 +352,16 @@ def _(pl, windows):
             .filter((pl.col("utc") - pl.col("approved_time")).abs() <= pl.duration(hours=2))
             .group_by("usgs_id", "wy").len("tx_near_peak")
         )  # fmt: skip
+        at_tx_peak = (
+            t_peak.join(a.select("usgs_id", "wy", "utc", "value"), on=["usgs_id", "wy"])
+            .filter((pl.col("utc") - pl.col("transmitted_time")).abs() <= pl.duration(hours=1))
+            .group_by("usgs_id", "wy").agg(pl.col("value").max().alias("approved_at_tx_peak"))
+        )  # fmt: skip
         return (
             a_peak.join(t_peak, on=["usgs_id", "wy"], how="left")
             .join(offset, on=["usgs_id", "wy"], how="left")
             .join(near, on=["usgs_id", "wy"], how="left")
+            .join(at_tx_peak, on=["usgs_id", "wy"], how="left")
             .with_columns(
                 revision=pl.col("transmitted") - pl.col("approved"),
                 hours_apart=(pl.col("transmitted_time") - pl.col("approved_time")).dt.total_minutes() / 60,
@@ -401,6 +408,11 @@ def _(gages, gh_years, pl):
         abs_rev=pl.col("revision").abs(),
         pct_rev=pl.col("revision") / pl.col("approved") * 100,
         foot_flip=pl.col("transmitted").floor() != pl.col("approved").floor(),
+        ice_months=pl.col("transmitted_time").dt.month().is_in([12, 1, 2, 3]),
+        cause=pl.when(pl.col("revision").abs() <= 0.1).then(pl.lit("within 0.1 ft"))
+        .when(pl.col("approved_at_tx_peak").is_null()).then(pl.lit("USGS has no value at the transmitted crest"))
+        .when((pl.col("revision") - pl.col("window_offset")).abs() < 0.05).then(pl.lit("whole window shifted"))
+        .otherwise(pl.lit("crest value changed")),
     )  # fmt: skip
     excluded = {
         "not yet approved": labelled.filter(~pl.col("all_approved")).height,
@@ -436,9 +448,15 @@ def _(gages, gh_years, pl):
         "flood_category_flips_crest_in_flood": int(
             ((gh["cat_tx"] != gh["cat_ap"]) & ((gh["cat_tx"] >= 2) | (gh["cat_ap"] >= 2))).sum()
         ),
+        "flood_category_flips_revision_under_0.5_ft": int(
+            ((gh["cat_tx"] != gh["cat_ap"]) & (gh["abs_rev"] <= 0.5)).sum()
+        ),
         "whole_foot_flips": int(gh["foot_flip"].sum()),
+        "whole_foot_flips_revision_under_0.5_ft": int((gh["foot_flip"] & (gh["abs_rev"] <= 0.5)).sum()),
         "gage_years_with_spike_over_1ft_above_peak": int((gh["transmitted_raw"] - gh["transmitted"] > 1).sum()),
         "peak_timing_over_6h_apart": int((gh["hours_apart"].abs() > 6).sum()),
+        "causes_over_0.1_ft": dict(gh.filter(pl.col("abs_rev") > 0.1).group_by("cause").len().iter_rows()),
+        "over_0.1_ft_in_ice_months": int(gh.filter((pl.col("abs_rev") > 0.1) & pl.col("ice_months")).height),
         "excluded": excluded,
         "datum_offset_gages": datum_off["usgs_id"].to_list(),
     }
@@ -467,9 +485,17 @@ def _(mo):
     mo.md(r"""
     ## 5. The worst cases
 
-    The fifteen largest gage-height revisions, with what the record says about them: the USGS qualifier at the
-    approved crest, whether the crest fell in the ice months (December to March), and whether the whole window
-    moved (window offset close to the revision) or only the peak.
+    The fifteen largest gage-height revisions, with what the record says about them. Every gage-year over
+    0.1 ft gets a cause:
+
+    - **USGS has no value at the transmitted crest:** the gage sent a higher reading, and the approved record
+      has nothing within an hour of it. USGS deleted those hours, typically for ice, a frozen or failed sensor
+      or a fouled orifice line.
+    - **whole window shifted:** the revision equals the median shift across the windows, a datum or
+      gage-height correction applied to the whole record.
+    - **crest value changed:** USGS kept the hour but published a different value.
+
+    We also flag crests in the ice months (December to March).
     """)
     return
 
@@ -478,13 +504,8 @@ def _(mo):
 def _(gh, pl):
     worst = (
         gh.sort("abs_rev", descending=True).head(15)
-        .with_columns(
-            ice_months=pl.col("approved_time").dt.month().is_in([12, 1, 2, 3]),
-            pattern=pl.when((pl.col("revision") - pl.col("window_offset")).abs() < 0.05)
-            .then(pl.lit("whole window shifted")).otherwise(pl.lit("peak edited")),
-        )
         .select("usgs_id", "nws_id", "name", "wy", "approved", "transmitted", "revision", "window_offset",
-                "approved_time", "transmitted_time", "qualifier", "ice_months", "pattern")
+                "approved_at_tx_peak", "approved_time", "transmitted_time", "ice_months", "cause")
     )  # fmt: skip
     worst
     return (worst,)
@@ -542,9 +563,9 @@ def _(CACHE, SEED, gh, httpx, iem_hads, pl, random):
 @app.cell
 def _(mo):
     mo.md(r"""
-    ## 7. Discharge, 2024 onward
+    ## 7. Discharge, where IEM has it
 
-    IEM has transmitted discharge (`QR`) only from about 2024, and only at some gages. Discharge is computed
+    IEM has transmitted discharge (`QR`) at only some gages, mostly from 2022 on. Discharge is computed
     from stage through a rating curve, and USGS revises ratings and applies shifts after field measurements,
     so we expect larger revisions here than for stage.
     """)
@@ -644,7 +665,7 @@ def _(mo):
     - Windows around the approved top three days can miss a transmitted spike elsewhere in the year; section 6
       measures how often.
     - The gage sample is NWS forecast points with long IEM archives, not a random sample of all USGS gages.
-    - Discharge covers only 2024 onward and only the gages that transmit it to HADS.
+    - Discharge covers only the gages that transmit it to HADS, mostly 2022 onward.
     """)
     return
 
