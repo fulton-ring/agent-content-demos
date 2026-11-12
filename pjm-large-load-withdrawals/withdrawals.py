@@ -223,7 +223,10 @@ def _():
             description="The ultimate or total load requested, in MW. 'In excess of 100 MW' gives 100. If no total "
             "is stated, the largest projected figure. Use the current figure where an old one is struck through."
         )
-        estimated_cost_musd: float | None = Field(description="Estimated transmission cost in $ millions")
+        estimated_cost_musd: float | None = Field(
+            description="Total estimated transmission cost in $ millions. If the slide prints a total, use it. "
+            "If it prints only component or phase costs, add them up. Never add a printed total to its own parts."
+        )
         projected_in_service: str | None = Field(description="Projected or requested in-service date as printed")
         needs_meeting_date: str | None = Field(description="Date the need was (or is being) presented, as printed")
         solutions_meeting_date: str | None = Field(description="Date the solution was (or is being) presented")
@@ -276,7 +279,9 @@ async def _(DATA_DIR, DeckNeeds, OUTPUT_DIR, decks, json, os, pages, selected, t
         if path.exists() and json.loads(path.read_text())["pages"] == page_list:
             return
         assert os.environ.get("OPENROUTER_API_KEY"), f"No saved answer for {deck} and no OPENROUTER_API_KEY"
-        agent = Agent(OpenRouterModel(MODEL), output_type=DeckNeeds, instructions=_instructions, retries=3)
+        agent: Agent[None, DeckNeeds] = Agent(
+            OpenRouterModel(MODEL), output_type=DeckNeeds, instructions=_instructions, retries=3
+        )
         async with gate:
             started = time.perf_counter()
             result = await agent.run(prompt_for(deck))
@@ -447,7 +452,6 @@ def _(OUTPUT_DIR, pd, records):
         needs_date=pd.to_datetime(_cust["needs_meeting_date"], errors="coerce", format="mixed"),
         is_withdrawn=_cust["stage"].eq("withdrawn"),
     )
-    _live = _cust[~_cust["is_withdrawn"]]
     needs = _cust.groupby("key").agg(
         owner=("owner", "first"),
         area=("area", "first"),
@@ -457,7 +461,7 @@ def _(OUTPUT_DIR, pd, records):
     )
     needs["presented"] = needs[["first_deck", "needs_date"]].min(axis=1)
     needs["ultimate_mw"] = _cust.groupby("key")["ultimate_mw"].max()
-    needs["cost_musd"] = _live.groupby("key")["estimated_cost_musd"].agg(latest)
+    needs["cost_musd"] = _cust.groupby("key")["estimated_cost_musd"].agg(latest)
     needs["solution_shown"] = _cust.groupby("key")["stage"].agg(lambda s: s.eq("solution").any())
     needs["withdrawn_on"] = _cust[_cust["is_withdrawn"]].groupby("key")["meeting"].min()
     needs["withdrawn"] = needs["withdrawn_on"].notna()
@@ -524,7 +528,8 @@ def _(mo):
     ### Withdrawn, or resubmitted under a new number?
 
     A withdrawal isn't a dropout if the same request comes back under a new need number. For each withdrawn
-    need we look at the owner's other customer-load needs presented after it that were not themselves
+    need we look at the owner's other customer-load needs presented after it (and numbered in the same year
+    or later) that were not themselves
     withdrawn (if the replacement was withdrawn too, the load still left):
 
     - **resubmission**: the two name the same *new* substation (Dominion names each new delivery
@@ -554,6 +559,7 @@ def _(OUTPUT_DIR, needs, pd, re, records):
             (needs["owner"] == _w["owner"])
             & (needs.index != _key)
             & (needs["presented"] > _w["presented"])
+            & (needs.index.str.split("-").str[1] >= _key.split("-")[1])
             & ~needs["withdrawn"]
         ]
         for _other, _o in _later.iterrows():
@@ -706,9 +712,16 @@ def _(DATA_DIR, OUTPUT_DIR, line_matches, mo, needs, pd, sub_matches):
         index=["HIFLD Next", "us-substations-verified"],
     )
     map_coverage["% found"] = (100 * map_coverage["found"] / map_coverage["named (all customer-load needs)"]).round(1)
-    map_coverage["% found (large)"] = (100 * map_coverage["found (large)"] / map_coverage["named (large loads)"]).round(1)
+    map_coverage["% found (large)"] = (100 * map_coverage["found (large)"] / map_coverage["named (large loads)"]).round(
+        1
+    )
     map_coverage.to_csv(OUTPUT_DIR / "map_coverage.csv")
     _misses = _distinct.loc[~_distinct["us-substations-verified"], "substation"].head(25).tolist()
+    print(
+        f"Large-load needs name {len(_large)} existing substations: {int(_large['HIFLD Next'].sum())} in HIFLD Next, "
+        f"{int(_large['us-substations-verified'].sum())} in us-substations-verified; {len(_lines)} lines cut into, "
+        f"{int(_lines['HIFLD Next line'].sum())} found as a HIFLD Next line"
+    )
     mo.vstack(
         [
             map_coverage,
@@ -751,7 +764,9 @@ def _(OUTPUT_DIR, counties_path, gpd, needs, pd, sub_matches):
         GW_withdrawn=("ultimate_mw", lambda s: s[_placed.loc[s.index, "withdrawn"]].sum() / 1000),
     )
     _counties = gpd.read_file(f"zip://{counties_path}")
-    _counties = _counties[_counties["STUSPS"].isin(["IL", "IN", "OH", "MI", "KY", "TN", "WV", "VA", "NC", "MD", "DE", "DC", "PA", "NJ"])]
+    _counties = _counties[
+        _counties["STUSPS"].isin(["IL", "IN", "OH", "MI", "KY", "TN", "WV", "VA", "NC", "MD", "DE", "DC", "PA", "NJ"])
+    ].to_crs("EPSG:5070")
     _shown = _counties.merge(county_mw, left_on="GEOID", right_index=True, how="left")
     county_mw.join(_counties.set_index("GEOID")[["NAME", "STUSPS"]]).to_csv(OUTPUT_DIR / "large_load_gw_by_county.csv")
     _fig, _axes = plt.subplots(1, 2, figsize=(14, 6))
