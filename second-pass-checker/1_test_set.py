@@ -25,8 +25,8 @@ def _():
     a second AI pass that re-reads the source, how many does it catch, and which kinds slip through?
 
     **The material.** The 88 errors from the 2026-10-08 re-check, listed one per row on
-    [#108](https://github.com/fulton-ring/agent-content-demos/issues/108#issuecomment-6354565999). The 202 later
-    errors on #108 were never published item by item, so they aren't here (see the README).
+    [#108](https://github.com/fulton-ring/agent-content-demos/issues/108#issuecomment-6354565999). A second batch,
+    the errors review jobs caught from 2026-10-08 to 2026-10-22, is added further down (issue #235).
 
     For each of the 88, a research subagent read the card and its Corrections section, rebuilt the claim the note
     made, found the source it was checked against, fetched that source and copied the passage the claim is about.
@@ -111,16 +111,131 @@ def _(candidates, errors):
     return (passes,)
 
 
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ## The later errors (issue #235)
+
+    #108 also counted 202 errors against a document source that review jobs caught between 2026-10-08 and
+    2026-10-22: the Research manager's reviews, the Draft job's change requests, "Check before publishing" items
+    on Articles cards and workers' own checks. They are the closest test of what a first checker misses, since
+    many were caught after an earlier Claude check had passed the card. #108's extraction files were lost, so we
+    re-extracted them.
+
+    **Step 1, re-extract.** Nine read-only subagents copied every fix recorded before #108's count
+    (2026-10-23 00:40 UTC) from issues #2–#107, the spike PRs, the 151 Proposals cards and 27 Articles cards,
+    reading each card as it stood at that time through Notion's page history. One row per fix, coded by what the
+    wrong claim was checked against, with #108's codes. That's `data/later_extraction.jsonl`.
+    """)
+    return
+
+
 @app.cell
-def _(errors, passes):
-    columns = ["id", "kind", "error_type", "claim", "source_url", "source_title", "passage", "wording", "doubt"]
-    test_set = pd.concat([errors[errors["replayable"] & ~errors["disputed"]], passes])[columns]
+def _():
+    extraction = pd.DataFrame(
+        [json.loads(line) for line in (DATA / "later_extraction.jsonl").read_text().splitlines() if line.strip()]
+    )
+    assert extraction["id"].is_unique
+    origin_names = {
+        "S": "a document source",
+        "R": "our own spike's run or code",
+        "N": "not a factual error",
+        "U": "flagged unchecked only",
+        "P": "our own published page",
+        "O": "a run time or cost",
+        "F": "the fix itself was wrong",
+    }
+    by_origin = extraction["origin"].map(origin_names).value_counts()
+    print(f"{len(extraction)} fixes recorded, by what the claim was checked against:\n" + by_origin.to_markdown())
+    return
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    **Step 2, dedupe and rebuild.** The same fix is often recorded two or three times: as a Draft job request, as
+    the manager's report of making it, and as an Articles check item. Eight subagents took the document-source
+    rows card by card, grouped repeats of the same error, and for each distinct error read the card **as it stood
+    just before the fix** in Notion's page history. Unlike the first batch, whose notes predate the page history,
+    this recovers the note's own words for most errors. They then fetched the source and copied the passage that
+    shows the problem, and marked an error not replayable where it couldn't be, with the reason.
+    """)
+    return
+
+
+@app.cell
+def _():
+    later = pd.DataFrame(
+        [json.loads(line) for line in (DATA / "later_errors.jsonl").read_text().splitlines() if line.strip()]
+    )
+    assert later["id"].is_unique
+    duplicate = later["not_replayable_reason"].fillna("").str.startswith("duplicate")
+    distinct = later[~duplicate]
+    reason = distinct["not_replayable_reason"].fillna("").str.replace(r"^other:.*", "other", regex=True)
+    print(
+        f"{len(later)} document-source fixes, {int(duplicate.sum())} repeats of another fix, "
+        f"{len(distinct)} distinct errors.\n"
+    )
+    print("Why the others can't be replayed:\n" + reason[~distinct["replayable"]].value_counts().to_markdown(), "\n")
+    later_kept = distinct[distinct["replayable"] & ~distinct["disputed"]]
+    print(
+        f"{int(distinct['replayable'].sum())} replayable; {int((distinct['replayable'] & distinct['disputed']).sum())} "
+        f"left out because the source supports the note (the fix looks wrong); {len(later_kept)} kept."
+    )
+    print("\nHow the kept claims' wording was recovered:\n" + later_kept["wording"].value_counts().to_markdown())
+    print("\nWho caught them:\n" + later_kept["caught_by"].value_counts().to_markdown())
+    return (later_kept,)
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    **Passing claims for the later batch.** The first draw left 63 usable passing claims unused. We draw from those
+    with a new seed, as many as the $3 budget for this batch allows after the errors (see the README).
+    """)
+    return
+
+
+@app.cell
+def _(candidates, passes):
+    N_LATER_PASSES = 0
+    unused = candidates[candidates["replayable"] & ~candidates["id"].isin(passes["id"])].sort_values("id")
+    assert len(unused) >= N_LATER_PASSES
+    later_passes = unused[unused["id"].isin(random.Random(235).sample(list(unused["id"]), N_LATER_PASSES))]
+    print(f"{len(unused)} unused passing claims; {len(later_passes)} drawn for the later batch.")
+    return (later_passes,)
+
+
+@app.cell
+def _(errors, later_kept, later_passes, passes):
+    columns = [
+        "id",
+        "kind",
+        "batch",
+        "error_type",
+        "claim",
+        "source_url",
+        "source_title",
+        "passage",
+        "wording",
+        "doubt",
+        "caught_by",
+    ]
+    test_set = pd.concat(
+        [
+            errors[errors["replayable"] & ~errors["disputed"]].assign(batch="2026-10-08"),
+            passes.assign(batch="2026-10-08"),
+            later_kept.assign(batch="later"),
+            later_passes.assign(batch="later"),
+        ]
+    )[columns]
     test_set["error_type"] = test_set["error_type"].fillna("pass")
     test_set["doubt"] = test_set["doubt"].fillna(False).astype(bool)
+    test_set["caught_by"] = test_set["caught_by"].astype(object).where(test_set["caught_by"].notna(), None)
     (DATA / "test_set.jsonl").write_text(
         "\n".join(json.dumps(r, ensure_ascii=False) for r in test_set.to_dict("records")) + "\n"
     )
-    print(test_set["error_type"].value_counts().to_markdown())
+    print(pd.crosstab(test_set["error_type"], test_set["batch"], margins=True).to_markdown())
     return (test_set,)
 
 

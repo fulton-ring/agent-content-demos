@@ -25,6 +25,11 @@ def _():
     checker to name the same error type as our log: catching the claim is what a reviewer needs.
 
     Counts are small (a few to a few dozen per type), so every rate comes with a 95% Wilson interval.
+
+    There are two batches of errors. **2026-10-08** is the 75 errors from the Analyze job's re-check, with 75
+    passing claims. **Later** is the 170 errors review jobs caught from 2026-10-08 to 2026-10-22 (issue #235),
+    many after an earlier Claude check had passed the card, so they are the harder test. We report them side by
+    side rather than pooled.
     """)
     return
 
@@ -77,14 +82,11 @@ def _():
 
 @app.cell
 def _(flags, items, rate):
-    order = items.loc[items["kind"] == "error", "error_type"].value_counts().index.tolist()
-
-    def table(passes: pd.Index) -> pd.DataFrame:
+    def table(batch: pd.Series, passes: pd.Index) -> pd.DataFrame:
+        errors = items.index[(items["kind"] == "error") & batch]
         rows = {}
-        for error_type in [*order, "all errors"]:
-            ids = items.index[
-                (items["kind"] == "error") & ((items["error_type"] == error_type) | (error_type == "all errors"))
-            ]
+        for error_type in [*items.loc[errors, "error_type"].value_counts().index, "all errors"]:
+            ids = errors[(items.loc[errors, "error_type"] == error_type) | (error_type == "all errors")]
             rows[error_type] = {
                 c: rate(int(flags.loc[ids, c].sum()), int(flags.loc[ids, c].notna().sum())) for c in CHECKERS
             }
@@ -93,15 +95,19 @@ def _(flags, items, rate):
         }
         return pd.DataFrame(rows).T
 
+    first, later = items["batch"] == "2026-10-08", items["batch"] == "later"
     all_passes = items.index[items["kind"] == "pass"]
     clean_passes = items.index[(items["kind"] == "pass") & ~items["doubt"]]
-    recall = table(all_passes)
-    print(recall.to_markdown())
+    recall = table(first, all_passes[first[all_passes]])
+    recall_later = table(later, all_passes[later[all_passes]])
     (HERE / "results").mkdir(exist_ok=True)
+    print("**2026-10-08 batch**\n" + recall.to_markdown())
     (HERE / "results/recall.md").write_text(recall.to_markdown() + "\n")
-    print("\nFalse alarms leaving out the passing claims our subagent doubted:")
-    print(table(clean_passes).tail(1).to_markdown())
-    return (recall,)
+    print("\n**Later batch (#235)**\n" + recall_later.to_markdown())
+    (HERE / "results/recall_later.md").write_text(recall_later.to_markdown() + "\n")
+    print("\nFalse alarms on all passing claims, leaving out the ones our subagent doubted:")
+    print(table(first | later, clean_passes).tail(1).to_markdown())
+    return recall, recall_later
 
 
 @app.cell(hide_code=True)
@@ -144,9 +150,9 @@ def _():
 @app.cell
 def _(flags, items, rate):
     by_wording = {}
-    for _wording in ["quoted", "reconstructed"]:
-        _ids = items.index[(items["kind"] == "error") & (items["wording"] == _wording)]
-        by_wording[_wording] = {
+    for _batch, _wording in [(b, w) for b in ["2026-10-08", "later"] for w in ["quoted", "reconstructed"]]:
+        _ids = items.index[(items["kind"] == "error") & (items["wording"] == _wording) & (items["batch"] == _batch)]
+        by_wording[f"{_batch}, {_wording}"] = {
             c: rate(int(flags.loc[_ids, c].sum()), int(flags.loc[_ids, c].notna().sum())) for c in CHECKERS
         }
     print(pd.DataFrame(by_wording).T.to_markdown())
@@ -169,9 +175,15 @@ def _(flags, items):
     only_gpt = errs.index[(errs["gpt_passage"] == True) & (errs["claude_passage"] == False)]  # noqa: E712
     only_claude = errs.index[(errs["claude_passage"] == True) & (errs["gpt_passage"] == False)]  # noqa: E712
     neither = errs.index[(errs["claude_passage"] == False) & (errs["gpt_passage"] == False)]  # noqa: E712
-    print(f"Caught only by GPT: {len(only_gpt)}; only by Claude: {len(only_claude)}; by neither: {len(neither)}")
-    print("\nBy type, missed by both passage checkers:")
-    print(items.loc[neither, "error_type"].value_counts().to_markdown())
+    for _batch in ["2026-10-08", "later"]:
+        _in = items.loc[errs.index, "batch"] == _batch
+        _count = {name: int(_in[ids].sum()) for name, ids in [("GPT", only_gpt), ("Claude", only_claude)]}
+        print(
+            f"{_batch}: caught only by GPT {_count['GPT']}; only by Claude {_count['Claude']}; "
+            f"by neither {int(_in[neither].sum())}"
+        )
+    print("\nBy type and batch, missed by both passage checkers:")
+    print(pd.crosstab(items.loc[neither, "error_type"], items.loc[neither, "batch"]).to_markdown())
     return only_claude, only_gpt
 
 
@@ -213,13 +225,14 @@ def _(answers, flags, items):
     let_through = errors.index[(errors == False).any(axis=1)]  # noqa: E712
     missed = pd.DataFrame(
         {
+            "batch": items.loc[let_through, "batch"],
             "type": items.loc[let_through, "error_type"],
             "missed by": [", ".join(c for c in CHECKERS if errors.loc[i, c] == False) for i in let_through],  # noqa: E712
             "claim": items.loc[let_through, "claim"],
             "claude_passage said": [answers[("claude_passage", i)]["verdict"]["reason"] for i in let_through],
         }
     )
-    print(missed[["type", "missed by"]].to_markdown())
+    print(missed[["batch", "type", "missed by"]].to_markdown())
     (HERE / "results/let_through.md").write_text(missed.to_markdown() + "\n")
     mo.ui.table(missed)
     return
@@ -234,7 +247,8 @@ def _():
     dreaming checker flagged (it saw the whole source, so its flags aren't caused by a short passage) and judged
     each one: **real** (a careful editor would change the claim), **nit** (true in substance; the flag is about
     emphasis, or about a detail like a date that's on the page but not in the text we extracted) or **checker
-    wrong**. One reader made these calls; they're in `data/false_alarm_review.jsonl` with a reason each.
+    wrong**. One reader made these calls; they're in `data/false_alarm_review.jsonl` with a reason each. The
+    review covers the 2026-10-08 batch's passing claims.
     """)
     return
 
@@ -242,9 +256,10 @@ def _():
 @app.cell
 def _(flags, items, rate):
     review = pd.read_json(HERE / "data/false_alarm_review.jsonl", lines=True).set_index("id")
-    flagged_passes = items.index[(items["kind"] == "pass") & (flags["claude_dreaming"] == True)]  # noqa: E712
+    first_passes = (items["kind"] == "pass") & (items["batch"] == "2026-10-08")
+    flagged_passes = items.index[first_passes & (flags["claude_dreaming"] == True)]  # noqa: E712
     assert set(review.index) == set(flagged_passes), "every flagged passing claim needs a judgement"
-    answered_passes = int(flags.loc[items["kind"] == "pass", "claude_dreaming"].notna().sum())
+    answered_passes = int(flags.loc[first_passes, "claude_dreaming"].notna().sum())
     counts = review["judgement"].value_counts()
     print(counts.to_markdown(), "\n")
     print(f"Passing claims with a real problem review missed: {rate(int(counts['real']), answered_passes)}")
@@ -277,7 +292,30 @@ def _(answers, items):
 
 
 @app.cell(hide_code=True)
-def _(recall):
+def _():
+    mo.md(r"""
+    ## The later errors by who caught them
+
+    The Research manager reviewed cards a worker had already checked; the Draft job caught errors after the manager
+    had passed the card. If the errors that got furthest are the hardest to see, recall should fall from left to right.
+    """)
+    return
+
+
+@app.cell
+def _(flags, items, rate):
+    by_catcher = {}
+    for _catcher in ["research_worker", "research_manager", "draft_job"]:
+        _ids = items.index[(items["batch"] == "later") & (items["caught_by"] == _catcher)]
+        by_catcher[_catcher] = {
+            c: rate(int(flags.loc[_ids, c].sum()), int(flags.loc[_ids, c].notna().sum())) for c in CHECKERS
+        }
+    print(pd.DataFrame(by_catcher).T.to_markdown())
+    return
+
+
+@app.cell(hide_code=True)
+def _(recall, recall_later):
     mo.md(f"""
     ## Headline
 
@@ -286,8 +324,11 @@ def _(recall):
     **{recall.loc["all errors", "claude_dreaming"]}**. False alarms on claims that passed review:
     {recall.loc["false alarms (passing claims)", "claude_passage"]},
     {recall.loc["false alarms (passing claims)", "gpt_passage"]} and
-    {recall.loc["false alarms (passing claims)", "claude_dreaming"]}. The README reads these against the card's
-    argument.
+    {recall.loc["false alarms (passing claims)", "claude_dreaming"]}.
+
+    On the later errors (#235): **{recall_later.loc["all errors", "claude_passage"]}**,
+    **{recall_later.loc["all errors", "gpt_passage"]}** and **{recall_later.loc["all errors", "claude_dreaming"]}**.
+    The README reads these against the card's argument.
     """)
     return
 
