@@ -257,6 +257,10 @@ def _(CDX_DIR, REPLAY_URL, SHUTDOWN_START, UA, caps, json, pd, re, requests, tim
             replay_errors += 1
             time.sleep(2)
             continue
+        if _resp.status_code == 429 or _resp.status_code >= 500:
+            replay_errors += 1  # the archive is throttling or failing, not answering for the capture
+            time.sleep(10)
+            continue
         replay_errors = 0
         _text = headline(_resp.text, _resp.headers.get("Location", ""))
         replays[f"{_r.id}:{_r.timestamp}"] = {
