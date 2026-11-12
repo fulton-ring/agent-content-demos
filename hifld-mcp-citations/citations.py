@@ -121,13 +121,15 @@ def _(mo):
 
 @app.cell
 def _():
+    ALL = " (every record, whatever its status)?"
     # kind: count (numberMatched), lookup (one record's field), sum (of a field over matches),
     # nearest (NAME of the closest feature to lat/lon).
+    # fmt: off
     QUESTIONS = [
         ("h01", "hospitals-3", "count", {"STATE": "VT"}, None,
-         "How many hospitals are there in Vermont?"),
+         "How many hospitals are there in Vermont" + ALL),
         ("h02", "hospitals-3", "count", {"STATE": "TX", "TYPE": "CRITICAL ACCESS"}, None,
-         "How many critical access hospitals are in Texas?"),
+         "How many critical access hospitals are in Texas" + ALL),
         ("h03", "hospitals-3", "lookup", {"source_ID": "0014563110", "OBJECTID": "11722"}, "BEDS",
          "How many beds does Barnes Jewish Hospital in St. Louis have?"),
         ("h04", "hospitals-3", "lookup", {"source_ID": "0002289169", "OBJECTID": "12096"}, "BEDS",
@@ -135,9 +137,9 @@ def _():
         ("h05", "hospitals-3", "lookup", {"source_ID": "0005514607", "OBJECTID": "12375"}, "BEDS",
          "How many beds does Strong Memorial Hospital in Rochester, New York have?"),
         ("h06", "hospitals-3", "sum", {"STATE": "VT"}, "BEDS",
-         "What is the total number of hospital beds in Vermont?"),
+         "What is the total number of hospital beds in Vermont, across every record?"),
         ("h07", "hospitals-3", "count", {"STATE": "CO", "HELIPAD": "Y"}, None,
-         "How many hospitals in Colorado have a helipad?"),
+         "How many hospitals in Colorado have a helipad" + ALL),
         ("h08", "hospitals-3", "lookup", {"source_ID": "0000720001", "OBJECTID": "9467"}, "TRAUMA",
          "What trauma level is Howard University Hospital in Washington, DC?"),
         ("h09", "hospitals-3", "nearest", {"lat": 44.4719, "lon": -73.1533}, "NAME",
@@ -146,7 +148,7 @@ def _():
         ("h10", "hospitals-3", "lookup", {"source_ID": "0196785344", "OBJECTID": "16236"}, "OWNER",
          "What type of owner runs St. Peter's Hospital in Albany, New York?"),
         ("p01", "power-plants-1", "count", {"STATE": "IA", "PRIM_FUEL": "WND"}, None,
-         "How many wind power plants are in Iowa?"),
+         "How many wind power plants are in Iowa" + ALL),
         ("p02", "power-plants-1", "lookup", {"PLANT_CODE": "6008"}, "SUMMER_CAP",
          "What is the summer capacity, in megawatts, of the Palo Verde power plant in Arizona?"),
         ("p03", "power-plants-1", "count", {"STATE": "VT", "STATUS": "OP"}, None,
@@ -154,19 +156,20 @@ def _():
         ("d01", "national-inventory-of-dams-nid-1", "lookup", {"NIDID": "NV10122"}, "DAM_HEIGHT",
          "How tall, in feet, is Hoover Dam on the Colorado River in Nevada?"),
         ("d02", "national-inventory-of-dams-nid-1", "count", {"STATE": "Rhode Island"}, None,
-         "How many dams are listed in Rhode Island?"),
+         "How many dams are listed in Rhode Island" + ALL),
         ("n01", "nursing-homes", "count", {"STATE": "ME", "COUNTY": "AROOSTOOK"}, None,
-         "How many nursing homes are in Aroostook County, Maine?"),
+         "How many nursing homes are in Aroostook County, Maine" + ALL),
         ("c01", "colleges-and-universities", "lookup", {"IPEDSID": "231174"}, "TOT_ENROLL",
          "What is the total enrollment of the University of Vermont?"),
         ("c02", "colleges-and-universities", "count", {"STATE": "WY"}, None,
-         "How many colleges and universities are in Wyoming?"),
+         "How many colleges and universities are in Wyoming" + ALL),
         ("j01", "prison-boundaries-1", "count", {"STATE": "VT", "TYPE": "STATE"}, None,
-         "How many state prisons are in Vermont?"),
+         "How many state prisons are in Vermont" + ALL),
         ("f01", "fire-and-emergency-medical-service-ems-stations", "count",
          {"STATE": "VT", "CITY": "Burlington"}, None,
-         "How many fire and EMS stations are in Burlington, Vermont?"),
+         "How many fire and EMS stations are in Burlington, Vermont" + ALL),
     ]
+    # fmt: on
     # What a reader would call each layer, to tell whether an answer names it.
     LAYER_NAMES = {
         "hospitals-3": "hospitals",
@@ -227,9 +230,12 @@ def _(BASE_URL, FEATURES, LAYER_NAMES, QUESTIONS, httpx, math, pl, re):
 
                 def _km(f: dict, lat: float = _lat, lon: float = _lon) -> float:
                     x, y = f["geometry"]["coordinates"][:2]
-                    a = (math.sin(math.radians(y - lat) / 2) ** 2
-                         + math.cos(math.radians(lat)) * math.cos(math.radians(y))
-                         * math.sin(math.radians(x - lon) / 2) ** 2)
+                    a = (
+                        math.sin(math.radians(y - lat) / 2) ** 2
+                        + math.cos(math.radians(lat))
+                        * math.cos(math.radians(y))
+                        * math.sin(math.radians(x - lon) / 2) ** 2
+                    )
                     return 12742 * math.asin(math.sqrt(a))
 
                 _value = min(_feats, key=_km)["properties"]["NAME"]
@@ -314,9 +320,16 @@ def _(Agent, BASE_URL, BaseModel, FEATURES, Field, MCPToolset, MCP_URL, dt, http
         )
 
     QUERY_TOOLS = {
-        "list_collections", "get_collection", "search_datasets", "get_dataset",
-        "get_dataset_file", "get_dataset_file_schema", "read_geoparquet_rows",
-        "query_parquet", "inspect_query_source", "get_query_page",
+        "list_collections",
+        "get_collection",
+        "search_datasets",
+        "get_dataset",
+        "get_dataset_file",
+        "get_dataset_file_schema",
+        "read_geoparquet_rows",
+        "query_parquet",
+        "inspect_query_source",
+        "get_query_page",
     }
     BASE_INSTRUCTIONS = (
         "You answer questions about US infrastructure using only the HIFLD Next MCP tools. "
@@ -441,11 +454,13 @@ async def _(
                 if isinstance(p, ToolCallPart):
                     calls[p.tool_call_id] = p.args_as_dict()
                 elif isinstance(p, ToolReturnPart):
-                    log.append({
-                        "tool": p.tool_name,
-                        "args": calls.get(p.tool_call_id, {}),
-                        "content": json.dumps(p.content, default=str),
-                    })
+                    log.append(
+                        {
+                            "tool": p.tool_name,
+                            "args": calls.get(p.tool_call_id, {}),
+                            "content": json.dumps(p.content, default=str),
+                        }
+                    )
         return log
 
     async def ask(agent: object, arm: str, repeat: int, q: tuple, spend: dict) -> dict:
@@ -459,23 +474,30 @@ async def _(
                 timeout=300,
             )
         except Exception as exc:  # a failed run is a measured outcome, not a crash
-            return row | {"error": f"{type(exc).__name__}: {exc}"[:300],
-                          "seconds": time.monotonic() - start}
+            return row | {
+                "error": f"{type(exc).__name__}: {exc}"[:300],
+                "seconds": time.monotonic() - start,
+            }
         messages = result.all_messages()
         cost = sum(
             float((m.provider_details or {}).get("cost", 0) or 0)
-            for m in messages if isinstance(m, ModelResponse)
+            for m in messages
+            if isinstance(m, ModelResponse)
         )
         spend["usd"] += cost
-        return row | result.output.model_dump() | {
-            "seconds": time.monotonic() - start,
-            "cost_usd": cost,
-            "input_tokens": result.usage.input_tokens,
-            "output_tokens": result.usage.output_tokens,
-            "tool_calls": result.usage.tool_calls,
-            "tools": tool_log(messages),
-            "error": None,
-        }
+        return (
+            row
+            | result.output.model_dump()
+            | {
+                "seconds": time.monotonic() - start,
+                "cost_usd": cost,
+                "input_tokens": result.usage.input_tokens,
+                "output_tokens": result.usage.output_tokens,
+                "tool_calls": result.usage.tool_calls,
+                "tools": tool_log(messages),
+                "error": None,
+            }
+        )
 
     if RUN_AGENT:
         _spend = {"usd": 0.0}
@@ -514,8 +536,8 @@ def _(mo):
     - **layer**: the layer's slug, or its name (for example "power plants")
     - **version**: a version string such as `v1.1.0` or "version 1.1.0"
     - **retrieval date**: the run's date (`2026-11-12`, "November 12, 2026" or "Nov 12, 2026")
-    - **query URL**: an `https://` URL into HIFLD Next's data (`/features/…/items`,
-      `/storage/…`, `/api/queries`), or a SQL `SELECT`
+    - **query URL**: a URL that runs a query (`/features/…/items`, `/api/queries`), or a SQL
+      `SELECT` statement. A link to a whole file doesn't count.
     - **source agency**: a producer or agency named in the layer's STAC metadata, for any
       of its versions (Oak Ridge National Laboratory, US Army Corps of Engineers…)
     - **license**: "public domain", "CC-PDM", "PDM" or a license name from the metadata
@@ -529,7 +551,8 @@ def _(LAYER_NAMES, QUESTIONS, dt, layer_meta, pl, re, runs):
     AGENCIES = {
         slug: {
             name.lower()
-            for (s, _v), m in layer_meta.items() if s == slug
+            for (s, _v), m in layer_meta.items()
+            if s == slug
             for name in [p["name"] for p in m.get("providers", []) if "producer" in p["roles"]]
             + [m.get("hifld:agency") or "", m.get("hifld:office") or ""]
             if name
@@ -548,9 +571,12 @@ def _(LAYER_NAMES, QUESTIONS, dt, layer_meta, pl, re, runs):
             "version": bool(re.search(r"\bv\d+\.\d+\.\d+|version\s*\d+\.\d+", low)),
             "retrieval date": any(x in low for x in dates),
             "query URL": bool(
-                re.search(r"https?://[^\s\"']+/(features/collections/[^\s\"']+/items|storage/"
-                          r"|api/queries)", low)
-                or re.search(r"\bselect\b[\s\S]+\bfrom\b", low)
+                re.search(
+                    r"https?://[^\s\"']+/(features/collections/[^\s\"']+/items"
+                    r"|api/queries)",
+                    low,
+                )
+                or re.search(r"\bselect\b[\s\S]+?\bfrom\b", low)
             ),
             "source agency": any(a in low for a in AGENCIES[slug]),
             "license": bool(re.search(r"public domain|cc-pdm|\bpdm\b|creative commons", low)),
@@ -562,13 +588,18 @@ def _(LAYER_NAMES, QUESTIONS, dt, layer_meta, pl, re, runs):
             continue
         _tools_text = " ".join(t["content"] for t in _r["tools"])
         for _where, _text in (("tool responses", _tools_text), ("final answer", _r["answer"])):
-            _rows.append({"arm": _r["arm"], "repeat": _r["repeat"], "qid": _r["qid"],
-                          "where": _where} | fields_in(_text, _r["qid"], _r["date"]))
+            _rows.append(
+                {"arm": _r["arm"], "repeat": _r["repeat"], "qid": _r["qid"], "where": _where}
+                | fields_in(_text, _r["qid"], _r["date"])
+            )
     presence = pl.DataFrame(_rows)
     field_table = (
         presence.group_by("arm", "where")
-        .agg(pl.len().alias("answers"), *[pl.col(f).sum() for f in FIELDS],
-             pl.all_horizontal(*FIELDS).sum().alias("all six"))
+        .agg(
+            pl.len().alias("answers"),
+            *[pl.col(f).sum() for f in FIELDS],
+            pl.all_horizontal(*FIELDS).sum().alias("all six"),
+        )
         .sort("where", "arm", descending=[True, False])
     )
     field_table
@@ -626,8 +657,9 @@ def _(CACHE, LAYER_NAMES, LAYER_OF, duckdb, http, key, pl, re, runs):
         body = resp.json()
         if kind == "count":
             return pinned, [str(body.get("numberMatched"))]
-        return pinned, [str(v) for f in body.get("features", [])[:20]
-                        for v in f["properties"].values()]
+        return pinned, [
+            str(v) for f in body.get("features", [])[:20] for v in f["properties"].values()
+        ]
 
     def local_copy(url: str) -> str:
         path = CACHE / re.sub(r"[^A-Za-z0-9.]+", "_", url.split("/storage/")[-1])
@@ -637,25 +669,27 @@ def _(CACHE, LAYER_NAMES, LAYER_OF, duckdb, http, key, pl, re, runs):
             path.write_bytes(resp.content)
         return str(path)
 
-    def run_sql(text: str) -> tuple[bool, list[str], str | None]:
-        block = re.search(r"```(?:sql)?\s*(select[\s\S]+?)```", text, re.IGNORECASE)
-        sql = block.group(1) if block else None
-        if sql is None:
-            line = re.search(r"(select\b[\s\S]+?)(?:\n\s*\n|$)", text, re.IGNORECASE)
-            sql = line.group(1) if line else None
-        if sql is None:
-            return False, [], None
-        files = re.findall(r"https?://[^\s'\"]+\.parquet", sql)
-        pinned = bool(files) and all(re.search(r"/v\d+\.\d+\.\d+/", f) for f in files)
-        if not files:
-            return False, [], "SQL names no data file"
-        try:
-            for f in files:
-                sql = sql.replace(f, local_copy(f))
-            rows = duckdb.sql(sql).fetchall()
-        except Exception as exc:  # a recipe that doesn't run is a scored outcome
-            return pinned, [], f"{type(exc).__name__}: {str(exc)[:120]}"
-        return pinned, [str(c) for r in rows[:50] for c in r], None
+    def run_sql(text: str) -> list[tuple[bool, list[str], str]]:
+        # Every SELECT in the answer, cut at the first sentence break, code fence or newline.
+        found = []
+        for m in re.finditer(
+            r"\bselect\b[\s\S]+?(?=\.\s+[A-Z(]|\s+\(then|```|\n|$)", text, re.IGNORECASE
+        ):
+            sql = m.group(0).rstrip(" ;.")
+            files = re.findall(r"https?://[^\s'\"]+\.parquet", sql)
+            if not files:
+                found.append((False, [], "SQL names no data file"))
+                continue
+            pinned = all(re.search(r"/v\d+\.\d+\.\d+/", f) for f in files)
+            try:
+                for f in files:
+                    sql = sql.replace(f, local_copy(f))
+                rows = duckdb.sql(sql).fetchmany(200)
+            except Exception as exc:  # a recipe that doesn't run is a scored outcome
+                found.append((pinned, [], f"SQL failed: {type(exc).__name__}"))
+                continue
+            found.append((pinned, [str(c) for r in rows for c in r], "SQL ran"))
+        return found
 
     def score(r: dict, kind: str) -> dict:
         text, value = r["answer"], r["value"]
@@ -664,15 +698,17 @@ def _(CACHE, LAYER_NAMES, LAYER_OF, duckdb, http, key, pl, re, runs):
             url = url.rstrip(".,;:")
             if "/features/collections/" in url and "/items" in url:
                 pinned, cells = run_ogc(url, kind)
-                recipes.append((pinned, found_in(value, cells), url))
-        pinned, cells, err = run_sql(text)
-        if cells or err:
-            recipes.append((pinned, found_in(value, cells), err or "sql"))
+                recipes.append((pinned, found_in(value, cells), url.split("/collections/")[-1]))
+        for pinned, cells, note in run_sql(text):
+            recipes.append((pinned, found_in(value, cells), note))
         slug = LAYER_OF[r["qid"]]
         names_layer = slug in text.lower() or LAYER_NAMES[slug] in text.lower()
         key_vals = key.filter(pl.col("qid") == r["qid"])
-        matches = [v for v, kv in zip(key_vals["version"], key_vals["value"], strict=True)
-                   if same(value, kv)]
+        matches = [
+            v
+            for v, kv in zip(key_vals["version"], key_vals["value"], strict=True)
+            if same(value, kv)
+        ]
         if any(p and ok for p, ok, _ in recipes):
             verdict = "reproduced"
         elif names_layer and matches:
@@ -699,12 +735,25 @@ def _(ARMS, QUESTIONS, current, pl, runs, same, score):
     for _r in runs:
         _base = {"arm": _r["arm"], "repeat": _r["repeat"], "qid": _r["qid"]}
         if _r.get("error"):
-            _rows.append(_base | {"verdict": "not reproducible", "correct": False,
-                                  "value": None, "recipe_notes": _r["error"][:200]})
+            _rows.append(
+                _base
+                | {
+                    "verdict": "not reproducible",
+                    "correct": False,
+                    "value": None,
+                    "recipe_notes": _r["error"][:200],
+                }
+            )
             continue
-        _rows.append(_base | {"value": _r["value"], "key": _cur[_r["qid"]],
-                              "correct": same(_r["value"], _cur[_r["qid"]])}
-                     | score(_r, _kind[_r["qid"]]))
+        _rows.append(
+            _base
+            | {
+                "value": _r["value"],
+                "key": _cur[_r["qid"]],
+                "correct": same(_r["value"], _cur[_r["qid"]]),
+            }
+            | score(_r, _kind[_r["qid"]])
+        )
     scored = pl.DataFrame(_rows, infer_schema_length=None)
     repro_table = (
         scored.group_by("arm")
@@ -734,8 +783,15 @@ def _(mo):
 @app.cell
 def _(scored):
     scored.select(
-        "arm", "repeat", "qid", "value", "key", "correct", "verdict",
-        "matches_versions", "recipe_notes",
+        "arm",
+        "repeat",
+        "qid",
+        "value",
+        "key",
+        "correct",
+        "verdict",
+        "matches_versions",
+        "recipe_notes",
     ).sort("qid", "arm", "repeat")
     return
 
