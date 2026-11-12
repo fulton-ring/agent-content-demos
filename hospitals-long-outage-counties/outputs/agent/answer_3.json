@@ -1,0 +1,119 @@
+{
+ "attempt": 3,
+ "model": "anthropic/claude-haiku-5.5",
+ "answer": {
+  "hospitals": 2283,
+  "hospital_storm_pairs": 3177,
+  "storms": 241,
+  "hospitals_more_than_once": 696,
+  "top_hospital_ids": [
+   "0017270631",
+   "0001742717",
+   "0003232168",
+   "0003341701",
+   "0003839474",
+   "0004339121",
+   "0004341339",
+   "0005032424",
+   "0011532721",
+   "0011932763"
+  ],
+  "by_trauma_level": [
+   {
+    "group": "NOT AVAILABLE",
+    "hospitals": 1679
+   },
+   {
+    "group": "LEVEL IV",
+    "hospitals": 285
+   },
+   {
+    "group": "LEVEL III",
+    "hospitals": 138
+   },
+   {
+    "group": "LEVEL I",
+    "hospitals": 72
+   },
+   {
+    "group": "LEVEL II",
+    "hospitals": 71
+   },
+   {
+    "group": "TRH",
+    "hospitals": 10
+   },
+   {
+    "group": "CTH",
+    "hospitals": 6
+   },
+   {
+    "group": "LEVEL I PEDIATRIC",
+    "hospitals": 4
+   },
+   {
+    "group": "PEDIATRIC",
+    "hospitals": 3
+   },
+   {
+    "group": "LEVEL I ADULT, LEVEL I PEDIATRIC",
+    "hospitals": 2
+   },
+   {
+    "group": "TRF",
+    "hospitals": 2
+   },
+   {
+    "group": "LEVEL I ADULT, LEVEL II PEDIATRIC",
+    "hospitals": 2
+   },
+   {
+    "group": "LEVEL II / PEDIATRIC",
+    "hospitals": 2
+   },
+   {
+    "group": "LEVEL II PEDIATRIC",
+    "hospitals": 2
+   },
+   {
+    "group": "RTH",
+    "hospitals": 1
+   },
+   {
+    "group": "LEVEL V",
+    "hospitals": 1
+   },
+   {
+    "group": "REGIONAL",
+    "hospitals": 1
+   },
+   {
+    "group": "LEVEL III ADULT",
+    "hospitals": 1
+   },
+   {
+    "group": "LEVEL II ADULT, LEVEL II PEDIATRIC",
+    "hospitals": 1
+   }
+  ],
+  "method": "Utility rows from Heimdall Storm Blackout v1.2 (data__utility_by_county.csv) were kept when declared = true, available = true, peak_customers_out is present, customers_total > 0, and peak_customers_out / customers_total >= 0.10. A county-storm qualified on duration when hours_to_90pct_restored > 72, or when it is empty with reason not_restored_in_window (never restored within the window). Eta was counted once: DR-4588 rows were mapped to AL292020. Hospitals came from HIFLD Next hospitals-3 v1.1.0 (geoparquet), limited to STATUS = OPEN and joined on COUNTYFIPS = geoid (5-digit text). Pairs are distinct (source_ID, storm). Storms are distinct storms with at least one qualifying county (241); 211 of those storms have at least one qualifying hospital county. Trauma counts are hospitals with at least one qualifying storm, grouped by the TRAUMA field as recorded.",
+  "caveats": [
+   "Rows with hours_to_90pct_reason reporting_drop or peak_mismatch have no restoration time and were excluded, even if their peak share was at least 10%; the feed-stop cases could hide qualifying counties.",
+   "Customer totals are EIA-861 estimates split by housing units, so the 10% share is approximate.",
+   "The 90% threshold uses the 45-day window, so 'not restored' means not restored within 45 days (or until the next FEMA storm in the county), not never restored.",
+   "Eta has two records (AL292020 and DR-4588) with different county values; I counted it once by mapping DR-4588 to AL292020. Using both records would change the counts.",
+   "Storms count is 241 by county, but only 211 storms have a hospital in a qualifying county.",
+   "The top-10 list has ties: the 9th-10th IDs and several others have 4 storms each, so the cut at 10 is arbitrary; two more hospitals (0012732117, 0015132114) also have 4.",
+   "Hospital county assignment uses HIFLD COUNTYFIPS, not geocoding; the Connecticut county change and Bedford city (51515) are not handled.",
+   "Most hospitals (1,679 of 2,283) have trauma status 'NOT AVAILABLE', and the TRAUMA field mixes levels, categories and pediatric/adult designations, so the trauma breakdown is not a clean level count.",
+   "The 'more than once' count uses storm groups, so Eta contributes at most one storm per hospital.",
+   "Night-light fields are not used; the analysis relies on EAGLE-I utility records only, and EAGLE-I coverage is incomplete in some years and states."
+  ]
+ },
+ "seconds": 55,
+ "cost_usd": 0.0734233,
+ "requests": 14,
+ "tool_calls": 22,
+ "input_tokens": 682708,
+ "output_tokens": 10305
+}

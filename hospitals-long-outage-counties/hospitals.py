@@ -207,8 +207,20 @@ def _(DATA, HOSPITALS_URL, download, gpd, pl, zipfile):
     ).drop_duplicates("source_ID")
     assert len(_joined) == len(_points), "a hospital fell in two counties"
     all_hospitals = pl.from_pandas(
-        _joined[["source_ID", "NAME", "CITY", "STATE", "TYPE", "STATUS", "BEDS", "TRAUMA",
-                 "COUNTYFIPS", "GEOID"]]
+        _joined[
+            [
+                "source_ID",
+                "NAME",
+                "CITY",
+                "STATE",
+                "TYPE",
+                "STATUS",
+                "BEDS",
+                "TRAUMA",
+                "COUNTYFIPS",
+                "GEOID",
+            ]
+        ]
     ).rename({"GEOID": "geoid"})
     hospitals = all_hospitals.filter(pl.col("STATUS") == "OPEN")
     join_check = {
@@ -277,9 +289,7 @@ def _(mo):
 
 @app.cell
 def _(OUT, pairs, pl):
-    _hours = pl.coalesce(
-        "hours_to_90pct_restored", pl.col("window_end_day").cast(pl.Float64) * 24
-    )
+    _hours = pl.coalesce("hours_to_90pct_restored", pl.col("window_end_day").cast(pl.Float64) * 24)
     ranking = (
         pairs.with_columns(hours_to_90=_hours)
         .group_by("source_ID", "NAME", "CITY", "STATE", "geoid", "TYPE", "BEDS", "TRAUMA")
@@ -306,10 +316,7 @@ def _(OUT, pairs, plt, ranking):
     _a.set_ylabel("hospitals")
     _a.set_title("How often hospitals repeat")
     _by_year = (
-        pairs.with_columns(year=pairs["landfall"].dt.year())
-        .group_by("year")
-        .len()
-        .sort("year")
+        pairs.with_columns(year=pairs["landfall"].dt.year()).group_by("year").len().sort("year")
     )
     _b.bar(_by_year["year"], _by_year["len"], color="#c0504d")
     _b.set_xlabel("storm year")
@@ -350,6 +357,39 @@ def _(OUT, pairs, pl):
 
 
 @app.cell
+def _(DATA, OUT, county_storms, gpd, hospitals, pl, plt, ranking):
+    _long = county_storms.filter("long").group_by("geoid").agg(long_storms=pl.len())
+    _shapes = gpd.read_file(DATA / "counties_2020")[["GEOID", "STATEFP", "geometry"]]
+    _shapes = _shapes[~_shapes["STATEFP"].isin(["02", "15", "60", "66", "69", "72", "78"])]
+    _shapes = _shapes.merge(
+        _long.rename({"geoid": "GEOID"}).to_pandas(), on="GEOID", how="left"
+    ).to_crs(5070)
+    _repeat = hospitals.join(
+        ranking.filter(pl.col("long_storms") >= 2).select("source_ID"), on="source_ID"
+    )["source_ID"].to_list()
+    _pts = gpd.read_parquet(DATA / "hospitals-3.parquet")
+    _pts = _pts[_pts["source_ID"].isin(_repeat)].to_crs(5070)
+    _fig, _ax = plt.subplots(figsize=(11, 6.5))
+    _shapes.plot(ax=_ax, color="#eeeeee", edgecolor="white", linewidth=0.1)
+    _shapes.dropna(subset=["long_storms"]).plot(
+        ax=_ax,
+        column="long_storms",
+        cmap="OrRd",
+        legend=True,
+        vmin=1,
+        vmax=4,
+        legend_kwds={"label": "storms with a long outage (main test)", "shrink": 0.6},
+    )
+    _pts[_pts.within(_shapes.union_all())].plot(ax=_ax, color="#1f3b73", markersize=3)
+    _ax.set_axis_off()
+    _ax.set_title("Counties with long outages, 2014-2025, and hospitals hit more than once (dots)")
+    _fig.tight_layout()
+    _fig.savefig(OUT / "long_outage_counties_map.png", dpi=150)
+    _fig
+    return
+
+
+@app.cell
 def _(mo):
     mo.md(r"""
     ## 5. By beds and trauma level
@@ -371,16 +411,25 @@ def _(OUT, hospitals, pl, ranking):
         ranking.select("source_ID", "long_storms"), on="source_ID", how="left"
     ).with_columns(
         long_storms=pl.col("long_storms").fill_null(0),
-        beds=pl.when(_beds < 0).then(pl.lit("unknown"))
-        .when(_beds < 26).then(pl.lit("1-25"))
-        .when(_beds < 100).then(pl.lit("26-99"))
-        .when(_beds < 300).then(pl.lit("100-299"))
+        beds=pl.when(_beds < 0)
+        .then(pl.lit("unknown"))
+        .when(_beds < 26)
+        .then(pl.lit("1-25"))
+        .when(_beds < 100)
+        .then(pl.lit("26-99"))
+        .when(_beds < 300)
+        .then(pl.lit("100-299"))
         .otherwise(pl.lit("300+")),
-        trauma=pl.when(_trauma.str.contains(r"LEVEL I\b|LEVEL I$")).then(pl.lit("Level I"))
-        .when(_trauma.str.contains(r"LEVEL II\b")).then(pl.lit("Level II"))
-        .when(_trauma.str.contains(r"LEVEL III\b")).then(pl.lit("Level III"))
-        .when(_trauma.str.contains(r"LEVEL IV\b")).then(pl.lit("Level IV"))
-        .when(_trauma == "NOT AVAILABLE").then(pl.lit("none listed"))
+        trauma=pl.when(_trauma.str.contains(r"LEVEL I\b"))
+        .then(pl.lit("Level I"))
+        .when(_trauma.str.contains(r"LEVEL II\b"))
+        .then(pl.lit("Level II"))
+        .when(_trauma.str.contains(r"LEVEL III\b"))
+        .then(pl.lit("Level III"))
+        .when(_trauma.str.contains(r"LEVEL IV\b"))
+        .then(pl.lit("Level IV"))
+        .when(_trauma == "NOT AVAILABLE")
+        .then(pl.lit("none listed"))
         .otherwise(pl.lit("other designation")),
     )
 
@@ -418,14 +467,17 @@ def _(mo):
     1. **Heimdall's `coverage_gap` flag** marks a gap of more than 6 hours in the utility series
        after the peak. EAGLE-I leaves out rows when nobody is out, so gaps are normal. We compare
        how often the flag is set on long rows and on all other rows.
-    2. **EAGLE-I's own coverage table** gives, for each state and year from 2018 on, the share of
-       customers whose utilities EAGLE-I tracks. We look at how many long pairs fall in
-       state-years with under 80% coverage, or before 2018, when the coverage is unknown.
+    2. **EAGLE-I's own coverage table** gives the share of customers whose utilities EAGLE-I
+       tracks, for each state in each year from 2018 to 2022 only. We count the long pairs in
+       state-years under 80% coverage, and the pairs outside 2018-2022, where coverage is
+       unknown.
     3. **Rows that may be broken feeds.** A county counted as never restored could be a utility
        map stuck on a stale number. Heimdall also flags counties whose peak exceeded the customer
        estimate in another storm, which suggests the estimate is too low.
     4. **Recount with the doubtful rows removed.** We drop every row flagged in 2 and 3, recount
-       the hospitals that repeat, and see how many are left.
+       the hospitals that repeat, and see how many are left. Dropping the unknown years removes
+       half the decade on its own, so we also count repeaters in 2018-2022 before removing
+       the other doubts.
     """)
     return
 
@@ -453,16 +505,15 @@ def _(county_storms, download, pairs, pairs_for, pl):
             .with_columns(
                 coverage_unknown=pl.col("coverage").is_null(),
                 coverage_under_80=(pl.col("coverage") < 0.8).fill_null(False),
-                maybe_stuck=(pl.col("hours_to_90pct_reason") == "not_restored_in_window")
-                .fill_null(False),
+                maybe_stuck=(pl.col("hours_to_90pct_reason") == "not_restored_in_window").fill_null(
+                    False
+                ),
                 estimate_low=pl.col("estimate_exceeded_in_other_storm").fill_null(False),
             )
         )
 
     _q = with_quality(pairs)
-    _repeat_ids = (
-        pairs.group_by("source_ID").len().filter(pl.col("len") > 1)["source_ID"].implode()
-    )
+    _repeat_ids = pairs.group_by("source_ID").len().filter(pl.col("len") > 1)["source_ID"].implode()
     _flags = ["coverage_unknown", "coverage_under_80", "maybe_stuck", "estimate_low"]
     gap_shares = pl.concat(
         [
@@ -479,7 +530,9 @@ def _(county_storms, download, pairs, pairs_for, pl):
 
     _clean = _q.filter(~pl.any_horizontal(_flags))
     _per = _clean.group_by("source_ID").len()
+    _same_years = _q.filter(~pl.col("coverage_unknown")).group_by("source_ID").len()
     robust = {
+        "repeaters_2018_2022_before_removing_doubts": _same_years.filter(pl.col("len") > 1).height,
         "pairs_kept": _clean.height,
         "hospitals_kept": _per.height,
         "hospitals_more_than_once_kept": _per.filter(pl.col("len") > 1).height,
@@ -520,7 +573,7 @@ def _(os):
 
     import duckdb
     from pydantic import BaseModel, Field
-    from pydantic_ai import Agent, ModelRetry
+    from pydantic_ai import Agent, ModelRetry, RunContext
     from pydantic_ai.mcp import MCPToolset
     from pydantic_ai.messages import ModelMessagesTypeAdapter
     from pydantic_ai.usage import UsageLimits
@@ -540,6 +593,7 @@ def _(os):
         MCPToolset,
         ModelMessagesTypeAdapter,
         ModelRetry,
+        RunContext,
         UsageLimits,
         asyncio,
         duckdb,
@@ -572,7 +626,7 @@ def _(BaseModel, Field):
 
 
 @app.cell
-def _(Agent, AgentAnswer, MCPToolset, ModelRetry, download, duckdb):
+def _(Agent, AgentAnswer, MCPToolset, ModelRetry, RunContext, download, duckdb):
     QUESTION = (
         "Which US hospitals sat in counties that stayed without power longest after the major "
         "storms of the past decade? Use HIFLD Next's hospital layer (version 1.1.0, find it "
@@ -595,9 +649,16 @@ def _(Agent, AgentAnswer, MCPToolset, ModelRetry, download, duckdb):
         "column meanings before you rely on them. Report numbers only from query results."
     )
     MCP_TOOLS = {
-        "list_collections", "get_collection", "search_datasets", "get_dataset",
-        "get_dataset_file", "get_dataset_file_schema", "read_geoparquet_rows",
-        "query_parquet", "inspect_query_source", "get_query_page",
+        "list_collections",
+        "get_collection",
+        "search_datasets",
+        "get_dataset",
+        "get_dataset_file",
+        "get_dataset_file_schema",
+        "read_geoparquet_rows",
+        "query_parquet",
+        "inspect_query_source",
+        "get_query_page",
     }
 
     def make_agent(model: str) -> tuple[Agent[duckdb.DuckDBPyConnection, AgentAnswer], MCPToolset]:
@@ -613,7 +674,7 @@ def _(Agent, AgentAnswer, MCPToolset, ModelRetry, download, duckdb):
         )
 
         @agent.tool
-        def load_table(ctx, url: str, table: str) -> str:  # noqa: ANN001
+        def load_table(ctx: RunContext[duckdb.DuckDBPyConnection], url: str, table: str) -> str:
             """Download a .csv or .parquet file from an https URL into DuckDB table `table`."""
             if not url.startswith("https://") or not table.isidentifier():
                 raise ModelRetry("url must be https and table a plain identifier")
@@ -623,13 +684,15 @@ def _(Agent, AgentAnswer, MCPToolset, ModelRetry, download, duckdb):
             except Exception as exc:  # the model sees the error and can fix the URL
                 raise ModelRetry(f"download failed: {exc}") from exc
             reader = "read_parquet" if "parquet" in url else "read_csv_auto"
+            cur = ctx.deps.cursor()  # tools can run in parallel; each call gets its own cursor
             try:
-                ctx.deps.execute(f"CREATE OR REPLACE TABLE {table} AS SELECT * FROM {reader}(?)",
-                                 [str(path)])
+                cur.execute(
+                    f"CREATE OR REPLACE TABLE {table} AS SELECT * FROM {reader}(?)", [str(path)]
+                )
             except duckdb.Error as exc:
                 raise ModelRetry(f"could not read the file: {exc}") from exc
-            cols = ctx.deps.execute(f"DESCRIBE {table}").fetchall()
-            rows = ctx.deps.execute(f"SELECT count(*) FROM {table}").fetchone()
+            cols = cur.execute(f"DESCRIBE {table}").fetchall()
+            rows = cur.execute(f"SELECT count(*) FROM {table}").fetchone()
             return f"{table}: {rows[0] if rows else 0} rows; columns " + ", ".join(
                 f"{c[0]} {c[1]}" for c in cols
             )
@@ -646,15 +709,15 @@ def _(Agent, AgentAnswer, MCPToolset, ModelRetry, download, duckdb):
                 raise ModelRetry(f"download failed: {exc}") from exc
 
         @agent.tool
-        def sql(ctx, query: str) -> str:  # noqa: ANN001
+        def sql(ctx: RunContext[duckdb.DuckDBPyConnection], query: str) -> str:
             """Run one read-only SELECT in DuckDB. Returns at most 60 rows as CSV."""
             if not query.lstrip().lower().startswith(("select", "with", "describe")):
                 raise ModelRetry("only SELECT, WITH or DESCRIBE queries")
             try:
-                frame = ctx.deps.execute(query).pl()
+                frame = ctx.deps.cursor().execute(query).df()
             except duckdb.Error as exc:
                 raise ModelRetry(f"query failed: {exc}") from exc
-            return f"{frame.height} rows\n" + frame.head(60).write_csv()
+            return f"{len(frame)} rows\n" + frame.head(60).to_csv(index=False)
 
         return agent, mcp
 
@@ -692,8 +755,11 @@ async def _(
                         timeout=900,
                     )
             except Exception as exc:  # a failed attempt is a measured outcome
-                return record | {"error": f"{type(exc).__name__}: {exc}"[:500],
-                                 "seconds": round(time.monotonic() - start), "cost_usd": None}
+                return record | {
+                    "error": f"{type(exc).__name__}: {exc}"[:500],
+                    "seconds": round(time.monotonic() - start),
+                    "cost_usd": None,
+                }
         (AGENT_DIR / f"transcript_{n}.json").write_bytes(
             ModelMessagesTypeAdapter.dump_json(result.all_messages(), indent=1)
         )
@@ -717,11 +783,11 @@ async def _(
             _rec = await attempt(_n)
             _spent += _rec["cost_usd"] or 0
             (AGENT_DIR / f"answer_{_n}.json").write_text(json.dumps(_rec, indent=1))
-            print(f"attempt {_n}: {_rec['seconds']} s, ${_rec['cost_usd'] or 0:.3f}",
-                  _rec.get("error", ""))
-    agent_records = [
-        json.loads(p.read_text()) for p in sorted(AGENT_DIR.glob("answer_*.json"))
-    ]
+            print(
+                f"attempt {_n}: {_rec['seconds']} s, ${_rec['cost_usd'] or 0:.3f}",
+                _rec.get("error", ""),
+            )
+    agent_records = [json.loads(p.read_text()) for p in sorted(AGENT_DIR.glob("answer_*.json"))]
     print(f"{len(agent_records)} saved agent answers")
     return (agent_records,)
 
@@ -761,13 +827,46 @@ def _(agent_records, headlines, pl, ranking):
             }
         )
     _rows.append(
-        {"attempt": 0, "hospitals": _ours["hospitals"], "pairs": _ours["hospital_storm_pairs"],
-         "storms": _ours["storms"], "repeat_hospitals": _ours["hospitals_more_than_once"],
-         "top10_right": 10, "error": "ours (attempt 0)"}
+        {
+            "attempt": 0,
+            "hospitals": _ours["hospitals"],
+            "pairs": _ours["hospital_storm_pairs"],
+            "storms": _ours["storms"],
+            "repeat_hospitals": _ours["hospitals_more_than_once"],
+            "top10_right": 10,
+            "error": "ours (attempt 0)",
+        }
     )
     agent_scores = pl.DataFrame(_rows)
     agent_scores
     return (agent_scores,)
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    **Where a shortcut join lands.** The obvious join uses HIFLD's `COUNTYFIPS` column instead
+    of placing each point in a county. In Connecticut that column holds the 2022 planning-region
+    codes (091xx), while Heimdall uses the old county codes (090xx). Every Connecticut hospital
+    silently drops out of a `COUNTYFIPS` join. The counts below show the effect.
+    """)
+    return
+
+
+@app.cell
+def _(county_storms, hospitals, pl):
+    _p = hospitals.join(county_storms.filter("long"), left_on="COUNTYFIPS", right_on="geoid")
+    _per = _p.group_by("source_ID").len()
+    countyfips_join = {
+        "hospitals": _per.height,
+        "hospital_storm_pairs": _p.height,
+        "hospitals_more_than_once": _per.filter(pl.col("len") > 1).height,
+        "connecticut_hospitals_lost": hospitals.filter(pl.col("STATE") == "CT")
+        .join(county_storms.filter("long"), on="geoid")["source_ID"]
+        .n_unique(),
+    }
+    countyfips_join
+    return (countyfips_join,)
 
 
 @app.cell
@@ -785,6 +884,7 @@ def _(
     OUT,
     agent_scores,
     by_group,
+    countyfips_join,
     gap_shares,
     headlines,
     join_check,
@@ -804,6 +904,7 @@ def _(
         "coverage_doubt_shares": gap_shares.to_dicts(),
         "robust_recount": robust,
         "by_beds_and_trauma": by_group.to_dicts(),
+        "countyfips_join": countyfips_join,
         "agent": agent_scores.to_dicts(),
     }
     (OUT / "summary.json").write_text(json.dumps(summary, indent=1, default=str))
