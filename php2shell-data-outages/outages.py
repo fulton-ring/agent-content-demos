@@ -274,8 +274,10 @@ def _(CDX_DIR, REPLAY_URL, SHUTDOWN_START, UA, caps, json, pd, re, requests, tim
     _keys = [f"{i}:{t}" for i, t in zip(caps["id"], caps["timestamp"], strict=True)]
     caps["maintenance"] = [replays.get(k, {}).get("maintenance") == "yes" for k in _keys]
     caps["bad"] = caps["status"].str.match(r"5\d\d|404|410") | caps["maintenance"]
+    _suspect_keys = {f"{i}:{t}" for i, t in zip(suspects["id"], suspects["timestamp"], strict=True)}
     print(
-        f"{len(suspects)} suspect captures, {len(replays)} replayed, {int(caps['maintenance'].sum())} maintenance pages"
+        f"{len(_suspect_keys)} suspect captures, {len(_suspect_keys & replays.keys())} replayed,"
+        f" {int(caps['maintenance'].sum())} maintenance pages"
     )
     return MAINTENANCE, headline
 
@@ -470,6 +472,8 @@ def _(
         "no_captures_in_window": int((_checked["captures_in_window"] == 0).sum()),
         "too_few_captures_to_tell": int((~_checked["can_tell"]).sum()),
         "share_too_few_captures": round(float((~_checked["can_tell"]).mean()), 3) if len(_checked) else None,
+        "too_few_captures_by_group": (~_checked["can_tell"]).groupby(_checked["group"]).sum().astype(int).to_dict(),
+        "captures_per_day": caps.groupby(caps["time"].dt.strftime("%Y-%m-%d")).size().to_dict(),
         "went_offline_shutdown_days": int(df["outage_shutdown_days"].sum()),
         "named_in_coverage": int(_named.sum()),
         "named_in_coverage_can_tell": int((_named & df["can_tell"]).sum()),

@@ -21,7 +21,8 @@ it with its outputs: `uv run marimo edit outages.py`.
 The notebook reads the saved archive answers in `cdx/` and today's live check in `live/` first, and only goes
 to the network for what's missing. A rerun on the same day and network gives the same numbers. A run on a new
 day adds a new live check. To query the archive from scratch, empty `cdx/`. The fetch is one query at a time,
-two seconds apart, and takes about 25 minutes.
+two seconds apart; from a GitHub Actions runner the archive took about 33 seconds per endpoint, so a
+full fetch takes over two hours.
 
 Settings, all optional, from environment variables: `CDX_URL`, `REPLAY_URL`, `CDX_DIR`, `LIVE_DIR`,
 `OUTPUT_DIR`, `NETWORK` (labels the live check, default `local`) and `CHECK_DATE`.
@@ -42,40 +43,56 @@ Settings, all optional, from environment variables: `CDX_URL`, `REPLAY_URL`, `CD
 - `live/<date>-<network>.csv`: one live request per endpoint.
 
 The Wayback Machine doesn't answer from the Claude worker's sandbox, so the archive fetch ran from a GitHub
-Actions runner (`archive-fetch.yml`, copied to `.github/workflows/` only while the branch needed it).
+Actions runner (`archive-fetch.yml`, copied to `.github/workflows/` only while the branch needed it). It took
+five runs: the archive answered CDX queries in about 33 seconds each, and it throttles replays to about 15 a
+minute.
 
 ## Results
 
-**Partial run (2026-11-11). Not final.** The archive answered for 203 of the 255 endpoints before the GitHub
-Actions job hit its time limit, and the second job never started. The 52 missing endpoints include 9 of the 10
-named in coverage. The 78 suspect captures that might be maintenance pages haven't been opened yet, because
-replays need the archive too. So maintenance pages served with a 200 status aren't counted below.
-
-From the 203 endpoints with archive answers:
+From the run of 2026-11-12: archive answers for all 255 endpoints, the 93 suspect captures opened, and a live
+check from a GitHub Actions runner the same day.
 
 | | |
 |---|---|
-| Endpoints with archive answers | 203 of 255 (US 173, UK 15, CA 17, NL 11, FI 8, FR 8, DE 8, BE 7, DK 6, EU 2 in the full list) |
-| No capture at all, Oct 14 to Nov 1 | 70 |
-| No capture during the shutdown days (too few to tell) | 143 (70%) |
-| Outage starting in the shutdown days | 3 |
-| Median outage length, bounds | 0 to 20.7 hours |
-| Still bad at the end of the window | 0 |
+| Endpoints checked | 255: US 173 (50 HIFLD Next sources, 98 federal, 25 state), CA 17, UK 15, NL 11, FI 8, FR 8, DE 8, BE 7, DK 6, EU 2 |
+| No capture at all, Oct 14 to Nov 1 | 81 |
+| No capture during the shutdown days (too few to tell) | 173 (68%) |
+| Outages starting in the shutdown days | 4 (CA 1, NL 1, DE 1, US 1) |
+| Median outage length, bounds | 0 to 34.8 hours |
+| Still bad at the end of the window (Nov 1) | 0 |
 | Outages starting in the week before (background) | 1 |
-| Outages that had an outside copy | 3 of 3 |
-| Live on 2026-11-11 (all 255) | 235 up, 15 blocked our client, 3 down, 2 gone, 0 up without downloads |
+| Outages that had an outside copy | 4 of 4 (238 of 255 endpoints have one) |
+| Live on 2026-11-12 | 233 up, 18 blocked our client, 2 down, 2 gone |
+| Up without downloads | 0 of the 14 pages where we found data-file links |
 
-The method sees the one control it could check: the Statistics Canada home page returned a 503 to the archive at
-16:56 UTC on October 21 and was back by 04:53 UTC on October 23, which matches CBC's report. The other two
-outages are single bad captures: a 404 on the retired HIFLD Open hub, and a 404 on the German Federal
-Employment Agency's statistics site. Both look like ordinary noise.
+**The method sees real takedowns when the archive was looking.** Ten endpoints were named offline in coverage.
+Five had a capture during the shutdown days, and two of those show the outage. Statistics Canada's home page
+returned a 503 at 16:56 UTC on October 21 and was back by 04:53 UTC on October 23, which matches CBC. The Dutch
+cyber-security agency's home page served "Onze website is tijdelijk niet beschikbaar" (our website is
+temporarily unavailable) at 10:53 UTC on October 21 and was back by 20:15 UTC. The other three (OBR data, the
+Finnish Government, Canada's Cyber Centre) had captures only before their takedown or after it.
 
-The capture record is the main limit. The archive made about 1,200 captures a day of these endpoints from
-October 14 to 17 and about 100 a day after that, so most endpoints have no capture during the shutdown days at
-all. On this sample, "almost nothing went down" can't be told apart from "the archive wasn't looking".
+**The other two outages look like noise:** a single 404 on the retired HIFLD Open hub, and a single 404 on the
+German Federal Employment Agency's statistics site, each good again within hours. The same statistics site
+served a maintenance page on October 26, after the shutdown days.
+
+**Everything seen going down came back within the window.** None of the 4 was still bad on November 1. Today two
+are up, one is the retired HIFLD Open hub (gone before the shutdowns too), and one blocks our client. Of the
+four, two run Drupal and two show no PHP. We found no data page that came back without its downloads, but only
+14 pages had download links we could test.
+
+**The capture record is the main limit.** The archive made about 4,500 captures a day of these endpoints from
+October 14 to 16, then 100 to 175 a day from October 18 on, shutdown days included. 68% of endpoints have no capture during October 21 to 23, and
+49 of the 50 HIFLD Next sources have none. Among the national portals in the shutdown countries, 57 of 82 can't
+be told. So the answer to "did they all come back" is yes for every outage we could see, but "nobody published
+a list" holds for the archive too: most of what might have gone dark wasn't watched.
 
 Full numbers: `outputs/summary.json`. Per endpoint: `outputs/endpoint_results.csv`. Each outage with its
-bounds: `outputs/outages.csv`. The run's printout: `outputs/last-run.txt`.
+bounds: `outputs/outages.csv`. The run's printout: `outputs/last-run.txt`. The live check from the worker's
+sandbox on 2026-11-11 is kept in `live/` (235 up, 15 blocked, 3 down, 2 gone).
+
+To reproduce these numbers exactly from the saved files, run
+`NETWORK=github-actions CHECK_DATE=2026-11-12 ./run.sh`. Without those settings it makes a new live check today.
 
 ## How it decides
 
