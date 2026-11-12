@@ -228,8 +228,9 @@ def _(CACHE, FIRST_WY, LAST_WY, dt, iem_hads, pl, threading, usgs_items):
                     )  # fmt: skip
                 if iem.height:
                     frames.append(
-                        iem.with_columns(status=pl.lit("Transmitted"), qualifier=pl.lit(None, pl.String),
-                                         window=pl.lit(day))  # fmt: skip
+                        iem.with_columns(
+                            status=pl.lit("Transmitted"), qualifier=pl.lit(None, pl.String), window=pl.lit(day)
+                        )  # fmt: skip
                     )
         schema = {"utc": pl.Datetime("us"), "var": pl.String, "value": pl.Float64, "status": pl.String,
                   "qualifier": pl.String, "window": pl.Date}  # fmt: skip
@@ -273,8 +274,10 @@ def _(mo):
     garbled radio message. USGS's website doesn't show those, so before taking the transmitted peak we drop
     any reading more than 1 ft (and more than 10%) away from the median of its five-reading neighbourhood
     (25% and 500 cfs for discharge), and any reading more than 25% and 2 ft above the highest value USGS
-    approved at that gage in any of our windows (garbage often arrives in runs, which the median misses). We count how often such a spike sat above the crest. We also check that the gage transmitted something within two hours of the approved peak,
-    because a transmission gap at the crest makes the "transmitted peak" meaningless rather than revised.
+    approved at that gage in any of our windows (garbage often arrives in runs, which the median misses). We
+    count how often such a spike sat above the crest. We also check that the gage transmitted something within
+    two hours of the approved peak, because a transmission gap at the crest makes the "transmitted peak"
+    meaningless rather than revised.
     """)
     return
 
@@ -316,7 +319,7 @@ def _(pl, windows):
     )  # fmt: skip
     tx_q = flag_spikes(
         iem.filter(pl.col("var").str.starts_with("QR"))
-        .group_by("usgs_id", "window", "utc").agg((pl.col("value").median() * 1000)),
+        .group_by("usgs_id", "window", "utc").agg(pl.col("value").median() * 1000),
         "usgs_q", floor=500.0, share=0.25,
     )  # fmt: skip
 
@@ -405,7 +408,9 @@ def _(gages, gh_years, pl):
             pl.col("all_approved") & (pl.col("tx_near_peak") == 0)
         ).height,
         "gage on a different datum (gage-years)": labelled.filter(
-            pl.col("all_approved") & (pl.col("tx_near_peak") > 0) & pl.col("usgs_id").is_in(datum_off["usgs_id"].implode())
+            pl.col("all_approved")
+            & (pl.col("tx_near_peak") > 0)
+            & pl.col("usgs_id").is_in(datum_off["usgs_id"].implode())
         ).height,
     }
     gh = labelled.filter(
@@ -491,8 +496,9 @@ def _(mo):
     ## 6. Did the windows miss any transmitted peaks?
 
     For a seeded sample of approved gage-years we pull the whole water year from IEM and check whether the
-    gage's highest transmitted stage (after the same garbage filter) fell inside our three windows. A transmitted maximum outside them is
-    usually a spike or a bad value that USGS removed, which is a revision our window method doesn't count.
+    gage's highest transmitted stage (after the same garbage filter) fell inside our three windows. A
+    transmitted maximum outside them is usually a spike or a bad value that USGS removed, which is a revision
+    our window method doesn't count.
     """)
     return
 
@@ -520,7 +526,8 @@ def _(CACHE, SEED, gh, httpx, iem_hads, pl, random):
                     & (pl.col("value") <= ceiling)
                 )
                 rows.append({"usgs_id": usgs_id, "nws_id": nws_id, "wy": wy, "window_max": tx_window,
-                             "full_year_max_raw": top["value"].max(), "full_year_max": clean["value"].max()})  # fmt: skip
+                             "full_year_max_raw": top["value"].max(),
+                             "full_year_max": clean["value"].max()})  # fmt: skip
         full_check = pl.DataFrame(rows)
         full_check.write_csv(check_path)
     full_check = full_check.with_columns(missed=(pl.col("full_year_max") - pl.col("window_max")) > 0.05)
