@@ -1,0 +1,38 @@
+name: php2shell-data-outages archive fetch
+
+# The Wayback Machine's CDX index doesn't answer from the Claude worker's sandbox, so this runs the notebook from
+# a GitHub Actions runner and commits the saved archive answers (cdx/), the live check (live/) and outputs/ to
+# the spike branch. Kept in the project folder; copied to .github/workflows only while the spike branch needs
+# the run, never merged.
+
+on:
+  push:
+    branches: [spike/php2shell-data-outages]
+    paths: [php2shell-data-outages/outages.py, php2shell-data-outages/endpoints.csv]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    defaults:
+      run:
+        working-directory: php2shell-data-outages
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: ./run.sh
+        env:
+          NETWORK: github-actions
+      - name: Commit results to the spike branch
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add cdx live outputs
+          git commit -m "php2shell-data-outages: archive fetch and live check from GitHub Actions" || exit 0
+          git pull --rebase origin spike/php2shell-data-outages
+          git push origin HEAD:spike/php2shell-data-outages
