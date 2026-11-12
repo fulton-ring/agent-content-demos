@@ -258,7 +258,7 @@ def _(TIPPECANOE, WORK, describe_pmtiles, measured, pq, shutil, source_crs, sys,
                     sys.executable,
                     "-c",
                     (
-                        "import duckdb; c = duckdb.connect(); c.sql('LOAD spatial'); "
+                        "import duckdb; c = duckdb.connect(); c.sql('INSTALL spatial'); c.sql('LOAD spatial'); "
                         f'c.sql("""COPY (SELECT * EXCLUDE ({drop}), '
                         f"ST_Transform({geometry}, '{crs}', 'EPSG:4326', always_xy := true) AS geometry "
                         f"FROM read_parquet({names!r}, union_by_name=true)) "
@@ -288,7 +288,7 @@ def _(TIPPECANOE, WORK, describe_pmtiles, measured, pq, shutil, source_crs, sys,
         ]
         replace = f" REPLACE ({', '.join(f'hex({b}) AS {b}' for b in binary)})" if binary else ""
         convert_script = (
-            "import duckdb; c = duckdb.connect(); c.sql('LOAD spatial'); "
+            "import duckdb; c = duckdb.connect(); c.sql('INSTALL spatial'); c.sql('LOAD spatial'); "
             f'c.sql("""COPY (SELECT * EXCLUDE ({drop}){replace}, {reproject} AS geometry '
             f"FROM read_parquet({names!r}, union_by_name=true) WHERE {geometry} IS NOT NULL) TO '{fgb}' "
             f"WITH (FORMAT GDAL, DRIVER 'FlatGeobuf', SRS 'EPSG:4326'{geometry_type[layer['geometry']]})\"\"\")"

@@ -44,7 +44,8 @@ writes the static tree beside it, and that tree is what Portolan describes.
 ## Results
 
 From the clean-checkout run of 2026-11-11 (`./run.sh`, about 2 h 15 min). Every number below is in
-`outputs/summary.json`, `outputs/rules_before_after.csv` or `outputs/tiling_summary.json`. Cost $0.
+`outputs/summary.json`, `outputs/rules_before_after.csv` or `outputs/tiling_summary.json`, or is computed
+from `outputs/tiling_benchmark.csv` (the per-class medians and the "19 of 25" count). Cost $0.
 
 **Today, nothing passes.** 0 of 330 layers, 0 of 857 catalogs and 0 of 526 collections are free of errors:
 11,019 errors and 1,586 warnings across 16 rules. Most of them come from one pipeline habit. The tree is written
@@ -76,7 +77,7 @@ and agent-skills index all answered live. The spec has no rules for any of them,
 |---|---|---|
 | Layers built | 27 of 27 (8 after reprojecting to EPSG:4326) | 25 of 27 (our FlatGeobuf step failed on 2) |
 | Total time, 25 layers both built | 429 s | 2,993 s; 3,073 s with the FlatGeobuf step |
-| Median speedup per layer | 5.4x (points 3.1x, lines 6.8x, polygons 5.8x) | |
+| Median speedup per layer | 5.4x including the FlatGeobuf step, 4.0x against tippecanoe alone (points 3.1x, lines 6.8x, polygons 5.8x) | |
 | Largest: NHD flowlines, 2.7 M lines | 294 s, 9.5 GB peak, 1.1 GB file | 2,349 s, 12.4 GB peak, 4.0 GB file |
 | Peak memory higher on | 19 of 25 layers | 6 of 25 |
 | Total size | 1.8 GB | 4.6 GB |
