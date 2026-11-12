@@ -741,7 +741,7 @@ def _(overall_table):
 def _(mo):
     mo.md(r"""
     **What it shows.** The only copies that pass are Harvard's data.gov records whose DCAT-US metadata names the
-    source (USGS data-release DOIs, a Census file URL) and its `modified` date. Those happen to be one-off
+    source (USGS data-release DOIs and a USGS catalog record) and its `modified` date. Those happen to be one-off
     releases that are unlikely to change. No HIFLD Next, DataLumos or Source Cooperative copy passes, for the same
     reason: none has a source link in a field. HIFLD Next has the richest record-level metadata (feature counts,
     source dates, declared date columns) but no source link and no capture date. Source Cooperative has
@@ -749,7 +749,8 @@ def _(mo):
     even its files are by hand.
 
     The checks that fail everywhere are **cadence** (no copy in any holder has an update-frequency field, though
-    DCAT-US defines one, `accrualPeriodicity`) and **a source link**. Those are the two fields a publisher saving a copy should add.
+    DCAT-US defines one, `accrualPeriodicity`) and, outside Harvard's data.gov records, **a source link**. Those are
+    the two fields a publisher saving a copy should add.
     """)
     return
 

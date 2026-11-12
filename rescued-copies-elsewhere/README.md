@@ -123,7 +123,7 @@ keep.
 
 ## What didn't work, and what it doesn't show
 
-- **The Wayback Machine wasn't reachable from our sandbox**, so HIFLD Open's own item pages (a richer original
+- **The Wayback Machine wasn't reachable from our sandbox**, so the notebook doesn't query it, and HIFLD Open's own item pages (a richer original
   than data.gov's record) couldn't be read. data.gov's archived record stands in as the original.
 - **DataLumos returns 403 to scripts**, so its files and pages count as "by hand". We read its metadata through
   DataCite instead.
