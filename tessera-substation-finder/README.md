@@ -13,11 +13,12 @@ photos, none was a substation. They were houses, farms, quarries, schools and fa
 places where a HIFLD Next line ends more than 1 km from any OSM substation, 1 was an unmapped switchyard and 2 were
 hydro dams.
 
-**Hard negatives (#247) make it about three times as precise, but not yet useful.** Retrained with 3,414 patches of
-developed land and its own mistakes, the CNN flags 6% of held-out industrial, commercial, school and housing places
-instead of 31%. At the same threshold rule, scan precision against OSM rises only from 7.9% to 9.5%. At a stricter
-cutoff (0.97) it is 24%, and 97% of the 100–229 kV substations in the scan tiles are still found. Of 20 new "wrong"
-detections checked on photos, none was a substation. They are now mostly farms, fields and woods, not built-up land.
+**Hard negatives (#247) make it several times more precise at strict cutoffs, but not yet a scanner.** Retrained
+with 3,426 patches of developed land and of its own mistakes, the CNN reaches 23% scan precision against OSM at a 0.90
+cutoff and 37% at 0.97, still finding 90% and 87% of the 100–229 kV substations in the scan tiles. The first CNN
+reaches 14% at best. At the threshold rule used before (1% of random patches), precision *falls* to 5%, because that
+rule is calibrated on forest and fields, which the new model already rejects. Of 20 new "wrong" detections checked on
+photos, none was a substation. The result also depends on which hard negatives are drawn (see What didn't work).
 
 Everything is in one marimo notebook, [`substation_finder.py`](substation_finder.py).
 
@@ -27,10 +28,10 @@ Everything is in one marimo notebook, [`substation_finder.py`](substation_finder
 ./run.sh
 ```
 
-It needs [uv](https://docs.astral.sh/uv/), about 10 GB of free disk and 8 GB of memory. With an empty `data/` it
-range-reads 45.9 GB from Source Cooperative. From a clean checkout on a 4-CPU cloud machine it took 43 minutes: 11 for
-the patch reads, 7.5 to read and scan the 48 tiles, 3 for the line ends and 3 for training. Reruns reuse `data/` and
-take about 10 minutes. To read the notebook with its outputs: `uv run marimo edit substation_finder.py`.
+It needs [uv](https://docs.astral.sh/uv/), about 20 GB of free disk and 14 GB of memory (a fresh run peaked at
+12.8 GB). With an empty `data/` it range-reads 61.5 GB from Source Cooperative. From a clean checkout on a 4-CPU cloud
+machine it took 42 minutes: 7.5 for the patch reads, 7 to read and scan the 48 tiles, 4.5 to mine 40 more tiles and 6.5
+for the two CNNs. Reruns reuse `data/` and take about 30 minutes. To read the notebook with its outputs: `uv run marimo edit substation_finder.py`.
 
 ## Data
 
@@ -66,11 +67,11 @@ We used TESSERA v1 because the v2 beta store on Source Cooperative covers only p
   with no OSM substation within 300 m. The verdicts are in [`hand_check.csv`](hand_check.csv). It is keyed by a hash of
   each place, not its location, because the issue asks us not to publish a list of unmapped sites. The chips stay in
   `data/chips/`.
-- **Hard negatives (section 10):** all more than 1 km from any OSM substation and in training blocks only. 2,224
+- **Hard negatives (section 10):** all more than 1 km from any OSM substation and in training blocks only. 2,236
   OSM land-use places (at most 150 per class and state, `power=*` excluded) and 1,190 detections scoring 0.5 or more
   from the first CNN on 40 random training-block tiles. The same CNN is retrained from scratch on the first
   model's samples plus these, with the same seed and the same threshold rule (1% of validation *random* negatives).
-  The 804 land-use places inside the 48 held-out scan tiles are a second test.
+  The 806 land-use places inside the 48 held-out scan tiles are a second test.
 
 ## Results
 
@@ -83,24 +84,21 @@ All numbers come from `outputs/`, written by the run.
 | Pixel probe | 0.958 | 0.59 | 0.38 | 0.22 | 0.07 | 0.26 |
 | CNN | 0.983 | 0.90 | 0.90 | 0.68 | 0.69 | 0.76 |
 
-The CNN finds 75% in New York and 78% in Tennessee. Recall rises with fenced area, from 52% under 500 m² to 90% from
-2,000 m² up ([`recall_by_area.png`](outputs/recall_by_area.png)).
+The CNN finds 75% in New York and 78% in Tennessee, more for bigger yards ([chart](outputs/recall_by_area.png)).
 
 **Scan of 48 held-out tiles** (`outputs/scan_precision_recall.csv` and `hard_negatives_scan.csv`). These tiles hold 99
 OSM substations: 1 at 230 kV+, 30 at 100–229 kV, 57 under 100 kV and 11 untagged. Recall is by voltage class; a
-detection has no voltage, so precision is overall only.
+detection has no voltage, so precision is overall only. The probe splits each yard into many small detections.
 
 | Model, cutoff | Detections | Within 300 m of OSM | Precision | 230 kV+ | 100–229 kV | Under 100 kV | All |
 |---|---:|---:|---:|---:|---:|---:|---:|
 | Probe, 0.94 (1% rule) | 2,663 | 324 | 0.122 | 1/1 | 0.70 | 0.65 | 0.63 |
 | CNN, 0.957 (1% rule) | 655 | 52 | 0.079 | 1/1 | 0.77 | 0.32 | 0.52 |
 | CNN, 0.99 | 383 | 54 | 0.141 | 0/1 | 0.77 | 0.37 | 0.52 |
-| Hard-negative CNN, 0.806 (1% rule) | 781 | 74 | 0.095 | 0/1 | 1.00 | 0.58 | 0.68 |
-| Hard-negative CNN, 0.90 | 546 | 71 | 0.130 | 0/1 | 1.00 | 0.56 | 0.66 |
-| Hard-negative CNN, 0.97 | 254 | 62 | 0.244 | 0/1 | 0.97 | 0.49 | 0.62 |
-| Hard-negative CNN, 0.99 | 131 | 52 | 0.397 | 0/1 | 0.87 | 0.40 | 0.51 |
-
-The probe's higher precision comes from splitting each yard into many small detections.
+| Hard-negative CNN, 0.276 (1% rule) | 1,178 | 59 | 0.050 | 1/1 | 0.90 | 0.37 | 0.55 |
+| Hard-negative CNN, 0.90 | 247 | 56 | 0.227 | 0/1 | 0.90 | 0.46 | 0.56 |
+| Hard-negative CNN, 0.97 | 137 | 51 | 0.372 | 0/1 | 0.87 | 0.39 | 0.51 |
+| Hard-negative CNN, 0.99 | 72 | 38 | 0.528 | 0/1 | 0.70 | 0.23 | 0.35 |
 
 **Hand check** (`hand_check.csv`): of 20 scan detections with no OSM substation nearby, **0 were substations**. All 20
 were ordinary land: homes, farms, quarries, schools, factories and forest. So precision against OSM is close to the
@@ -108,34 +106,35 @@ real precision. Of the 20 top line-end places, **1 was a substation** (a large s
 **2 were hydro dams**, 1 was unclear and 16 were something else. Most of those were commercial or industrial land.
 In total the CNN flags 139 of the 502 line-end places (`outputs/line_end_flags.csv`).
 
-**Cost:** $0, with no account or key. 45.9 GB of range reads and 82 MB of other downloads from an empty `data/`,
-8.2 GB kept in `data/`, and 43 minutes on 4 cores from a clean checkout. See `outputs/summary.json`.
+**Cost:** $0, with no account or key. 61.5 GB of range reads and 82 MB of other downloads from an empty `data/`,
+16.3 GB kept in `data/`, and 42 minutes on 4 cores from a clean checkout. See `outputs/summary.json`.
 
-**Hard negatives** (`outputs/hard_negatives_*.csv`). On held-out patches, at its own 1% rule (threshold 0.806), the
-retrained CNN finds 93% of 230 kV+ (first CNN 90%), 92% of 100–229 kV (90%), 56% under 100 kV (68%) and 70% overall
-(76%). Developed places flagged in the scan tiles (`hard_negatives_land_use_flags.csv`): 31% → 6%, for example
-schools 45% → 6%. Hand check: of 20 random 1%-rule detections with no OSM substation within 300 m, **0 were
-substations**: 12 farms, fields, woods or rural homes, 6 commercial or industrial sites and 2 town housing areas.
+**Hard negatives** (`outputs/hard_negatives_*.csv`). On held-out patches, at its own 1% rule, the retrained CNN finds
+93% of 230 kV+ (first CNN 90%), 94% of 100–229 kV (90%), 67% under 100 kV (68%) and 78% overall (76%); AUC 0.975
+against 0.983. Developed places in the scan tiles flagged (`hard_negatives_land_use_flags.csv`): 31% → 20%, for
+example retail 81% → 23% and industrial 74% → 57%. Hand check: of 20 random 1%-rule detections with no OSM substation
+within 300 m, **0 were substations**: 12 farms, woods or rural homes, 5 commercial, industrial or school sites, 2
+housing areas and a canal lock. `hand_check.csv` also holds 20 verdicts from an earlier run (also 0 substations).
 
 ## What didn't work
 
 - **Precision, still.** Random negatives are mostly forest and fields, so the first CNN learned "developed land with
-  hard surfaces". Hard negatives fix most of that, but at the 1% rule 9 in 10 detections are still not substations.
-  The 0.97 cutoff was picked from a sweep on the test tiles, so 24% is optimistic. Even then a reviewer sees about
-  3 wrong places for each right one.
-- **Small yards got harder.** Held-out recall under 100 kV fell from 68% to 56%, and the one 230 kV+ substation in
-  the scan tiles is missed at every cutoff. One example says little, but large yards may now resemble the industrial
-  land the model was taught to reject.
-- **Small samples where it matters:** 29 held-out substations at 230 kV+, and 1 in the scanned tiles.
+  hard surfaces". Hard negatives help only at cutoffs picked from a sweep on the test tiles, so 23–37% is optimistic,
+  and even then a reviewer sees two to three wrong places for each right one. A threshold tuned on held-out hard
+  negatives would be the fair test.
+- **Unstable.** An earlier run with a different land-use draw (unsorted rows) scored 9.5% at its 1% rule and 24% at
+  0.97 with 97% of 100–229 kV found, and cut developed-place flags to 6%. The Overture land-use query also returned
+  31,689 to 31,783 places in different runs, which we haven't explained.
+- **Memory.** Fresh runs first died at 13.9 GB; streaming reads into arrays and a memory-mapped training set fixed it.
 - **Column-window reads.** A window needs one HTTP request per `.npy` row (about 200 a second here), and multi-range
   requests return the whole 130 MB file, so we read whole rows and fetch 20 to 30 times the bytes we keep.
-- **Line ends are mostly taps.** 452 of the 502 far ends touch another line, as `hifld-grid-gaps/` found nationally,
-  so most of these places have no substation to find.
+- **Line ends are mostly taps:** 452 of the 502 far ends touch another line, so most have no substation to find.
 
 ## What it doesn't show
 
 - One year (2024), two states, one embedding model, and OSM (partly backfilled from old HIFLD) as the answer key.
-- The hand check is 60 chips judged by the worker agent from photos, not a field visit.
+- The hand checks are photos judged by the worker agent, not field visits. Only 29 held-out substations are 230 kV+,
+  and 1 in the scan tiles.
 - We didn't test larger patches, a threshold tuned on held-out hard negatives, or TESSERA v2.
 - The first CNN's numbers depend on floating-point order. Running this notebook gives exactly the published #195
   numbers, but one intermediate version gave 7.2% scan precision instead of 7.9% for the same model and data.
@@ -147,5 +146,4 @@ substations**: 12 farms, fields, woods or rural homes, 6 commercial or industria
 - **`geoembeddings-facility-finder/`** for the design, and **`us-substations-verified/`** and **`hifld-grid-gaps/`**
   for the OSM and HIFLD Next line-end code. Hard-negative mining is the standard detector-training technique.
 
-The notebook is about 1,750 lines, over the 1,000-line budget, mostly from marimo's per-cell import and return lists,
-the aerial-chip drawing and the hard-negative section (about 450 lines) that #247 asked to keep in this folder.
+The notebook is about 1,790 lines, over the 1,000-line budget: marimo boilerplate, chip drawing, the #247 section.

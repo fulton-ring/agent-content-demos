@@ -1746,31 +1746,32 @@ def _(
     commercial and industrial land). Most far ends are taps on another line, as
     `hifld-grid-gaps/` found, so there is usually nothing to find.
 
-    **Hard negatives help, but don't make a scanner yet.** Adding developed-land and
-    self-mined negatives cuts the share of the {int(_lu["places"])} held-out developed places
-    the CNN flags from {_lu["cnn"]:.0%} to {_lu["cnn_hn"]:.0%}. At the same
-    1%-of-random-patches rule, scan precision against OSM goes from
-    {_before["precision"]:.1%} to {_rule["precision"]:.1%}, with recall of
-    100–229 kV substations in the scan tiles at {_rule["recall 100-229 kV"]:.0%}. Because the
-    new model's scores separate better, a stricter cutoff now pays: at 0.97,
-    {_strict["precision"]:.0%} of {int(_strict["detections"])} detections are near an OSM
-    substation and {_strict["recall 100-229 kV"]:.0%} of 100–229 kV substations are still
-    found. That cutoff was picked from a sweep on the test tiles, so it is optimistic. On
-    held-out patches the new model keeps {_hn.loc["cnn_hn", "recall 230 kV+"]:.0%} of
-    230 kV+ and {_hn.loc["cnn_hn", "recall 100-229 kV"]:.0%} of 100–229 kV substations but
-    loses small ones ({_hn.loc["cnn_hn", "recall under 100 kV"]:.0%} under 100 kV, from
+    **Hard negatives help at strict cutoffs, but don't make a scanner yet.** Adding
+    developed-land and self-mined negatives changes the share of the {int(_lu["places"])}
+    held-out developed places the CNN flags from {_lu["cnn"]:.0%} to {_lu["cnn_hn"]:.0%}. At
+    the same 1%-of-random-patches rule, scan precision against OSM goes from
+    {_before["precision"]:.1%} to {_rule["precision"]:.1%}: that rule is calibrated on
+    forest and fields, which the new model already rejects, so it sets a loose threshold
+    ({_rule.name:.3f}). A stricter cutoff pays: at 0.97, {_strict["precision"]:.0%} of
+    {int(_strict["detections"])} detections are near an OSM substation and
+    {_strict["recall 100-229 kV"]:.0%} of 100–229 kV substations are still found. That
+    cutoff was picked from a sweep on the test tiles, so it is optimistic. On held-out
+    patches the new model finds {_hn.loc["cnn_hn", "recall 230 kV+"]:.0%} of 230 kV+,
+    {_hn.loc["cnn_hn", "recall 100-229 kV"]:.0%} of 100–229 kV and
+    {_hn.loc["cnn_hn", "recall under 100 kV"]:.0%} of under-100 kV substations (first CNN
+    {_hn.loc["cnn", "recall 230 kV+"]:.0%}, {_hn.loc["cnn", "recall 100-229 kV"]:.0%} and
     {_hn.loc["cnn", "recall under 100 kV"]:.0%}). Of 20 new "wrong" detections checked on
-    photos, {_fp2.get("substation", 0)} were substations: its mistakes moved from
-    developed land to farms, fields and woods.
+    photos, {_fp2.get("substation", 0)} were substations.
 
     **What didn't work, or wasn't tried:**
 
     - Precision. Even with hard negatives, most detections at the 1% rule are not
-      substations; a reviewer would need the stricter cutoff and would still see about
+      substations; at the stricter cutoff a reviewer would still see about
       {(1 - _strict["precision"]) / _strict["precision"]:.0f} wrong places for each right one.
-    - The one 230 kV+ substation in the scan tiles is missed by the second CNN at every
-      cutoff, which the first CNN found; one example says little, but large yards may now
-      look too much like the industrial land it was taught to reject.
+    - Stability. The second CNN depends on which hard negatives are drawn: an earlier run
+      with a slightly different land-use draw scored 9.5% at its 1% rule and 24% at 0.97.
+    - The one 230 kV+ substation in the scan tiles is missed by the second CNN at the
+      stricter cutoffs; one example says little.
     - Per-voltage precision. A detection has no voltage, so precision is overall only;
       recall is per class.
     - Small samples where it matters: the held-out set has only {int(_cnn["n 230 kV+"])}
