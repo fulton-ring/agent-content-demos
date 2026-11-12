@@ -50,7 +50,8 @@ From `./run.sh`; the tables are in `results/` and in each notebook's output.
 **Replay.** 76 of the 88 first-batch errors could be replayed. 5 had lost their wording, 2 were videos, 1 was
 paywalled, 1 was internal, and 3 were other cases (two video dates, a README that has since changed). One more (E21)
 was dropped because the source does say what the note claimed. That leaves **75 errors + 75 passing claims**. The
-full-source checker could refetch the same page for 103 of the 150; the others were blocked (28) or had changed (19).
+full-source checker could refetch the same page for 104 of the 150 (one more than in #227, after PC04-3's PDF fetched
+in the #235 run); the others were blocked or had changed.
 
 **Later errors.** 297 distinct errors against a document source (#108 counted 202). 58 turned out on a closer read
 not to be document-source errors (a fix about our own catalog or spike, a check item where nothing was wrong), 37 had
@@ -91,7 +92,8 @@ checkers flag more because many passing claims' passages cover only part of the 
 caught 1 that GPT missed; on the later batch, 0 and 1. On these errors that's no measurable difference.
 
 **Cost and time per claim.** Passage checkers $0.003 and 3–4 s. Full source $0.014 and 2.4 s. The first batch cost
-$2.12 of its $5 budget and the later batch $2.91 of its $3, which left nothing for passing claims to match it (see
+$2.12 of its $5 budget in #227 and the later batch $2.91 of its $3 (all committed answers total $5.06, printed by
+notebook 2), which left nothing for passing claims to match it (see
 below). The times are wall-clock with 8 calls running at once, so they reflect provider load more than the checker;
 don't compare them across checkers.
 
@@ -100,7 +102,8 @@ don't compare them across checkers.
 - **The argument is wrong on overstatement.** We expected a re-check to miss "claims stated more strongly than the
   source allows". Every checker caught all 15. What slips through is **missed context**: a claim that's literally
   true and leaves out what changes its meaning (that the $800 million order was a copper mine's, or that a forecast
-  system was an intern's research demo). Of the 7 errors any checker let through, 5 are that type.
+  system was an intern's research demo). In the first batch, of the 7 errors any checker let
+  through, 5 are that type.
 - **The later errors don't confirm that blind spot.** On 170 errors caught after an earlier check had passed the
   card, the passage checkers caught 66 of 67 missed-context errors. What the later batch adds is that the full-source
   checker is weaker on overstatement (13/17, 53–90%) than the passage checkers (25/27), perhaps because a whole page
