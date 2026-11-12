@@ -6,7 +6,6 @@ app = marimo.App(width="medium")
 
 @app.cell
 def _():
-    import gc
     import json
     import os
     import time
@@ -36,7 +35,6 @@ def _():
         ThreadPoolExecutor,
         box,
         duckdb,
-        gc,
         gpd,
         httpx,
         json,
@@ -337,19 +335,31 @@ def _(DATA_DIR, TESSERA, YEAR, downloaded, fetch, np, pd, states):
 
 
 @app.cell
-def _(Affine, ThreadPoolExecutor, gc, httpx, https, np, tile_key, tiles, time):
+def _(Affine, ThreadPoolExecutor, httpx, https, np, tile_key, tiles, time):
     READ = 40  # pixels read around each point
     range_bytes = [0]  # bytes fetched by range reads this run, for the cost section
     _client = httpx.Client(timeout=120, limits=httpx.Limits(max_connections=32))
 
-    def get_range(url: str, start: int, length: int) -> bytes:
-        """One HTTP range request, retried up to 4 times."""
+    def get_range(url: str, start: int, length: int) -> np.ndarray:
+        """One HTTP range request into a byte array, retried up to 4 times.
+
+        Streaming into a preallocated array, rather than taking the response as one bytes
+        object, keeps a fresh run's memory close to a cached run's.
+        """
         for attempt in range(4):
             try:
-                r = _client.get(url, headers={"Range": f"bytes={start}-{start + length - 1}"})
-                if r.status_code == 206 and len(r.content) == length:
+                buf, pos = np.empty(length, np.uint8), 0
+                headers = {"Range": f"bytes={start}-{start + length - 1}"}
+                with _client.stream("GET", url, headers=headers) as r:
+                    if r.status_code == 206:
+                        for chunk in r.iter_bytes():
+                            if pos + len(chunk) > length:
+                                break
+                            buf[pos : pos + len(chunk)] = np.frombuffer(chunk, np.uint8)
+                            pos += len(chunk)
+                if pos == length:
                     range_bytes[0] += length
-                    return r.content
+                    return buf
             except httpx.HTTPError:
                 pass
             time.sleep(2**attempt)
@@ -362,8 +372,8 @@ def _(Affine, ThreadPoolExecutor, gc, httpx, https, np, tile_key, tiles, time):
         g = get_range(https(t["grid_uri"]), int(t["grid_offset"]) + r0 * w * 128, n * w * 128)
         s = get_range(https(t["scales_uri"]), int(t["scales_offset"]) + r0 * w * 4, n * w * 4)
         return (
-            np.frombuffer(g, np.int8).reshape(n, w, 128),
-            np.frombuffer(s, np.float32).reshape(n, w),
+            g.view(np.int8).reshape(n, w, 128),
+            s.view(np.float32).reshape(n, w),
         )
 
     def read_patch(
@@ -386,13 +396,8 @@ def _(Affine, ThreadPoolExecutor, gc, httpx, https, np, tile_key, tiles, time):
     def read_patches(
         points: list[tuple[float, float]], size: int = READ
     ) -> tuple[np.ndarray, np.ndarray, list[Affine]]:
-        out = []
-        for b in range(0, len(points), 500):
-            with ThreadPoolExecutor(16) as ex:
-                out += ex.map(lambda p: read_patch(p[0], p[1], size), points[b : b + 500])
-            # httpx responses sit in reference cycles, so their multi-megabyte buffers wait for
-            # the cycle collector, which rarely runs here; without this a fresh run grew past 13 GB.
-            gc.collect()
+        with ThreadPoolExecutor(16) as ex:
+            out = list(ex.map(lambda p: read_patch(p[0], p[1], size), points))
         return (
             np.stack([o[0] for o in out]),
             np.stack([o[1] for o in out]),
@@ -745,7 +750,7 @@ def _(Point, SEED, block_of, np, states, test_blocks, tiles):
 
 
 @app.cell
-def _(ThreadPoolExecutor, band_mean, band_std, gc, np, probe_map, read_rows, tiles, torch):
+def _(ThreadPoolExecutor, band_mean, band_std, np, probe_map, read_rows, tiles, torch):
     def read_tile(key: tuple[float, float]) -> tuple[np.ndarray, np.ndarray]:
         """A whole tile, read in bands of 100 rows in parallel."""
         h = int(tiles.loc[[key]].iloc[0]["height"])
@@ -753,7 +758,6 @@ def _(ThreadPoolExecutor, band_mean, band_std, gc, np, probe_map, read_rows, til
         with ThreadPoolExecutor(8) as ex:
             parts = list(ex.map(lambda b: read_rows(key, *b), bands))
         s = np.concatenate([p[1] for p in parts])
-        gc.collect()  # free the cyclic httpx responses behind parts, as in read_patches
         return np.concatenate([p[0] for p in parts]), np.where(np.isfinite(s), s, 0).astype(
             np.float32
         )
