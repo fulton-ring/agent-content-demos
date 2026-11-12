@@ -112,7 +112,7 @@ written before the hand-check verdicts; `summary.json` is the rerun after them, 
 
 **Hard negatives** (`outputs/hard_negatives_*.csv`). On held-out patches, at its own 1% rule, the retrained CNN finds
 93% of 230 kV+ (first CNN 90%), 94% of 100–229 kV (90%), 67% under 100 kV (68%) and 78% overall (76%); AUC 0.975
-against 0.983. Developed places in the scan tiles flagged (`hard_negatives_land_use_flags.csv`): 31% → 20%, for
+against 0.983, passing 1.9% of held-out random patches (first CNN 1.3%). Developed places in the scan tiles flagged (`hard_negatives_land_use_flags.csv`): 31% → 20%, for
 example retail 81% → 23% and industrial 74% → 57%. Hand check: of 20 random 1%-rule detections with no OSM substation
 within 300 m, **0 were substations**: 12 farms, woods or rural homes, 5 commercial, industrial or school sites, 2
 housing areas and a canal lock. `hand_check.csv` also holds 20 verdicts from an earlier run (also 0 substations).

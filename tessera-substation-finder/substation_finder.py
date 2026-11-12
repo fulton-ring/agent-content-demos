@@ -1071,12 +1071,13 @@ def _(ALBERS, DATA_DIR, Path, gpd, httpx, lines, np, osm, plt):
             .json()["features"]
         )
         need = shape_box(bb.x.min(), bb.y.min(), bb.x.max(), bb.y.max())
-        years = sorted({f["properties"]["naip:year"] for f in items}, reverse=True)
+        # Planetary Computer returns naip:year as a string for some items and an int for others.
+        years = sorted({str(f["properties"]["naip:year"]) for f in items}, reverse=True)
         assert items, f"no NAIP image near {title}"
         # The newest year covering most of the chip; a year can graze its edge.
         cover = {
             y: unary_union(
-                [shape(f["geometry"]) for f in items if f["properties"]["naip:year"] == y]
+                [shape(f["geometry"]) for f in items if str(f["properties"]["naip:year"]) == y]
             )
             .intersection(need)
             .area
@@ -1084,8 +1085,10 @@ def _(ALBERS, DATA_DIR, Path, gpd, httpx, lines, np, osm, plt):
             for y in years
         }
         year = max(years, key=lambda y: (round(cover[y], 2), y))
-        items = [f for f in items if f["properties"]["naip:year"] == year]
-        with rasterio.Env(GDAL_DISABLE_READDIR_ON_OPEN="EMPTY_DIR"):
+        items = [f for f in items if str(f["properties"]["naip:year"]) == year]
+        with rasterio.Env(
+            GDAL_DISABLE_READDIR_ON_OPEN="EMPTY_DIR", GDAL_HTTP_MAX_RETRY=4, GDAL_HTTP_RETRY_DELAY=2
+        ):
             srcs = [
                 rasterio.open(f"/vsicurl/{f['assets']['image']['href']}?{token}") for f in items
             ]
