@@ -79,7 +79,9 @@ def _(mo):
        a full scan of held-out 0.1° tiles for precision.
     5. Run the CNN where HIFLD Next transmission lines end more than 1 km from any OSM
        substation, and check the top-scoring sites by hand on aerial photos.
-    6. Record time, downloads and cost.
+    6. Retrain the CNN with hard negatives (developed land and its own mistakes) and score
+       it the same way ([#247](https://github.com/fulton-ring/agent-content-demos/issues/247)).
+    7. Record time, downloads and cost.
     """)
     return
 
@@ -296,7 +298,7 @@ def _(mo):
 
 
 @app.cell
-def _(DATA_DIR, TESSERA, YEAR, downloaded, fetch, np, pd):
+def _(DATA_DIR, TESSERA, YEAR, downloaded, fetch, np, pd, states):
     _idx_path = DATA_DIR / f"tessera_{YEAR}_index.parquet"
     downloaded["tessera_index"] = fetch(f"{TESSERA}/index/tessera_{YEAR}.parquet", _idx_path)
     tiles = pd.read_parquet(
@@ -313,6 +315,13 @@ def _(DATA_DIR, TESSERA, YEAR, downloaded, fetch, np, pd):
             "transform",
         ],
     )
+    print(f"TESSERA {YEAR} tiles worldwide: {len(tiles):,}")
+    # Keep the tiles in a box around the two states; the full index takes about 1 GB of memory.
+    _b = states.to_crs(4326).total_bounds
+    tiles = tiles[
+        tiles["lon"].between(_b[0] - 0.1, _b[2] + 0.1)
+        & tiles["lat"].between(_b[1] - 0.1, _b[3] + 0.1)
+    ].copy()
     tiles["key"] = list(zip(tiles["lon"].round(2), tiles["lat"].round(2), strict=True))
     tiles = tiles.set_index("key")
 
@@ -322,7 +331,6 @@ def _(DATA_DIR, TESSERA, YEAR, downloaded, fetch, np, pd):
     def https(uri: str) -> str:
         return TESSERA + uri.split("/npy/v1", 1)[1]
 
-    print(f"TESSERA {YEAR} tiles worldwide: {len(tiles):,}")
     return https, tile_key, tiles
 
 
@@ -332,14 +340,26 @@ def _(Affine, ThreadPoolExecutor, httpx, https, np, tile_key, tiles, time):
     range_bytes = [0]  # bytes fetched by range reads this run, for the cost section
     _client = httpx.Client(timeout=120, limits=httpx.Limits(max_connections=32))
 
-    def get_range(url: str, start: int, length: int) -> bytes:
-        """One HTTP range request, retried up to 4 times."""
+    def get_range(url: str, start: int, length: int) -> np.ndarray:
+        """One HTTP range request into a byte array, retried up to 4 times.
+
+        Streaming into a preallocated array, rather than taking the response as one bytes
+        object, keeps a fresh run's memory close to a cached run's.
+        """
         for attempt in range(4):
             try:
-                r = _client.get(url, headers={"Range": f"bytes={start}-{start + length - 1}"})
-                if r.status_code == 206 and len(r.content) == length:
+                buf, pos = np.empty(length, np.uint8), 0
+                headers = {"Range": f"bytes={start}-{start + length - 1}"}
+                with _client.stream("GET", url, headers=headers) as r:
+                    if r.status_code == 206:
+                        for chunk in r.iter_bytes():
+                            if pos + len(chunk) > length:
+                                break
+                            buf[pos : pos + len(chunk)] = np.frombuffer(chunk, np.uint8)
+                            pos += len(chunk)
+                if pos == length:
                     range_bytes[0] += length
-                    return r.content
+                    return buf
             except httpx.HTTPError:
                 pass
             time.sleep(2**attempt)
@@ -352,8 +372,8 @@ def _(Affine, ThreadPoolExecutor, httpx, https, np, tile_key, tiles, time):
         g = get_range(https(t["grid_uri"]), int(t["grid_offset"]) + r0 * w * 128, n * w * 128)
         s = get_range(https(t["scales_uri"]), int(t["scales_offset"]) + r0 * w * 4, n * w * 4)
         return (
-            np.frombuffer(g, np.int8).reshape(n, w, 128),
-            np.frombuffer(s, np.float32).reshape(n, w),
+            g.view(np.int8).reshape(n, w, 128),
+            s.view(np.float32).reshape(n, w),
         )
 
     def read_patch(
@@ -512,12 +532,9 @@ def _(mo):
 
 @app.cell
 def _(PATCH, READ, SEED, codes, np, roc_auc_score, samples, scales, time, timings, torch):
-    torch.manual_seed(SEED)
     torch.set_num_threads(max(1, torch.get_num_threads()))
-    _rng = np.random.default_rng(SEED)
     _train = np.flatnonzero(samples["split"].to_numpy() == "train")
     _val = np.flatnonzero(samples["split"].to_numpy() == "val")
-    _y = samples["label"].to_numpy().astype(np.float32)
     # Per-band mean and spread of dequantised training pixels, for input scaling.
     _px = (codes[_train, ::4, ::4] * scales[_train, ::4, ::4, None]).reshape(-1, 128)
     band_mean = torch.tensor(_px.mean(0), dtype=torch.float32).view(1, 128, 1, 1)
@@ -546,7 +563,10 @@ def _(PATCH, READ, SEED, codes, np, roc_auc_score, samples, scales, time, timing
         x = torch.from_numpy(c).float() * torch.from_numpy(s).unsqueeze(-1)
         return (x.permute(0, 3, 1, 2) - band_mean) / band_std
 
-    def cnn_scores(model: torch.nn.Module, rows: np.ndarray) -> np.ndarray:
+    def cnn_scores(
+        model: torch.nn.Module, c: np.ndarray, s: np.ndarray, rows: np.ndarray
+    ) -> np.ndarray:
+        """The model's score for the central 32 x 32 crop of each given 40 x 40 patch."""
         o = (READ - PATCH) // 2
         out = []
         model.eval()
@@ -554,51 +574,62 @@ def _(PATCH, READ, SEED, codes, np, roc_auc_score, samples, scales, time, timing
             for b in range(0, len(rows), 256):
                 r = rows[b : b + 256]
                 x = to_tensor(
-                    codes[r, o : o + PATCH, o : o + PATCH], scales[r, o : o + PATCH, o : o + PATCH]
+                    c[r, o : o + PATCH, o : o + PATCH], s[r, o : o + PATCH, o : o + PATCH]
                 )
                 out.append(torch.sigmoid(model(x)).numpy())
         return np.concatenate(out)
 
+    def train_cnn(
+        c: np.ndarray, s: np.ndarray, y: np.ndarray, train: np.ndarray, val: np.ndarray
+    ) -> tuple[torch.nn.Module, list[dict]]:
+        """Train on random flipped and rotated crops; keep the epoch with the best val AUC."""
+        torch.manual_seed(SEED)
+        rng = np.random.default_rng(SEED)
+        t = time.time()
+        model = SubstationCNN()
+        opt = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-4)
+        best, best_state, log = -1.0, None, []
+        for epoch in range(15):
+            model.train()
+            order = rng.permutation(train)
+            for b in range(0, len(order), 64):
+                r = order[b : b + 64]
+                oy, ox = rng.integers(0, READ - PATCH + 1, 2)
+                x = to_tensor(
+                    c[r, oy : oy + PATCH, ox : ox + PATCH], s[r, oy : oy + PATCH, ox : ox + PATCH]
+                )
+                x = torch.rot90(x, int(rng.integers(4)), dims=(2, 3))
+                if rng.random() < 0.5:
+                    x = torch.flip(x, dims=(3,))
+                loss = torch.nn.functional.binary_cross_entropy_with_logits(
+                    model(x), torch.from_numpy(y[r])
+                )
+                opt.zero_grad()
+                loss.backward()
+                opt.step()
+            auc = roc_auc_score(y[val], cnn_scores(model, c, s, val))
+            log.append(
+                {
+                    "epoch": epoch + 1,
+                    "val_auc": round(float(auc), 4),
+                    "seconds": round(time.time() - t),
+                }
+            )
+            print(log[-1])
+            if auc > best:
+                best, best_state = auc, {k: v.clone() for k, v in model.state_dict().items()}
+        assert best_state is not None
+        model.load_state_dict(best_state)
+        model.eval()
+        return model, log
+
     _t = time.time()
-    cnn = SubstationCNN()
-    _opt = torch.optim.Adam(cnn.parameters(), lr=1e-3, weight_decay=1e-4)
-    _best, _best_state, cnn_log = -1.0, None, []
-    for _epoch in range(15):
-        cnn.train()
-        _order = _rng.permutation(_train)
-        for _b in range(0, len(_order), 64):
-            _r = _order[_b : _b + 64]
-            _oy, _ox = _rng.integers(0, READ - PATCH + 1, 2)
-            _x = to_tensor(
-                codes[_r, _oy : _oy + PATCH, _ox : _ox + PATCH],
-                scales[_r, _oy : _oy + PATCH, _ox : _ox + PATCH],
-            )
-            _x = torch.rot90(_x, int(_rng.integers(4)), dims=(2, 3))
-            if _rng.random() < 0.5:
-                _x = torch.flip(_x, dims=(3,))
-            _loss = torch.nn.functional.binary_cross_entropy_with_logits(
-                cnn(_x), torch.from_numpy(_y[_r])
-            )
-            _opt.zero_grad()
-            _loss.backward()
-            _opt.step()
-        _auc = roc_auc_score(_y[_val], cnn_scores(cnn, _val))
-        cnn_log.append(
-            {
-                "epoch": _epoch + 1,
-                "val_auc": round(float(_auc), 4),
-                "seconds": round(time.time() - _t),
-            }
-        )
-        print(cnn_log[-1])
-        if _auc > _best:
-            _best, _best_state = _auc, {k: v.clone() for k, v in cnn.state_dict().items()}
-    assert _best_state is not None
-    cnn.load_state_dict(_best_state)
-    cnn.eval()
+    cnn, cnn_log = train_cnn(
+        codes, scales, samples["label"].to_numpy().astype(np.float32), _train, _val
+    )
     timings["train_cnn"] = time.time() - _t
-    cnn_score = cnn_scores(cnn, np.arange(len(samples)))
-    return band_mean, band_std, cnn, cnn_log, cnn_score, to_tensor
+    cnn_score = cnn_scores(cnn, codes, scales, np.arange(len(samples)))
+    return band_mean, band_std, cnn, cnn_log, cnn_score, cnn_scores, to_tensor, train_cnn
 
 
 @app.cell
@@ -719,7 +750,7 @@ def _(Point, SEED, block_of, np, states, test_blocks, tiles):
 
 
 @app.cell
-def _(ThreadPoolExecutor, band_mean, band_std, cnn, np, probe_map, read_rows, tiles, torch):
+def _(ThreadPoolExecutor, band_mean, band_std, np, probe_map, read_rows, tiles, torch):
     def read_tile(key: tuple[float, float]) -> tuple[np.ndarray, np.ndarray]:
         """A whole tile, read in bands of 100 rows in parallel."""
         h = int(tiles.loc[[key]].iloc[0]["height"])
@@ -733,19 +764,19 @@ def _(ThreadPoolExecutor, band_mean, band_std, cnn, np, probe_map, read_rows, ti
 
     STRIDE = 4
 
-    def cnn_map(c: np.ndarray, s: np.ndarray) -> np.ndarray:
+    def cnn_map(model: torch.nn.Module, c: np.ndarray, s: np.ndarray) -> np.ndarray:
         """CNN score of every 32 x 32 window at a 4-pixel stride, window (i, j) at (4i, 4j)."""
         with torch.no_grad():
             x = torch.from_numpy(c).float() * torch.from_numpy(s).unsqueeze(-1)
             x = (x.permute(2, 0, 1).unsqueeze(0) - band_mean) / band_std
-            f = torch.nn.functional.max_pool2d(cnn.features(x), 32, stride=STRIDE)
-            return torch.sigmoid(cnn.head(f[0].permute(1, 2, 0))).squeeze(-1).numpy()
+            f = torch.nn.functional.max_pool2d(model.features(x), 32, stride=STRIDE)
+            return torch.sigmoid(model.head(f[0].permute(1, 2, 0))).squeeze(-1).numpy()
 
     return STRIDE, cnn_map, probe_map, read_tile
 
 
 @app.cell
-def _(DATA_DIR, YEAR, cnn_map, np, probe_map, read_tile, scan_tiles, tiles, time, timings):
+def _(DATA_DIR, YEAR, cnn, cnn_map, np, probe_map, read_tile, scan_tiles, tiles, time, timings):
     _t = time.time()
     scan_maps = {}
     for _region, _key in scan_tiles:
@@ -759,7 +790,7 @@ def _(DATA_DIR, YEAR, cnn_map, np, probe_map, read_tile, scan_tiles, tiles, time
         _c, _s = _z["codes"], _z["scales"]
         scan_maps[_key] = {
             "region": _region,
-            "cnn": cnn_map(_c, _s),
+            "cnn": cnn_map(cnn, _c, _s),
             "probe": probe_map(_c, _s),
             "transform": tiles.loc[[_key]].iloc[0]["transform"],
         }
@@ -770,12 +801,17 @@ def _(DATA_DIR, YEAR, cnn_map, np, probe_map, read_tile, scan_tiles, tiles, time
 
 @app.cell
 def _(ALBERS, STRIDE, gpd, ndimage, np, osm, pd, scan_maps, states):
-    def detections(threshold: dict[str, float]) -> gpd.GeoDataFrame:
-        """Join above-threshold neighbours into detections, one point at each one's peak."""
+    def detections(maps: dict, threshold: dict[str, float]) -> gpd.GeoDataFrame:
+        """Join above-threshold neighbours into detections, one point at each one's peak.
+
+        maps holds each tile's score maps by model name; the probe scores every pixel, a CNN
+        every 4th, with its window centre 16 pixels in.
+        """
         rows = []
-        for key, m in scan_maps.items():
+        for key, m in maps.items():
             c, a, _b, f, _d, e = m["transform"]
-            for model, step, off in (("cnn", STRIDE, 16), ("probe", 1, 0)):
+            for model in threshold:
+                step, off = (1, 0) if model == "probe" else (STRIDE, 16)
                 score = m[model]
                 lab, n = ndimage.label(score >= threshold[model], structure=np.ones((3, 3)))
                 if n == 0:
@@ -811,14 +847,14 @@ def _(ALBERS, STRIDE, gpd, ndimage, np, osm, pd, scan_maps, states):
 
 
 @app.cell
-def _(OUT_DIR, VOLTAGE_CLASSES, detections, np, osm, pd, scan_osm, thresholds):
+def _(OUT_DIR, VOLTAGE_CLASSES, detections, np, osm, pd, scan_maps, scan_osm, thresholds):
     MATCH_M = 300
 
-    def score_scan(threshold: dict[str, float]) -> tuple[pd.DataFrame, object]:
-        det = detections(threshold)
+    def score_scan(maps: dict, threshold: dict[str, float]) -> tuple[pd.DataFrame, object]:
+        det = detections(maps, threshold)
         det["d_osm"] = det.geometry.apply(lambda g: osm.distance(g).min() if len(osm) else np.inf)
         rows = []
-        for model in ("probe", "cnn"):
+        for model in threshold:
             d = det[det["model"] == model]
             row = {
                 "model": model,
@@ -840,16 +876,13 @@ def _(OUT_DIR, VOLTAGE_CLASSES, detections, np, osm, pd, scan_osm, thresholds):
             rows.append(row)
         return pd.DataFrame(rows), det
 
-    scan_table, scan_det = score_scan(thresholds)
+    scan_table, scan_det = score_scan(scan_maps, thresholds)
     # The same scan at stricter CNN cutoffs, to show the trade-off a reviewer would choose from.
-    _strict = [
-        score_scan({"probe": thresholds["probe"], "cnn": t})[0].query("model == 'cnn'")
-        for t in (0.9, 0.97, 0.99)
-    ]
+    _strict = [score_scan(scan_maps, {"cnn": t})[0] for t in (0.9, 0.97, 0.99)]
     scan_table = pd.concat([scan_table, *_strict], ignore_index=True)
     scan_table.to_csv(OUT_DIR / "scan_precision_recall.csv", index=False)
     print(scan_table.to_string(index=False))
-    return MATCH_M, scan_det, scan_table
+    return MATCH_M, scan_det, scan_table, score_scan
 
 
 @app.cell
@@ -920,7 +953,7 @@ def _(ALBERS, DATA_DIR, downloaded, fetch, gpd, np, osm, states):
 
 
 @app.cell
-def _(Affine, DATA_DIR, STRIDE, YEAR, cnn_map, far_ends, np, read_patches, time, timings):
+def _(Affine, DATA_DIR, STRIDE, YEAR, cnn, cnn_map, far_ends, np, read_patches, time, timings):
     _t = time.time()
     # The raw 64 x 64 windows are cached, not the scores, as for the scan tiles.
     _cache = DATA_DIR / f"line_end_windows_{YEAR}.npz"
@@ -932,7 +965,7 @@ def _(Affine, DATA_DIR, STRIDE, YEAR, cnn_map, far_ends, np, read_patches, time,
     _out = []
     for _i in range(len(_z["codes"])):
         _sc = _z["scales"][_i]
-        _m = cnn_map(_z["codes"][_i], np.where(np.isfinite(_sc), _sc, 0).astype(np.float32))
+        _m = cnn_map(cnn, _z["codes"][_i], np.where(np.isfinite(_sc), _sc, 0).astype(np.float32))
         _r, _q = np.unravel_index(int(_m.argmax()), _m.shape)
         _a = Affine(*_z["transforms"][_i])
         _out.append(
@@ -1038,12 +1071,13 @@ def _(ALBERS, DATA_DIR, Path, gpd, httpx, lines, np, osm, plt):
             .json()["features"]
         )
         need = shape_box(bb.x.min(), bb.y.min(), bb.x.max(), bb.y.max())
-        years = sorted({f["properties"]["naip:year"] for f in items}, reverse=True)
+        # Planetary Computer returns naip:year as a string for some items and an int for others.
+        years = sorted({str(f["properties"]["naip:year"]) for f in items}, reverse=True)
         assert items, f"no NAIP image near {title}"
         # The newest year covering most of the chip; a year can graze its edge.
         cover = {
             y: unary_union(
-                [shape(f["geometry"]) for f in items if f["properties"]["naip:year"] == y]
+                [shape(f["geometry"]) for f in items if str(f["properties"]["naip:year"]) == y]
             )
             .intersection(need)
             .area
@@ -1051,8 +1085,10 @@ def _(ALBERS, DATA_DIR, Path, gpd, httpx, lines, np, osm, plt):
             for y in years
         }
         year = max(years, key=lambda y: (round(cover[y], 2), y))
-        items = [f for f in items if f["properties"]["naip:year"] == year]
-        with rasterio.Env(GDAL_DISABLE_READDIR_ON_OPEN="EMPTY_DIR"):
+        items = [f for f in items if str(f["properties"]["naip:year"]) == year]
+        with rasterio.Env(
+            GDAL_DISABLE_READDIR_ON_OPEN="EMPTY_DIR", GDAL_HTTP_MAX_RETRY=4, GDAL_HTTP_RETRY_DELAY=2
+        ):
             srcs = [
                 rasterio.open(f"/vsicurl/{f['assets']['image']['href']}?{token}") for f in items
             ]
@@ -1143,7 +1179,423 @@ def _(OUT_DIR, Path, pd, to_check):
 @app.cell
 def _(mo):
     mo.md(r"""
-    ## 10. Time, downloads and cost
+    ## 10. Retraining with hard negatives
+
+    The scan and the hand check say the CNN learned "developed land", because its random
+    negatives are mostly forest and fields. So we give it **hard negatives**: patches of
+    developed land more than 1 km from any OSM substation, of two kinds.
+
+    - **Mapped developed land.** OSM land-use polygons (from Overture `base/land_use`, same
+      release as the answer key) of the kinds the first CNN confused with substations:
+      industrial, commercial, retail, works, quarries, landfills, farmyards, schools and
+      housing. Polygons tagged `power=*` (power plants and their yards) are left out. One
+      point per polygon, at most 150 per class and state, drawn from training blocks.
+    - **The first CNN's own mistakes** (hard-negative mining): we scan 40 random tiles in
+      training blocks with it, and every detection scoring 0.5 or more with no OSM
+      substation within 1 km becomes a negative, at most 60 per tile.
+
+    Hard negatives in held-out blocks are never trained on. The land-use polygons inside the
+    48 held-out scan tiles become a second test: how many of those places each model flags.
+    """)
+    return
+
+
+@app.cell
+def _(ALBERS, DATA_DIR, Path, duckdb, gpd, np, osm, overture_release, pd, states, time, timings):
+    _t = time.time()
+    HARD_CLASSES = [
+        "industrial",
+        "commercial",
+        "retail",
+        "works",
+        "quarry",
+        "landfill",
+        "farmyard",
+        "school",
+        "residential",
+    ]
+    _path = DATA_DIR / f"overture-land-use-tn-ny-{overture_release}.parquet"
+    if not _path.exists():
+        _con = duckdb.connect()
+        _con.sql("INSTALL httpfs; LOAD httpfs; INSTALL spatial; LOAD spatial;")
+        # The land-use theme is large; a cap keeps DuckDB inside a small machine's memory.
+        _con.sql("SET memory_limit = '3GB'")
+        _con.sql("CREATE SECRET overture (TYPE s3, KEY_ID '', SECRET '', REGION 'us-west-2')")
+        _boxes = " OR ".join(
+            f"(bbox.xmin > {b.minx} AND bbox.xmax < {b.maxx} AND bbox.ymin > {b.miny}"
+            f" AND bbox.ymax < {b.maxy})"
+            for b in states.to_crs(4326).bounds.itertuples()
+        )
+        _classes = ", ".join(f"'{c}'" for c in HARD_CLASSES)
+        _con.sql(f"""
+            COPY (
+                SELECT id, class, source_tags['power'] AS power, ST_AsWKB(geometry) AS wkb
+                FROM read_parquet(
+                    's3://overturemaps-us-west-2/release/{overture_release}/theme=base/type=land_use/*')
+                WHERE class IN ({_classes}) AND ({_boxes})
+            ) TO '{_path}.part' (FORMAT parquet)
+        """)
+        Path(f"{_path}.part").rename(_path)
+    _raw = pd.read_parquet(_path)
+    # DuckDB writes rows in no fixed order; sort so the random draw below is repeatable.
+    _raw = _raw[_raw["power"].isna()].sort_values("id").reset_index(drop=True)
+    _lu = gpd.GeoDataFrame(
+        _raw[["id", "class"]],
+        geometry=gpd.GeoSeries.from_wkb(_raw["wkb"].to_numpy()).representative_point(),
+        crs=4326,
+    ).to_crs(ALBERS)
+    _lu = gpd.sjoin(_lu, states, predicate="within").drop(columns="index_right")
+    land_use = _lu[~_lu.within(osm.geometry.buffer(1000).union_all())].reset_index(drop=True)
+    _ll = land_use.to_crs(4326).geometry
+    land_use["lon"], land_use["lat"] = _ll.x.to_numpy(), _ll.y.to_numpy()
+    timings["land_use"] = time.time() - _t
+    print(f"Land-use places more than 1 km from an OSM substation: {len(land_use):,}")
+    land_use.groupby(["class", "region"]).size().unstack().reindex(HARD_CLASSES).fillna(0).astype(
+        np.int64
+    )
+    return HARD_CLASSES, land_use
+
+
+@app.cell
+def _(Point, SEED, block_of, np, scan_tiles, states, test_blocks, tiles):
+    # 20 random training-block tiles per state to mine the first CNN's mistakes from.
+    _rng = np.random.default_rng(SEED + 2)
+    _keys = np.array(list(tiles.index), dtype=float)
+    _scanned = {k for _r, k in scan_tiles}
+    mine_tiles = []
+    for _region, _shape in zip(states["region"], states.to_crs(4326).geometry, strict=True):
+        _x0, _y0, _x1, _y1 = _shape.bounds
+        _k = _keys[
+            (_keys[:, 0] > _x0) & (_keys[:, 0] < _x1) & (_keys[:, 1] > _y0) & (_keys[:, 1] < _y1)
+        ]
+        _k = _k[~np.isin(block_of(_k[:, 0], _k[:, 1]), list(test_blocks))]
+        _k = np.array([k for k in _k if _shape.contains(Point(*k))])
+        _pick = _k[_rng.choice(len(_k), size=20, replace=False)]
+        mine_tiles += [(_region, (round(float(a), 2), round(float(b), 2))) for a, b in _pick]
+    assert not _scanned & {k for _r, k in mine_tiles}
+    print(f"{len(mine_tiles)} training tiles to mine")
+    return (mine_tiles,)
+
+
+@app.cell
+def _(
+    DATA_DIR,
+    READ,
+    YEAR,
+    cnn,
+    cnn_map,
+    detections,
+    mine_tiles,
+    np,
+    osm,
+    pd,
+    read_tile,
+    tiles,
+    time,
+    timings,
+):
+    _t = time.time()
+    _codes, _scales, _rows = [], [], []
+    for _region, _key in mine_tiles:
+        _cache = DATA_DIR / "tiles" / f"{YEAR}_{_key[0]}_{_key[1]}.npz"
+        if not _cache.exists():
+            _cache.parent.mkdir(exist_ok=True)
+            _c, _s = read_tile(_key)
+            np.savez(_cache, codes=_c, scales=_s)
+        _z = np.load(_cache)
+        _c, _s = _z["codes"], _z["scales"]
+        _tf = tiles.loc[[_key]].iloc[0]["transform"]
+        _maps = {_key: {"region": _region, "cnn": cnn_map(cnn, _c, _s), "transform": _tf}}
+        _d = detections(_maps, {"cnn": 0.5})
+        _d = _d[np.array([osm.distance(g).min() > 1000 for g in _d.geometry], dtype=bool)]
+        _d = _d.sort_values("score", ascending=False).head(60)
+        _x0, _a, _b, _y0, _dd, _e = _tf
+        for _p in _d.itertuples():
+            _r0 = int(np.clip(int((_p.lat - _y0) / _e) - READ // 2, 0, _c.shape[0] - READ))
+            _c0 = int(np.clip(int((_p.lon - _x0) / _a) - READ // 2, 0, _c.shape[1] - READ))
+            _codes.append(_c[_r0 : _r0 + READ, _c0 : _c0 + READ].copy())
+            _scales.append(_s[_r0 : _r0 + READ, _c0 : _c0 + READ].copy())
+            _rows.append(
+                {"lon": _p.lon, "lat": _p.lat, "region": _region, "kind": "first CNN's mistake"}
+            )
+    mined = pd.DataFrame(_rows)
+    mined_codes, mined_scales = np.stack(_codes), np.stack(_scales)
+    timings["mine"] = time.time() - _t
+    print(
+        f"Mined {len(mined):,} hard negatives from {len(mine_tiles)} training tiles "
+        f"in {timings['mine']:.0f} s"
+    )
+    mined.groupby("region").size()
+    return mined, mined_codes, mined_scales
+
+
+@app.cell
+def _(
+    DATA_DIR,
+    HARD_CLASSES,
+    SEED,
+    YEAR,
+    block_of,
+    land_use,
+    mined,
+    mined_codes,
+    mined_scales,
+    np,
+    pd,
+    read_patches,
+    test_blocks,
+    time,
+    timings,
+):
+    _t = time.time()
+    _rng = np.random.default_rng(SEED + 3)
+    _lu = land_use[
+        ~np.isin(
+            block_of(land_use["lon"].to_numpy(), land_use["lat"].to_numpy()), list(test_blocks)
+        )
+    ]
+    # At most 150 per class and state, drawn at random.
+    _lu = (
+        _lu.sample(frac=1, random_state=SEED)
+        .groupby(["region", "class"])
+        .head(150)
+        .reset_index(drop=True)
+    )
+    assert set(_lu["class"]) <= set(HARD_CLASSES)
+    _cache = DATA_DIR / f"land_use_patches_{YEAR}.npz"
+    if _cache.exists() and len(np.load(_cache)["codes"]) == len(_lu):
+        _z = np.load(_cache)
+        _lc, _ls = _z["codes"], _z["scales"]
+    else:
+        _lc, _ls, _ = read_patches(list(zip(_lu["lon"], _lu["lat"], strict=True)))
+        np.savez(_cache, codes=_lc, scales=_ls)
+    hard = pd.concat(
+        [
+            pd.DataFrame(
+                {
+                    "lon": _lu["lon"],
+                    "lat": _lu["lat"],
+                    "region": _lu["region"],
+                    "kind": "land use: " + _lu["class"],
+                }
+            ),
+            mined,
+        ],
+        ignore_index=True,
+    )
+    hard_codes = np.concatenate([_lc, mined_codes])
+    _hs = np.concatenate([_ls, mined_scales])
+    hard_scales = np.where(np.isfinite(_hs), _hs, 0).astype(np.float32)
+    # A tenth goes to validation, like the first model's training rows.
+    hard["split"] = np.where(_rng.random(len(hard)) < 0.1, "val", "train")
+    timings["read_hard"] = time.time() - _t
+    print(f"{len(hard):,} hard negatives, {timings['read_hard']:.0f} s")
+    hard.groupby(["kind", "split"]).size().unstack()
+    return hard, hard_codes, hard_scales
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    ### The second CNN
+
+    Same network, same augmentation, same 15 epochs and same seed. The only change is the
+    training data: the first model's positives and random negatives, plus the hard
+    negatives. Its threshold follows the same rule as the first model's: 1% of validation
+    *random* negatives score above it, so the two are compared at the same strictness on
+    ordinary land.
+    """)
+    return
+
+
+@app.cell
+def _(
+    DATA_DIR,
+    cnn_scores,
+    codes,
+    hard,
+    hard_codes,
+    hard_scales,
+    np,
+    samples,
+    scales,
+    time,
+    timings,
+    train_cnn,
+):
+    _t = time.time()
+    _n = len(samples)
+    # The combined patches go in a memory-mapped file, not a second 2.3 GB array in memory.
+    _codes2 = np.lib.format.open_memmap(
+        DATA_DIR / "codes_with_hard_negatives.npy",
+        mode="w+",
+        dtype=np.int8,
+        shape=(_n + len(hard), *codes.shape[1:]),
+    )
+    _codes2[:_n], _codes2[_n:] = codes, hard_codes
+    _scales2 = np.concatenate([scales, hard_scales])
+    _y = np.r_[samples["label"].to_numpy(), np.zeros(len(hard))].astype(np.float32)
+    _split = np.r_[samples["split"].to_numpy(), hard["split"].to_numpy()]
+    cnn_hn, cnn_hn_log = train_cnn(
+        _codes2, _scales2, _y, np.flatnonzero(_split == "train"), np.flatnonzero(_split == "val")
+    )
+    timings["train_cnn_hard"] = time.time() - _t
+    cnn_hn_score = cnn_scores(cnn_hn, _codes2, _scales2, np.arange(_n))
+    print(f"Trained in {timings['train_cnn_hard']:.0f} s")
+    return cnn_hn, cnn_hn_log, cnn_hn_score
+
+
+@app.cell
+def _(OUT_DIR, VOLTAGE_CLASSES, cnn_hn_score, np, pd, roc_auc_score, scored, thresholds):
+    scored_hn = scored.assign(cnn_hn=cnn_hn_score)
+    _val = scored_hn[(scored_hn["split"] == "val") & (scored_hn["label"] == 0)]
+    threshold_hn = float(np.quantile(_val["cnn_hn"], 0.99))
+    _cut = {"cnn": thresholds["cnn"], "cnn_hn": threshold_hn}
+    _test = scored_hn[scored_hn["split"] == "test"]
+    _neg = _test[_test["label"] == 0]
+    _rows = []
+    for _m in ("cnn", "cnn_hn"):
+        _row = {
+            "model": _m,
+            "threshold": round(_cut[_m], 3),
+            "AUC": round(roc_auc_score(_test["label"], _test[_m]), 3),
+            "false-positive rate": round(float((_neg[_m] >= _cut[_m]).mean()), 3),
+        }
+        for _v in [*VOLTAGE_CLASSES, "all"]:
+            _p = _test[(_test["label"] == 1) & ((_test["vclass"] == _v) | (_v == "all"))]
+            _row[f"recall {_v}"] = round(float((_p[_m] >= _cut[_m]).mean()), 2)
+            _row[f"n {_v}"] = len(_p)
+        _rows.append(_row)
+    recall_hn_table = pd.DataFrame(_rows)
+    recall_hn_table.to_csv(OUT_DIR / "hard_negatives_heldout_recall.csv", index=False)
+    print(recall_hn_table.to_string(index=False))
+    return recall_hn_table, threshold_hn
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    ### The same 48-tile scan, before and after
+
+    The scan tiles, matching rule and OSM answer key are those of section 7. The second CNN
+    is scored at its own 1% threshold and at a few stricter cutoffs. We also count how many
+    of the mapped developed places inside those held-out tiles (industrial land, quarries,
+    schools and so on, more than 1 km from an OSM substation) each CNN flags: the window
+    centred on the place scores above the threshold.
+    """)
+    return
+
+
+@app.cell
+def _(DATA_DIR, YEAR, cnn_hn, cnn_map, np, scan_maps, scan_tiles, time, timings):
+    _t = time.time()
+    scan_maps_hn = {}
+    for _region, _key in scan_tiles:
+        _z = np.load(DATA_DIR / "tiles" / f"{YEAR}_{_key[0]}_{_key[1]}.npz")
+        scan_maps_hn[_key] = {
+            **scan_maps[_key],
+            "cnn_hn": cnn_map(cnn_hn, _z["codes"], _z["scales"]),
+        }
+    timings["scan_hard"] = time.time() - _t
+    return (scan_maps_hn,)
+
+
+@app.cell
+def _(OUT_DIR, pd, scan_maps_hn, score_scan, threshold_hn, thresholds):
+    _before = score_scan(scan_maps_hn, {"cnn": thresholds["cnn"]})[0]
+    _after, scan_det_hn = score_scan(scan_maps_hn, {"cnn_hn": threshold_hn})
+    _stricter = [score_scan(scan_maps_hn, {"cnn_hn": t})[0] for t in (0.9, 0.97, 0.99)]
+    scan_hn_table = pd.concat([_before, _after, *_stricter], ignore_index=True)
+    scan_hn_table.to_csv(OUT_DIR / "hard_negatives_scan.csv", index=False)
+    print(scan_hn_table.to_string(index=False))
+    return scan_det_hn, scan_hn_table
+
+
+@app.cell
+def _(
+    HARD_CLASSES,
+    OUT_DIR,
+    STRIDE,
+    land_use,
+    np,
+    pd,
+    scan_maps_hn,
+    threshold_hn,
+    thresholds,
+    tile_key,
+):
+    _cut = {"cnn": thresholds["cnn"], "cnn_hn": threshold_hn}
+    _rows = []
+    for _cls, _lon, _lat in zip(land_use["class"], land_use["lon"], land_use["lat"], strict=True):
+        _m = scan_maps_hn.get(tile_key(_lon, _lat))
+        if _m is None:
+            continue
+        _x0, _a, _b, _y0, _d, _e = _m["transform"]
+        # The CNN window centred nearest the place: window (i, j) is centred at pixel 4i + 16.
+        _i = int(np.clip(round(((_lat - _y0) / _e - 16) / STRIDE), 0, _m["cnn"].shape[0] - 1))
+        _j = int(np.clip(round(((_lon - _x0) / _a - 16) / STRIDE), 0, _m["cnn"].shape[1] - 1))
+        _rows.append({"class": _cls} | {k: bool(_m[k][_i, _j] >= _cut[k]) for k in _cut})
+    heldout_land_use = pd.DataFrame(_rows)
+    land_use_flags = (
+        heldout_land_use.groupby("class")
+        .agg(places=("cnn", "size"), cnn=("cnn", "mean"), cnn_hn=("cnn_hn", "mean"))
+        .reindex(HARD_CLASSES)
+        .dropna()
+    )
+    land_use_flags.loc["all"] = [
+        len(heldout_land_use),
+        heldout_land_use["cnn"].mean(),
+        heldout_land_use["cnn_hn"].mean(),
+    ]
+    land_use_flags = land_use_flags.round(3)
+    land_use_flags.to_csv(OUT_DIR / "hard_negatives_land_use_flags.csv")
+    print(land_use_flags.to_string())
+    return (land_use_flags,)
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    ### A fresh hand check
+
+    As in section 9: 20 of the second CNN's scan detections with no OSM substation within
+    300 m, drawn at random and checked on NAIP. Verdicts go in the same `hand_check.csv`,
+    keyed the same way.
+    """)
+    return
+
+
+@app.cell
+def _(CHIP_DIR, MATCH_M, OUT_DIR, Path, SEED, draw_chip, pd, place_id, scan_det_hn):
+    _fp = scan_det_hn[scan_det_hn["d_osm"] > MATCH_M]
+    to_check_hn = _fp.sample(n=min(20, len(_fp)), random_state=SEED)[
+        ["region", "score", "lon", "lat"]
+    ].reset_index(drop=True)
+    to_check_hn["id"] = [
+        place_id(a, b) for a, b in zip(to_check_hn["lon"], to_check_hn["lat"], strict=True)
+    ]
+    for _r in to_check_hn.itertuples():
+        draw_chip(
+            CHIP_DIR / f"{_r.id}.jpg",
+            _r.lon,
+            _r.lat,
+            None,
+            f"{_r.id} hard-negative CNN scan detection {_r.region} {_r.score:.3f}",
+        )
+    to_check_hn.drop(columns=["lon", "lat"]).to_csv(CHIP_DIR / "to_check_hn.csv", index=False)
+    _hc = pd.read_csv(Path("hand_check.csv"))
+    hand_hn = to_check_hn.merge(_hc[["id", "verdict", "note"]], on="id", how="left")
+    hand_hn["verdict"] = hand_hn["verdict"].fillna("not checked")
+    hand_hn_table = hand_hn["verdict"].value_counts().rename("scan detection, second CNN")
+    hand_hn_table.to_csv(OUT_DIR / "hand_check_hard_negatives_tally.csv")
+    print(hand_hn_table.to_string())
+    return hand_hn, hand_hn_table
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    ## 11. Time, downloads and cost
 
     Everything is free and anonymous: no account, key or paid service. The cost is bandwidth
     and CPU time on whatever machine runs this.
@@ -1156,8 +1608,16 @@ def _(
     DATA_DIR,
     OUT_DIR,
     YEAR,
+    cnn_hn_log,
     cnn_log,
     downloaded,
+    hand_hn_table,
+    hard,
+    land_use_flags,
+    recall_hn_table,
+    scan_hn_table,
+    threshold_hn,
+    mine_tiles,
     hand_table,
     json,
     line_end_table,
@@ -1191,7 +1651,12 @@ def _(
         + sum(64 * _w(p.x, p.y) for p in _ends)
         + sum(
             int(tiles.loc[[k]].iloc[0]["height"]) * int(tiles.loc[[k]].iloc[0]["width"])
-            for _r, k in scan_tiles
+            for _r, k in [*scan_tiles, *mine_tiles]
+        )
+        + sum(
+            READ * _w(lo, la)
+            for lo, la, kind in zip(hard["lon"], hard["lat"], hard["kind"], strict=True)
+            if kind.startswith("land use")
         )
     )
     timings["total"] = time.time() - run_start
@@ -1214,6 +1679,15 @@ def _(
         "scan": scan_table.to_dict("records"),
         "line_ends": line_end_table.astype(str).to_dict("records"),
         "hand_check": hand_table.reset_index().to_dict("records"),
+        "hard_negatives": {
+            "count_by_kind": hard["kind"].value_counts().to_dict(),
+            "threshold": threshold_hn,
+            "cnn_training": cnn_hn_log,
+            "heldout_recall": recall_hn_table.to_dict("records"),
+            "scan": scan_hn_table.to_dict("records"),
+            "heldout_land_use_flagged": land_use_flags.reset_index().to_dict("records"),
+            "hand_check": hand_hn_table.reset_index().to_dict("records"),
+        },
         "cost": cost,
     }
     (OUT_DIR / "summary.json").write_text(json.dumps(summary, indent=2, default=str))
@@ -1222,7 +1696,17 @@ def _(
 
 
 @app.cell
-def _(hand, line_end_table, mo, recall_table, scan_table):
+def _(
+    hand,
+    hand_hn,
+    land_use_flags,
+    line_end_table,
+    mo,
+    recall_hn_table,
+    recall_table,
+    scan_hn_table,
+    scan_table,
+):
     _cnn = recall_table[(recall_table["model"] == "cnn") & (recall_table["region"] == "both")].iloc[
         0
     ]
@@ -1234,8 +1718,15 @@ def _(hand, line_end_table, mo, recall_table, scan_table):
     _fp = hand[hand["set"] == "scan detection"]["verdict"].value_counts()
     _flagged = int(line_end_table.iloc[-1]["flagged"])
     _places = int(line_end_table.iloc[-1]["places"])
+    _hn = recall_hn_table.set_index("model")
+    _sh = scan_hn_table.set_index(["model", "threshold"])
+    _before = _sh.xs("cnn", level="model").iloc[0]
+    _after = _sh.xs("cnn_hn", level="model")
+    _rule, _strict = _after.iloc[0], _after.loc[0.97]
+    _lu = land_use_flags.loc["all"]
+    _fp2 = hand_hn["verdict"].value_counts()
     mo.md(f"""
-    ## 11. What this shows, and what didn't work
+    ## 12. What this shows, and what didn't work
 
     **The embeddings know what a substation looks like, but not well enough to search for
     new ones.** On patches centred on held-out OSM substations the CNN finds
@@ -1258,10 +1749,32 @@ def _(hand, line_end_table, mo, recall_table, scan_table):
     commercial and industrial land). Most far ends are taps on another line, as
     `hifld-grid-gaps/` found, so there is usually nothing to find.
 
+    **Hard negatives help at strict cutoffs, but don't make a scanner yet.** Adding
+    developed-land and self-mined negatives changes the share of the {int(_lu["places"])}
+    held-out developed places the CNN flags from {_lu["cnn"]:.0%} to {_lu["cnn_hn"]:.0%}. At
+    the same 1%-of-random-patches rule, scan precision against OSM goes from
+    {_before["precision"]:.1%} to {_rule["precision"]:.1%}: that rule is calibrated on
+    forest and fields, which the new model already rejects, so it sets a loose threshold
+    ({_rule.name:.3f}). A stricter cutoff pays: at 0.97, {_strict["precision"]:.0%} of
+    {int(_strict["detections"])} detections are near an OSM substation and
+    {_strict["recall 100-229 kV"]:.0%} of 100–229 kV substations are still found. That
+    cutoff was picked from a sweep on the test tiles, so it is optimistic. On held-out
+    patches the new model finds {_hn.loc["cnn_hn", "recall 230 kV+"]:.0%} of 230 kV+,
+    {_hn.loc["cnn_hn", "recall 100-229 kV"]:.0%} of 100–229 kV and
+    {_hn.loc["cnn_hn", "recall under 100 kV"]:.0%} of under-100 kV substations (first CNN
+    {_hn.loc["cnn", "recall 230 kV+"]:.0%}, {_hn.loc["cnn", "recall 100-229 kV"]:.0%} and
+    {_hn.loc["cnn", "recall under 100 kV"]:.0%}). Of 20 new "wrong" detections checked on
+    photos, {_fp2.get("substation", 0)} were substations.
+
     **What didn't work, or wasn't tried:**
 
-    - Precision. Random negatives are too easy; the model needs hard negatives (industrial
-      parks, quarries, parking lots, farmsteads) before a scan is worth a reviewer's time.
+    - Precision. Even with hard negatives, most detections at the 1% rule are not
+      substations; at the stricter cutoff a reviewer would still see about
+      {(1 - _strict["precision"]) / _strict["precision"]:.0f} wrong places for each right one.
+    - Stability. The second CNN depends on which hard negatives are drawn: an earlier run
+      with a slightly different land-use draw scored 9.5% at its 1% rule and 24% at 0.97.
+    - The one 230 kV+ substation in the scan tiles is missed by the second CNN at the
+      stricter cutoffs; one example says little.
     - Per-voltage precision. A detection has no voltage, so precision is overall only;
       recall is per class.
     - Small samples where it matters: the held-out set has only {int(_cnn["n 230 kV+"])}
