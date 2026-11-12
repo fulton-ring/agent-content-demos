@@ -129,7 +129,6 @@ housing areas and a canal lock. `hand_check.csv` also holds 20 verdicts from an 
 - **Memory.** Fresh runs first died at 13.9 GB; streaming reads into arrays and a memory-mapped training set fixed it.
 - **Column-window reads.** A window needs one HTTP request per `.npy` row (about 200 a second here), and multi-range
   requests return the whole 130 MB file, so we read whole rows and fetch 20 to 30 times the bytes we keep.
-- **Line ends are mostly taps:** 452 of the 502 far ends touch another line, so most have no substation to find.
 
 ## What it doesn't show
 
