@@ -133,7 +133,7 @@ def _(CACHE, IEM_NETWORKS, NWPS, PER_STATE, SEED, httpx, pl, random, time):
                 props = [f["properties"] for f in resp.json()["features"]]
                 cands = sorted(
                     p["sid"] for p in props
-                    if (p.get("archive_begin") or "9999") <= "2008-10-01"
+                    if (p.get("archive_begin") or "9999") <= "2010-12-31"
                     and (p.get("attributes") or {}).get("PEDTS", "").startswith("HG")
                     and (p.get("attributes") or {}).get("HAS_HML") == "1"
                     and p["sid"] not in NAMED
@@ -267,7 +267,13 @@ def _(mo):
     window offset: the median transmitted-minus-approved difference at matching timestamps across the windows.
     A peak revision close to the window offset means USGS shifted the whole record (a datum or gage-height
     correction); a peak revision much larger than it means the peak itself was edited (a spike removed, a gap
-    filled, ice). We also check that the gage transmitted something within two hours of the approved peak,
+    filled, ice).
+
+    The HADS feed also carries garbage readings: a 1,213 ft stage at a gage that never tops 30 ft, from a
+    garbled radio message. USGS's website doesn't show those, so before taking the transmitted peak we drop
+    any reading more than 1 ft (and more than 10%) away from the median of its five-reading neighbourhood
+    (25% and 500 cfs for discharge), and any reading more than 25% and 2 ft above the highest value USGS
+    approved at that gage in any of our windows (garbage often arrives in runs, which the median misses). We count how often such a spike sat above the crest. We also check that the gage transmitted something within two hours of the approved peak,
     because a transmission gap at the crest makes the "transmitted peak" meaningless rather than revised.
     """)
     return
@@ -283,14 +289,35 @@ def _(pl, windows):
         .sort("len", descending=True).unique("usgs_id", keep="first")
         .select("usgs_id", "series")
     )  # fmt: skip
-    tx_gh = (
+
+    def flag_spikes(t: pl.DataFrame, usgs_var: str, floor: float, share: float) -> pl.DataFrame:
+        """Mark garbage readings: far from their five-reading median, or far above anything USGS ever approved."""
+        record = (
+            windows.filter((pl.col("var") == usgs_var) & (pl.col("status") == "Approved"))
+            .group_by("usgs_id").agg(pl.col("value").max().alias("record"))
+        )  # fmt: skip
+        med = pl.col("value").rolling_median(5, center=True, min_samples=1).over("usgs_id", "window")
+        ceiling = pl.max_horizontal(pl.col("record") * (1 + share * 2.5), pl.col("record") + floor * 2)
+        return (
+            t.sort("usgs_id", "window", "utc")
+            .join(record, on="usgs_id", how="left")
+            .with_columns(
+                spike=((pl.col("value") - med).abs() > pl.max_horizontal(pl.lit(floor), med.abs() * share))
+                | (pl.col("value") > ceiling).fill_null(False)
+            )
+            .drop("record")
+        )
+
+    tx_gh = flag_spikes(
         iem.with_columns(series=pl.col("var").str.slice(0, 5))
         .join(main_hg, on=["usgs_id", "series"])
-        .group_by("usgs_id", "window", "utc").agg(pl.col("value").median())
+        .group_by("usgs_id", "window", "utc").agg(pl.col("value").median()),
+        "usgs_gh", floor=1.0, share=0.1,
     )  # fmt: skip
-    tx_q = (
+    tx_q = flag_spikes(
         iem.filter(pl.col("var").str.starts_with("QR"))
-        .group_by("usgs_id", "window", "utc").agg((pl.col("value").median() * 1000))
+        .group_by("usgs_id", "window", "utc").agg((pl.col("value").median() * 1000)),
+        "usgs_q", floor=500.0, share=0.25,
     )  # fmt: skip
 
     def usgs_side(var: str) -> pl.DataFrame:
@@ -306,9 +333,11 @@ def _(pl, windows):
             pl.col("qualifier").first().alias("qualifier"),
             (pl.col("status") == "Approved").all().alias("all_approved"),
         )  # fmt: skip
-        t_peak = t.sort("value", descending=True).group_by("usgs_id", "wy").agg(
+        t_peak = t.filter(~pl.col("spike")).sort("value", descending=True).group_by("usgs_id", "wy").agg(
             pl.col("value").first().alias("transmitted"), pl.col("utc").first().alias("transmitted_time"),
-        )  # fmt: skip
+        ).join(t.group_by("usgs_id", "wy").agg(pl.col("value").max().alias("transmitted_raw")),
+               on=["usgs_id", "wy"])  # fmt: skip
+        t = t.filter(~pl.col("spike"))
         offset = (
             a.join(t, on=["usgs_id", "wy", "window", "utc"], suffix="_t")
             .group_by("usgs_id", "wy")
@@ -376,11 +405,11 @@ def _(gages, gh_years, pl):
             pl.col("all_approved") & (pl.col("tx_near_peak") == 0)
         ).height,
         "gage on a different datum (gage-years)": labelled.filter(
-            pl.col("all_approved") & (pl.col("tx_near_peak") > 0) & pl.col("usgs_id").is_in(datum_off["usgs_id"])
+            pl.col("all_approved") & (pl.col("tx_near_peak") > 0) & pl.col("usgs_id").is_in(datum_off["usgs_id"].implode())
         ).height,
     }
     gh = labelled.filter(
-        pl.col("all_approved") & (pl.col("tx_near_peak") > 0) & ~pl.col("usgs_id").is_in(datum_off["usgs_id"])
+        pl.col("all_approved") & (pl.col("tx_near_peak") > 0) & ~pl.col("usgs_id").is_in(datum_off["usgs_id"].implode())
     )
     gh_summary = {
         "gages": gh["usgs_id"].n_unique(),
@@ -403,6 +432,7 @@ def _(gages, gh_years, pl):
             ((gh["cat_tx"] != gh["cat_ap"]) & ((gh["cat_tx"] >= 2) | (gh["cat_ap"] >= 2))).sum()
         ),
         "whole_foot_flips": int(gh["foot_flip"].sum()),
+        "gage_years_with_spike_over_1ft_above_peak": int((gh["transmitted_raw"] - gh["transmitted"] > 1).sum()),
         "peak_timing_over_6h_apart": int((gh["hours_apart"].abs() > 6).sum()),
         "excluded": excluded,
         "datum_offset_gages": datum_off["usgs_id"].to_list(),
@@ -461,7 +491,7 @@ def _(mo):
     ## 6. Did the windows miss any transmitted peaks?
 
     For a seeded sample of approved gage-years we pull the whole water year from IEM and check whether the
-    gage's highest transmitted stage fell inside our three windows. A transmitted maximum outside them is
+    gage's highest transmitted stage (after the same garbage filter) fell inside our three windows. A transmitted maximum outside them is
     usually a spike or a bad value that USGS removed, which is a revision our window method doesn't count.
     """)
     return
@@ -475,6 +505,7 @@ def _(CACHE, SEED, gh, httpx, iem_hads, pl, random):
     else:
         sample = random.Random(SEED).sample(list(gh.select("usgs_id", "nws_id", "wy", "transmitted").iter_rows()),
                                             min(25, gh.height))  # fmt: skip
+        record = dict(gh.group_by("usgs_id").agg(pl.col("approved").max()).iter_rows())
         rows = []
         with httpx.Client() as fclient:
             for usgs_id, nws_id, wy, tx_window in sample:
@@ -482,12 +513,19 @@ def _(CACHE, SEED, gh, httpx, iem_hads, pl, random):
                 hg = year.filter(pl.col("var").str.starts_with("HG"))
                 series = hg.group_by(pl.col("var").str.slice(0, 5)).len().sort("len", descending=True)
                 top = hg.filter(pl.col("var").str.slice(0, 5) == series["var"][0]) if series.height else hg
-                full_max = top["value"].max() if top.height else None
+                med = pl.col("value").rolling_median(5, center=True, min_samples=1)
+                ceiling = max(record[usgs_id] * 1.25, record[usgs_id] + 2)
+                clean = top.sort("utc").filter(
+                    ((pl.col("value") - med).abs() <= pl.max_horizontal(pl.lit(1.0), med.abs() * 0.1))
+                    & (pl.col("value") <= ceiling)
+                )
                 rows.append({"usgs_id": usgs_id, "nws_id": nws_id, "wy": wy, "window_max": tx_window,
-                             "full_year_max": full_max})  # fmt: skip
+                             "full_year_max_raw": top["value"].max(), "full_year_max": clean["value"].max()})  # fmt: skip
         full_check = pl.DataFrame(rows)
         full_check.write_csv(check_path)
     full_check = full_check.with_columns(missed=(pl.col("full_year_max") - pl.col("window_max")) > 0.05)
+    print(f"{(full_check['full_year_max_raw'] - full_check['full_year_max'] > 1).sum()} of {full_check.height} "
+          "sampled gage-years had a transmission spike of more than 1 ft somewhere in the year")  # fmt: skip
     print(f"{full_check['missed'].sum()} of {full_check.height} sampled gage-years had a higher transmitted "
           "value outside the windows")  # fmt: skip
     full_check
@@ -576,7 +614,11 @@ def _(
     summary = {
         "gage_height": gh_summary,
         "discharge": q_summary,
-        "full_year_check": {"sampled": full_check.height, "missed": int(full_check["missed"].sum())},
+        "full_year_check": {
+            "sampled": full_check.height,
+            "missed": int(full_check["missed"].sum()),
+            "spike_over_1ft_in_year": int((full_check["full_year_max_raw"] - full_check["full_year_max"] > 1).sum()),
+        },
         "runtime_s": round(time.time() - STARTED),
     }
     (OUT / "summary.json").write_text(json.dumps(summary, indent=2, default=str))
