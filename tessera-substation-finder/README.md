@@ -107,7 +107,8 @@ real precision. Of the 20 top line-end places, **1 was a substation** (a large s
 In total the CNN flags 139 of the 502 line-end places (`outputs/line_end_flags.csv`).
 
 **Cost:** $0, with no account or key. 61.5 GB of range reads and 82 MB of other downloads from an empty `data/`,
-16.3 GB kept in `data/`, and 42 minutes on 4 cores from a clean checkout. See `outputs/summary.json`.
+16.3 GB kept in `data/`, and 42 minutes on 4 cores from a clean checkout (`outputs/summary_clean_checkout_run.json`,
+written before the hand-check verdicts; `summary.json` is the rerun after them, with identical results).
 
 **Hard negatives** (`outputs/hard_negatives_*.csv`). On held-out patches, at its own 1% rule, the retrained CNN finds
 93% of 230 kV+ (first CNN 90%), 94% of 100–229 kV (90%), 67% under 100 kV (68%) and 78% overall (76%); AUC 0.975
