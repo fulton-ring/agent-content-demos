@@ -333,12 +333,14 @@ def _(pl, windows):
         wy = pl.col("window").dt.year() + (pl.col("window").dt.month() >= 10).cast(pl.Int32)
         a = approved.with_columns(wy=wy)
         t = transmitted.with_columns(wy=wy)
-        a_peak = a.sort("value", descending=True).group_by("usgs_id", "wy").agg(
+        a_peak = a.sort(["value", "utc"], descending=[True, False]).group_by("usgs_id", "wy").agg(
             pl.col("value").first().alias("approved"), pl.col("utc").first().alias("approved_time"),
             pl.col("qualifier").first().alias("qualifier"),
             (pl.col("status") == "Approved").all().alias("all_approved"),
         )  # fmt: skip
-        t_peak = t.filter(~pl.col("spike")).sort("value", descending=True).group_by("usgs_id", "wy").agg(
+        t_peak = (
+            t.filter(~pl.col("spike")).sort(["value", "utc"], descending=[True, False]).group_by("usgs_id", "wy")
+        ).agg(
             pl.col("value").first().alias("transmitted"), pl.col("utc").first().alias("transmitted_time"),
         ).join(t.group_by("usgs_id", "wy").agg(pl.col("value").max().alias("transmitted_raw")),
                on=["usgs_id", "wy"])  # fmt: skip
@@ -456,7 +458,9 @@ def _(gages, gh_years, pl):
         "whole_foot_flips_revision_under_0.5_ft": int((gh["foot_flip"] & (gh["abs_rev"] <= 0.5)).sum()),
         "gage_years_with_spike_over_1ft_above_peak": int((gh["transmitted_raw"] - gh["transmitted"] > 1).sum()),
         "peak_timing_over_6h_apart": int((gh["hours_apart"].abs() > 6).sum()),
-        "causes_over_0.1_ft": dict(gh.filter(pl.col("abs_rev") > 0.1).group_by("cause").len().iter_rows()),
+        "causes_over_0.1_ft": dict(
+            gh.filter(pl.col("abs_rev") > 0.1).group_by("cause").len().sort("cause").iter_rows()
+        ),
         "over_0.1_ft_in_ice_months": int(gh.filter((pl.col("abs_rev") > 0.1) & pl.col("ice_months")).height),
         "excluded": excluded,
         "datum_offset_gages": datum_off["usgs_id"].to_list(),
