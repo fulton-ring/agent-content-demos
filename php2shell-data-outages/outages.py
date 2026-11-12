@@ -185,7 +185,7 @@ def _(mo):
     the endpoint's usual page (under 40% of its median length before October 21), and whose content differs from
     every capture in the week before, we fetch the archived capture itself and look for maintenance wording in
     its redirect target, title or first heading, in English, Dutch, Finnish, French, German and Danish. These
-    replays are capped at 300 and saved in `cdx/replays.json`.
+    replays are capped at 300, five seconds apart, and saved in `cdx/replays.json`.
 
     Archive "revisit" records (status `-`) mean the content was identical to an earlier capture, so they take the
     status of the capture with the same content hash.
@@ -255,11 +255,11 @@ def _(CDX_DIR, REPLAY_URL, SHUTDOWN_START, UA, caps, json, pd, re, requests, tim
             )
         except requests.RequestException:
             replay_errors += 1
-            time.sleep(2)
+            time.sleep(60)
             continue
         if _resp.status_code == 429 or _resp.status_code >= 500:
             replay_errors += 1  # the archive is throttling or failing, not answering for the capture
-            time.sleep(10)
+            time.sleep(60)
             continue
         replay_errors = 0
         _text = headline(_resp.text, _resp.headers.get("Location", ""))
@@ -268,7 +268,7 @@ def _(CDX_DIR, REPLAY_URL, SHUTDOWN_START, UA, caps, json, pd, re, requests, tim
             "maintenance": "yes" if MAINTENANCE.search(_text) else "no",
             "excerpt": " ".join(_text.split())[:200],
         }
-        time.sleep(2)
+        time.sleep(5)  # the archive allows about 15 replays a minute
     _replay_path.write_text(json.dumps(replays, indent=1, sort_keys=True))
 
     _keys = [f"{i}:{t}" for i, t in zip(caps["id"], caps["timestamp"], strict=True)]
