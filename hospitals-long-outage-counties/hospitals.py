@@ -299,7 +299,7 @@ def _(OUT, pairs, pl):
             worst_peak_share_out=pl.col("peak_share_out").max().round(3),
             storms=pl.col("name").sort_by("landfall").str.join("; "),
         )
-        .sort(["long_storms", "total_hours_to_90"], descending=True)
+        .sort(["long_storms", "total_hours_to_90", "source_ID"], descending=[True, True, False])
     )
     ranking.write_csv(OUT / "hospital_ranking.csv")
     _per_storm = ranking.group_by("long_storms").len().sort("long_storms")
@@ -347,7 +347,7 @@ def _(OUT, pairs, pl):
             states=pl.col("STATE").unique().sort().str.join(" "),
             median_hours_to_90=pl.col("hours_to_90pct_restored").median().round(0),
         )
-        .sort("hospitals", descending=True)
+        .sort(["hospitals", "event_id"], descending=[True, False])
     )
     storm_table.write_csv(OUT / "storms_by_hospitals.csv")
     _top5_share = storm_table["hospitals"].head(5).sum() / storm_table["hospitals"].sum()
