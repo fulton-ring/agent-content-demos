@@ -20,7 +20,8 @@ def _():
     The Iowa Environmental Mesonet (IEM) has archived the values gages transmitted through NOAA's HADS system
     since about 2008. This notebook compares, for about 100 flood-prone gages and water years 2009 to the latest
     approved year, the annual peak gage height **as transmitted** (IEM) with the **approved** peak (USGS Water
-    Data OGC API v1, `continuous` collection), and the same for discharge where IEM has it (a few gages, mostly 2022 onward).
+    Data OGC API v1, `continuous` collection), and the same for discharge where IEM has it (a few gages,
+    mostly 2022 onward).
 
     IEM holds what the gage sent. USGS can edit values after transmission (delete a spike, apply a datum
     correction) before or while they show on its website, and those edits may not reach HADS. So "as
