@@ -14,6 +14,7 @@ with app.setup:
     import urllib.parse
     import urllib.request
     from datetime import datetime
+    from decimal import Decimal
     from pathlib import Path
 
     import marimo as mo
@@ -22,10 +23,13 @@ with app.setup:
     import pypdfium2.raw as pdfium_raw
 
     HERE = Path(__file__).parent
-    OUT = Path(os.environ.get("CCR_OUTPUT_DIR", HERE / "output"))
+    # PacifiCorp is the main sample (#188); CCR_UTILITY=aep runs the same steps on AEP's reports (#223).
+    UTILITY = os.environ.get("CCR_UTILITY", "pacificorp")
+    assert UTILITY in ("pacificorp", "aep"), f"unknown CCR_UTILITY {UTILITY}"
+    OUT = Path(os.environ.get("CCR_OUTPUT_DIR", HERE / "output")) / ("" if UTILITY == "pacificorp" else UTILITY)
     PDFS = OUT / "pdfs"
     PAGES = OUT / "pages"
-    SITE = "https://www.pacificorp.com"
+    SITE = {"pacificorp": "https://www.pacificorp.com", "aep": "https://www.aep.com"}[UTILITY]
 
 
 @app.cell(hide_code=True)
@@ -91,28 +95,44 @@ def _():
 @app.cell(hide_code=True)
 def _():
     mo.md(r"""
-    ## Every PacifiCorp report
+    ## Every report the utility lists
 
     Each plant's compliance page links its CCR units' documents. We keep the links to annual groundwater reports.
     `3_results.py` uses this list to size the whole job.
+
+    PacifiCorp has one page per plant with paths like `.../hunter/ccr-landfill/groundwater/annual...pdf`. AEP
+    (the second utility, issue #223) has one page per plant at `aep.com/environment/ccr/<plant>/`, and names
+    each report like `NE-LF-GWMonitoringCorrectiveActionRpt-01312021.pdf`: plant code, unit code, posting date.
     """)
     return
 
 
 @app.cell
 def _(fetch):
-    PLANTS = ["dave-johnston", "hunter", "huntington", "jim-bridger", "naughton"]
     all_reports = []
-    for _plant in PLANTS:
-        _html = fetch(f"{SITE}/environment/environmental-applications-compliance/{_plant}.html").decode(
-            "utf-8", "replace"
-        )
-        for _href in sorted(set(re.findall(r'href="([^"]*/groundwater/annual[^"]*\.pdf)"', _html))):
-            _unit = _href.split("/ccr/")[1].split("/")[1]
-            _years = re.findall(r"20[12]\d", urllib.parse.unquote(_href.rsplit("/", 1)[1]))
-            all_reports.append(
-                {"plant": _plant, "unit": _unit, "url": SITE + _href, "year": _years[0] if _years else ""}
+    if UTILITY == "pacificorp":
+        PLANTS = ["dave-johnston", "hunter", "huntington", "jim-bridger", "naughton"]
+        for _plant in PLANTS:
+            _html = fetch(f"{SITE}/environment/environmental-applications-compliance/{_plant}.html").decode(
+                "utf-8", "replace"
             )
+            for _href in sorted(set(re.findall(r'href="([^"]*/groundwater/annual[^"]*\.pdf)"', _html))):
+                _unit = _href.split("/ccr/")[1].split("/")[1]
+                _years = re.findall(r"20[12]\d", urllib.parse.unquote(_href.rsplit("/", 1)[1]))
+                all_reports.append(
+                    {"plant": _plant, "unit": _unit, "url": SITE + _href, "year": _years[0] if _years else ""}
+                )
+    else:
+        _index = fetch(f"{SITE}/environment/ccr").decode("utf-8", "replace")
+        PLANTS = sorted(set(re.findall(r'href="/environment/ccr/([a-z]+)/"', _index)))
+        for _plant in PLANTS:
+            _html = fetch(f"{SITE}/environment/ccr/{_plant}/").decode("utf-8", "replace")
+            _links = re.findall(
+                r'href="([^"]*/([A-Z]+)-([A-Z0-9-]+)-GWMonitoringCorrectiveActionRpt-(\d+)v?\.pdf)"', _html
+            )
+            for _href, _code, _unit, _date in sorted(set(_links)):
+                _year = _date[4:] if len(_date) == 8 else "20" + _date[4:6]
+                all_reports.append({"plant": _plant, "unit": _unit.lower(), "url": SITE + _href, "year": _year})
     assert all_reports, "no report links found; the site layout may have changed"
     OUT.mkdir(parents=True, exist_ok=True)
     (OUT / "all_reports.json").write_text(json.dumps(all_reports, indent=1))
@@ -137,21 +157,36 @@ def _():
       someone writes a parser for that lab's layout, so we read those too, rendered as images, and report them apart.
 
     The file names don't follow one pattern, so the sample is a list of name fragments. Each file's sha256 is logged.
+
+    **AEP.** We looked for a second utility with scanned lab pages and found none we could fetch by script
+    (see the README): in AEP's, Alabama Power's and Georgia Power's reports the scans are custody forms and
+    field sheets, and the lab pages are born-digital. Duke Energy's and TVA's sites refuse scripted requests.
+    Most AEP reports leave the lab reports out; Northeastern (Oklahoma) and Welsh (Texas) include them. The AEP
+    sample is four of those, covering two labs: AEP's Shreveport lab (2017 to 2019 samples) and AEP's Dolan lab
+    (2020 samples, metals in µg/L).
     """)
     return
 
 
 @app.cell
 def _(all_reports, fetch):
-    SAMPLE = [
-        "hunter/ccr-landfill/groundwater/annual-reports/2018",
-        "hunter/ccr-landfill/groundwater/annual-reports/2019",
-        "huntington/ccr-landfill/groundwater/annual-monitoring-corrective-action/2018",
-        "huntington/ccr-landfill/groundwater/annual-monitoring-corrective-action/2019",
-        "dave-johnston/ash-pond/groundwater/annual-reports/2022",
-        "jim-bridger/landfill/groundwater/annual-groundwater-reports/2021",
-        "naughton/fgd-pond-2/groundwater/annual-groundwater-reports/2022",
-    ]
+    SAMPLE = {
+        "pacificorp": [
+            "hunter/ccr-landfill/groundwater/annual-reports/2018",
+            "hunter/ccr-landfill/groundwater/annual-reports/2019",
+            "huntington/ccr-landfill/groundwater/annual-monitoring-corrective-action/2018",
+            "huntington/ccr-landfill/groundwater/annual-monitoring-corrective-action/2019",
+            "dave-johnston/ash-pond/groundwater/annual-reports/2022",
+            "jim-bridger/landfill/groundwater/annual-groundwater-reports/2021",
+            "naughton/fgd-pond-2/groundwater/annual-groundwater-reports/2022",
+        ],
+        "aep": [
+            "NE-LF-GWMonitoringCorrectiveActionRpt-031220.pdf",
+            "NE-BAP-GWMonitoringCorrectiveActionRpt-031320.pdf",
+            "NE-BAP-GWMonitoringCorrectiveActionRpt-01312021.pdf",
+            "WH-BASP-GWMonitoringCorrectiveActionRpt-013120.pdf",
+        ],
+    }[UTILITY]
     reports = []
     for _fragment in SAMPLE:
         _matches = [r for r in all_reports if _fragment in r["url"]]
@@ -185,8 +220,8 @@ def _():
     consultant's results table. A scanned page with no text layer at all is always a candidate: only a model can
     tell a lab page from a custody form there, so both models also say whether it is a lab result page.
 
-    We read every scanned candidate and a seeded random 15 born-digital candidates per report, to keep within the
-    budget.
+    We read every scanned candidate and a seeded random 15 born-digital candidates per report (25 for AEP, whose
+    lab pages are all born-digital), to keep within the budget.
     """)
     return
 
@@ -213,7 +248,9 @@ def _(reports):
         "Sulfate",
         "Thallium",
     ]
-    BORN_DIGITAL_PER_REPORT, SEED = 15, 2018
+    BORN_DIGITAL_PER_REPORT, SEED = {"pacificorp": 15, "aep": 25}[UTILITY], 2018
+    # AEP's Dolan lab prints "Sample Number" where the others print "Sample ID".
+    SAMPLE_WORDS = {"pacificorp": ("Sample ID",), "aep": ("Sample ID", "Sample Number")}[UTILITY]
 
     def picture_share(page: pdfium.PdfPage) -> float:
         """The largest share of the page covered by one image."""
@@ -232,7 +269,9 @@ def _(reports):
             _text = _doc[_i].get_textpage().get_text_range()
             _is_scan = picture_share(_doc[_i]) > 0.5
             _lab_text = (
-                "Sample ID" in _text and sum(a in _text for a in ANALYTES) >= 3 and "COLLECTION DATE" not in _text
+                any(w in _text for w in SAMPLE_WORDS)
+                and sum(a in _text for a in ANALYTES) >= 3
+                and "COLLECTION DATE" not in _text
             )
             if _is_scan and (_lab_text or len(_text.strip()) < 50):
                 _scanned.append(_i)
@@ -302,8 +341,8 @@ def _(reports):
     def squash(cell: str | None) -> str:
         return re.sub(r"\s+", "", cell or "").translate(str.maketrans("\u2010\u2011\u2012\u2013", "----"))
 
-    key = []
-    for _r in reports:
+    key_wet, wells_wet = [], {}
+    for _r in reports if UTILITY == "pacificorp" else []:
         _rows = []
         with pdfplumber.open(PDFS / f"{_r['id']}.pdf") as _pdf:
             for _pno, _page in enumerate(_pdf.pages[:150]):
@@ -337,6 +376,7 @@ def _(reports):
             if not _blocks or _row["date"] < _blocks[-1][-1]["date"]:
                 _blocks.append([])
             _blocks[-1].append(_row)
+        wells_wet[_r["id"]] = sorted({row["name"] for row in _rows if row["name"]})
         _dropped = 0
         for _block in _blocks:
             _names = [row["name"] for row in _block if row["name"]]
@@ -346,7 +386,7 @@ def _(reports):
             for _row in _block:
                 for _analyte, (_value, _q) in _row["values"].items():
                     if _value and not _value.startswith(("NS", "NM")):
-                        key.append(
+                        key_wet.append(
                             {
                                 "report": _r["id"],
                                 "table_page": _row["table_page"],
@@ -357,16 +397,104 @@ def _(reports):
                                 "qualifier": _q,
                             }
                         )
-        _n = [k for k in key if k["report"] == _r["id"]]
+        _n = [k for k in key_wet if k["report"] == _r["id"]]
         print(
             f"{_r['id']}: {len(_n)} values in {len({(k['well'], k['date']) for k in _n})} samples; "
-            f"{_dropped} of {len(_rows)} rows dropped (ambiguous well)"
+            f"{_dropped} of {len(_rows)} rows dropped (ambiguous well); {len(wells_wet[_r['id']])} wells"
         )
-    return (key,)
+    return key_wet, squash, wells_wet
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ### AEP's tables (Geosyntec)
+
+    AEP's consultant prints one table per well, with the well in the title (`Table 1 - Groundwater Data Summary:
+    MW-3D`), a units row under the header, and the qualifier in the same cell as the value (`2.12 J`, `< 0.02 U`).
+    So the parser is different: the well comes from the title, the value and qualifier are split, and metals
+    printed in µg/L are converted to mg/L, the unit the labs print. Everything after this cell is shared.
+    """)
+    return
 
 
 @app.cell
-def _(key, pages, reports):
+def _(reports, squash):
+    NAMES = {
+        "boron": "boron",
+        "calcium": "calcium",
+        "chloride": "chloride",
+        "fluoride": "fluoride",
+        "ph": "ph",
+        "sulfate": "sulfate",
+        "totaldissolvedsolids": "tds",
+        "antimony": "antimony",
+        "arsenic": "arsenic",
+        "barium": "barium",
+        "beryllium": "beryllium",
+        "cadmium": "cadmium",
+        "chromium": "chromium",
+        "cobalt": "cobalt",
+        "lead": "lead",
+        "lithium": "lithium",
+        "mercury": "mercury",
+        "molybdenum": "molybdenum",
+        "selenium": "selenium",
+        "thallium": "thallium",
+    }
+    key_geosyntec, wells_geosyntec = [], {}
+    for _r in reports if UTILITY == "aep" else []:
+        _n0 = len(key_geosyntec)
+        wells_geosyntec[_r["id"]] = set()
+        with pdfplumber.open(PDFS / f"{_r['id']}.pdf") as _pdf:
+            for _pno, _page in enumerate(_pdf.pages[:150]):
+                _title = re.search(r"Groundwater Data Summary:\s*(\S+)", _page.extract_text() or "")
+                if not _title:
+                    continue
+                _well = squash(_title.group(1))
+                wells_geosyntec[_r["id"]].add(_well)
+                for _table in _page.extract_tables():
+                    _head = next((i for i, row in enumerate(_table) if squash(row[0]) == "CollectionDate"), None)
+                    if _head is None:
+                        continue
+                    _cols = {j: NAMES.get(squash(c).lower()) for j, c in enumerate(_table[_head])}
+                    _units = [squash(u) for u in _table[_head + 1]]
+                    for _row in _table[_head + 2 :]:
+                        _date = squash(_row[0])
+                        if not re.fullmatch(r"\d{1,2}/\d{1,2}/\d{4}", _date):
+                            continue
+                        for _j, _analyte in _cols.items():
+                            _cell = re.fullmatch(r"(<?)([\d.,]+)([A-Z*]*)", squash(_row[_j]))
+                            if _analyte is None or _cell is None:
+                                continue
+                            _value = _cell.group(2).replace(",", "")
+                            if _units[_j] in ("µg/L", "ug/L"):
+                                _value = str(Decimal(_value) / 1000)
+                            key_geosyntec.append(
+                                {
+                                    "report": _r["id"],
+                                    "table_page": _pno + 1,
+                                    "well": _well,
+                                    "date": datetime.strptime(_date, "%m/%d/%Y").date().isoformat(),
+                                    "analyte": _analyte,
+                                    "value": _cell.group(1) + _value,
+                                    "qualifier": _cell.group(3),
+                                }
+                            )
+        _n = key_geosyntec[_n0:]
+        print(
+            f"{_r['id']}: {len(_n)} values in {len({(k['well'], k['date']) for k in _n})} samples; "
+            f"{len(wells_geosyntec[_r['id']])} wells"
+        )
+    return key_geosyntec, wells_geosyntec
+
+
+@app.cell
+def _(key_geosyntec, key_wet, pages, reports, wells_geosyntec, wells_wet):
+    key = key_wet + key_geosyntec
+    for _r in reports:
+        # The report's own well list, used by the page-level well check in 3_results.py.
+        _r["wells"] = sorted(wells_wet.get(_r["id"], []) or wells_geosyntec.get(_r["id"], []))
     (OUT / "reports.json").write_text(json.dumps(reports, indent=1))
     (OUT / "pages.json").write_text(json.dumps(pages, indent=1))
     (OUT / "key.json").write_text(json.dumps(key, indent=1))

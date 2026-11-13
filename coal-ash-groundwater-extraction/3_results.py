@@ -10,7 +10,7 @@ with app.setup:
     import os
     import re
     from collections import Counter
-    from datetime import date
+    from datetime import date, timedelta
     from pathlib import Path
 
     import marimo as mo
@@ -19,10 +19,13 @@ with app.setup:
     from PIL import Image, ImageDraw
 
     HERE = Path(__file__).parent
-    OUT = Path(os.environ.get("CCR_OUTPUT_DIR", HERE / "output"))
+    UTILITY = os.environ.get("CCR_UTILITY", "pacificorp")
+    SUB = "" if UTILITY == "pacificorp" else UTILITY
+    OUT = Path(os.environ.get("CCR_OUTPUT_DIR", HERE / "output")) / SUB
     PAGES = OUT / "pages"
-    SHOTS = HERE / "screenshots"
-    RESULTS = HERE / "results"
+    SHOTS = HERE / "screenshots" / SUB
+    RESULTS = HERE / "results" / SUB
+    ADJUDICATIONS = HERE / ("adjudications.json" if UTILITY == "pacificorp" else f"adjudications_{UTILITY}.json")
     REVIEW_SECONDS, REVIEW_USD_PER_HOUR = 30, 40.0
 
 
@@ -43,6 +46,8 @@ def _():
     - `ND` (Energy Laboratories' style) is a non-detect at the reporting limit printed beside it;
     - units copied into the result (`ND mg/L`) are dropped, and only the day of a collection date is compared,
       because one model adds the time of day and the other doesn't;
+    - a result printed in µg/L is divided by 1,000, so every value is in mg/L (AEP's Dolan lab prints metals in
+      µg/L; PacifiCorp's labs print everything in mg/L);
     - anything else is a number, so `0.0088` and `0.00880` are the same value.
 
     Constituent names are matched to the twenty Appendix III and IV constituents the results table holds. Radium,
@@ -99,6 +104,12 @@ def _():
         value = number(text)
         return None if value is None else (False, value)
 
+    def in_mg_per_l(value: tuple | None, units: str) -> tuple | None:
+        unit = units.lower().replace(" ", "")
+        if value is None or value[1] is None or unit not in ("ug/l", "µg/l", "μg/l"):
+            return value
+        return value[0], value[1] / 1000
+
     def same(a: tuple | None, b: tuple | None) -> bool:
         if a is None or b is None or a[0] != b[0] or a[1] is None or b[1] is None:
             return False
@@ -107,17 +118,17 @@ def _():
     def well_name(text: str | None) -> str:
         return re.sub(r"\s+", "", (text or "").upper()).translate(str.maketrans("‐‑‒–", "----"))
 
-    return canonical, meaning, same, well_name
+    return canonical, in_mg_per_l, meaning, same, well_name
 
 
 @app.cell
-def _(canonical, meaning, well_name):
+def _(canonical, in_mg_per_l, meaning, well_name):
     reports = {r["id"]: r for r in json.loads((OUT / "reports.json").read_text())}
     pages = {p["key"]: p for p in json.loads((OUT / "pages.json").read_text())}
     key_rows = json.loads((OUT / "key.json").read_text())
     _r = json.loads((OUT / "readings.json").read_text())
     MODELS, readings = _r["models"], _r["readings"]
-    adjudications = json.loads((HERE / "adjudications.json").read_text())
+    adjudications = json.loads(ADJUDICATIONS.read_text()) if ADJUDICATIONS.exists() else {}
 
     def page_reading(output: dict | None) -> dict | None:
         """A model's answer for one page, reduced to well, date and {analyte: (meaning, row)}."""
@@ -127,7 +138,8 @@ def _(canonical, meaning, well_name):
         for row in output["results"]:
             analyte = canonical(row["analyte"])
             if analyte and analyte not in values:
-                values[analyte] = (meaning(row["result"]["printed"], row.get("reporting_limit")), row)
+                value = meaning(row["result"]["printed"], row.get("reporting_limit"))
+                values[analyte] = (in_mg_per_l(value, row["units"]), row)
         return {
             "well": well_name((output.get("client_sample_id") or {}).get("printed")),
             "date": ((output.get("collection_date") or {}).get("iso") or "")[:10] or None,
@@ -139,7 +151,11 @@ def _(canonical, meaning, well_name):
     for _k in key_rows:
         key.setdefault((_k["report"], well_name(_k["well"]), _k["date"]), {})[_k["analyte"]] = _k
     print(f"{len(key)} samples in the answer key; {len(adjudications)} fields checked on the scan")
-    return MODELS, adjudications, key, pages, readings, reduced, reports
+    period = {}
+    for _report, _well, _date in key:
+        _lo, _hi = period.get(_report, (_date, _date))
+        period[_report] = (min(_lo, _date), max(_hi, _date))
+    return MODELS, adjudications, key, pages, period, readings, reduced, reports
 
 
 @app.cell(hide_code=True)
@@ -153,16 +169,26 @@ def _():
     - **the two models disagree** on its value, or only one of them read it;
     - **it fails a check**: the result can't be read as a number, the units aren't the usual ones for that
       constituent (mg/L, or s.u. for pH), the value is outside a plausible range (pH 0 to 14, anything else 0 to
-      100,000 mg/L), or the collection date isn't in or just before the report's year.
+      100,000 mg/L).
 
-    The well name and collection date are fields too, checked the same way. Every other field is accepted as read.
+    The well name and collection date are fields too. Each goes to review when the models disagree, and each has
+    a page-level check against the report's own results table, which sits in the same PDF:
+
+    - **the well must be on the report's well list** (every well name in its results table). Disagreement can't
+      catch a misread both models make, such as `HLF-10` for `HLF-1O`; this check can (issue #223);
+    - **the date must fall in the period the results table covers**, give or take three days. In #188 this check
+      was "in or just before the report's year", but AEP's reports carry lab reports going back to 2017, so it
+      flagged most of their pages.
+
+    Every other field is accepted as read.
     """)
     return
 
 
 @app.cell
-def _(pages, reduced, reports, same):
+def _(pages, period, reduced, reports, same, well_name):
     UNITS_OK = {"ph": {"s.u.", "su", "s.u", "units", "std units", "ph units", "none", ""}}
+    WELL_RULE = "well not on the report's well list"
 
     def checks(analyte: str, value: tuple | None, units: str) -> list[str]:
         failed = []
@@ -175,7 +201,7 @@ def _(pages, reduced, reports, same):
             if not 0 <= value[1] <= 14:
                 failed.append("pH outside 0-14")
         else:
-            if unit != "mg/l":
+            if unit not in ("mg/l", "ug/l", "µg/l", "μg/l"):
                 failed.append(f"units {units}")
             if not 0 <= value[1] <= 100_000:
                 failed.append("implausible value")
@@ -188,11 +214,16 @@ def _(pages, reduced, reports, same):
             page_review[_key] = "only one model calls it a lab result page"
         if _g is None or _m is None:
             continue
-        _year = int(reports[_page["report"]]["year"])
+        _wells = {well_name(w) for w in reports[_page["report"]]["wells"]}
+        _lo, _hi = (date.fromisoformat(d) for d in period[_page["report"]])
         for _f in ("well", "date"):
             _reasons = [] if _g[_f] == _m[_f] else ["models disagree"]
-            if _f == "date" and not (_g["date"] or "").startswith((str(_year), str(_year - 1))):
-                _reasons.append("date outside report year")
+            if _f == "well" and not {_g["well"], _m["well"]} <= _wells:
+                _reasons.append(WELL_RULE)
+            if _f == "date":
+                _day = _g["date"] and re.fullmatch(r"\d{4}-\d\d-\d\d", _g["date"]) and date.fromisoformat(_g["date"])
+                if not _day or not (_lo - timedelta(days=3) <= _day <= _hi + timedelta(days=3)):
+                    _reasons.append("date outside the results table's period")
             fields.append({"page": _key, "field": _f, "gemini": _g[_f], "mistral": _m[_f], "reasons": _reasons})
         for _a in sorted(set(_g["values"]) | set(_m["values"])):
             _gv, _mv = _g["values"].get(_a), _m["values"].get(_a)
@@ -212,7 +243,7 @@ def _(pages, reduced, reports, same):
     print(f"{len(fields)} fields; {len(reviewed)} ({len(reviewed) / len(fields):.1%}) sent to review")
     print(f"{len(pages_in_review)} of {len(lab_pages) + len(page_review)} pages have something in review")
     print(Counter(r for f in reviewed for r in f["reasons"]).most_common())
-    return fields, lab_pages, page_review, pages_in_review, reviewed
+    return WELL_RULE, fields, lab_pages, page_review, pages_in_review, reviewed
 
 
 @app.cell(hide_code=True)
@@ -320,21 +351,57 @@ def _(adjudications, fields, key, meaning, pages, reduced, same):
         well_scores[f"{_name} wrong"] = sum(
             1 for p, s in matched.items() if s and reduced[_name][p] and reduced[_name][p]["well"] != true_well(p, s)
         )
-    well_scores["accepted wrong"] = sum(
-        1
+    agreed_wrong_wells = [
+        p
         for p, s in matched.items()
         if s and reduced["gemini"][p]["well"] == reduced["mistral"][p]["well"] != true_well(p, s)
-    )
+    ]
+    _well_reasons = {f["page"]: f["reasons"] for f in fields if f["field"] == "well"}
+    well_scores["both models wrong"] = len(agreed_wrong_wells)
+    well_scores["accepted wrong"] = sum(not _well_reasons[p] for p in agreed_wrong_wells)
     print("well names:", well_scores)
-    SHOTS.mkdir(exist_ok=True)
-    for _old in SHOTS.glob("accepted-wrong-*.png"):
+    SHOTS.mkdir(parents=True, exist_ok=True)
+    for _old in [*SHOTS.glob("accepted-wrong-*.png"), *SHOTS.glob("agreed-wrong-*.png")]:
         _old.unlink()
-    for _p, _s in matched.items():
-        if _s and reduced["gemini"][_p]["well"] == reduced["mistral"][_p]["well"] != true_well(_p, _s):
-            _img = Image.open(PAGES / f"{_p}.png")
-            _img.crop((0, 0, _img.size[0], _img.size[1] // 4)).save(SHOTS / f"accepted-wrong-well-{_p}.png")
+    for _p in agreed_wrong_wells:
+        _img = Image.open(PAGES / f"{_p}.png")
+        _img.crop((0, 0, _img.size[0], _img.size[1] // 4)).save(SHOTS / f"agreed-wrong-well-{_p}.png")
     (OUT / "to_check.json").write_text(json.dumps(to_check, indent=1))
-    return matched, scored, to_check, well_scores
+    return agreed_wrong_wells, matched, scored, to_check, well_scores
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ## Before and after the well check
+
+    How many wrong well names does the well-list check catch, and how many pages does it add to review? "Before"
+    is the review rule without it, as in #188. A page counts as in review if any of its fields is, or if only one
+    model calls it a lab page.
+    """)
+    return
+
+
+@app.cell
+def _(WELL_RULE, agreed_wrong_wells, fields, matched, page_review, reduced):
+    _before = {f["page"] for f in fields if [r for r in f["reasons"] if r != WELL_RULE]} | set(page_review)
+    _after = {f["page"] for f in fields if f["reasons"]} | set(page_review)
+    _flagged = [f for f in fields if f["field"] == "well" and WELL_RULE in f["reasons"]]
+    _caught = [p for p in agreed_wrong_wells if p in {f["page"] for f in _flagged}]
+    _new = [f["page"] for f in _flagged if f["page"] not in _before]
+    well_check = {
+        "pages with a wrong well both models agree on": len(agreed_wrong_wells),
+        "of those, caught by disagreement or another check": sum(p in _before for p in agreed_wrong_wells),
+        "of those, caught by the well check": len(_caught),
+        "pages the well check flags": len(_flagged),
+        "pages it adds to review": len(_new),
+        "of the added pages, not in the results table at all": sum(matched.get(p) is None for p in _new),
+        "pages in review before": len(_before),
+        "pages in review after": len(_after),
+    }
+    print(json.dumps(well_check, indent=1))
+    print("wells it flags, as Gemini read them:", Counter(reduced["gemini"][f["page"]]["well"] for f in _flagged))
+    return (well_check,)
 
 
 @app.cell(hide_code=True)
@@ -425,7 +492,7 @@ def _():
 
 @app.cell
 def _(scored):
-    SHOTS.mkdir(exist_ok=True)
+    SHOTS.mkdir(parents=True, exist_ok=True)
     _wrong = [f for f in scored if f["accepted_wrong"]]
     for _f in _wrong:
         _img = Image.open(PAGES / f"{_f['page']}.png").convert("RGB")
@@ -499,7 +566,7 @@ def _():
 @app.cell
 def _(fields, matched, page_review, pages, reports, scored):
     _checked = {f["id"]: f for f in scored}
-    RESULTS.mkdir(exist_ok=True)
+    RESULTS.mkdir(parents=True, exist_ok=True)
 
     def _box_suspect(box: list[int]) -> bool:
         """A printed number is wider than it is tall; a box that isn't is probably [y, x, y, x] or wrong."""
@@ -608,13 +675,14 @@ def _(cost, lab_pages, pages, reports):
 
 
 @app.cell
-def _(MODELS, accuracy, confidence_caught, cost, rows, sizing, suspect_pages, well_scores):
+def _(MODELS, accuracy, confidence_caught, cost, rows, sizing, suspect_pages, well_check, well_scores):
     (RESULTS / "results.json").write_text(
         json.dumps(
             {
                 "models": MODELS,
                 "accuracy": accuracy,
                 "well_names": well_scores,
+                "well_check": well_check,
                 "dataset_rows": len(rows),
                 "pages_with_suspect_boxes": len(suspect_pages),
                 "confidence_caught": confidence_caught,
