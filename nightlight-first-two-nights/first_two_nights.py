@@ -196,7 +196,15 @@ def _(Image, data_dir, date, from_bounds, httpx, io, np, rasterize, re, time):
             "TRANSPARENT": "TRUE",
             "TIME": night.isoformat(),
         }
-        path = download(WMS, data_dir / "gibs" / layer / name, params)
+        path = data_dir / "gibs" / layer / name
+        for _attempt in range(3):  # GIBS sometimes answers with an XML error instead
+            download(WMS, path, params)
+            if path.read_bytes()[:4] == b"\x89PNG":
+                break
+            path.unlink()
+        else:
+            print(f"GIBS gave no image for {layer} {night}; counted as no data")
+            return np.zeros((height, width, 4), dtype=np.uint8)
         rgba = np.array(Image.open(io.BytesIO(path.read_bytes())).convert("RGBA"))
         assert rgba.shape[:2] == (height, width), f"{path} has shape {rgba.shape}"
         return rgba
@@ -364,7 +372,7 @@ def _(
         usual = np.nanmedian(np.where(pre_clear, pre_radiance, np.nan), axis=0)
     lit = (zone_index(territory, dte_grid) == 0) & (pre_clear.sum(axis=0) >= 3) & (usual >= 5.0)
     tract_index = np.where(lit, zone_index(tracts, dte_grid), -1)
-    tract_lit = np.bincount(tract_index[lit], minlength=len(tracts))
+    tract_lit = np.bincount(tract_index[tract_index >= 0], minlength=len(tracts))
     print(f"{lit.sum():,} lit pixels; {(tract_lit >= 20).sum()} tracts with 20+ lit pixels")
     return dte_conf, dte_grid, dte_nights, lit, tract_index, tract_lit
 
@@ -380,6 +388,7 @@ def _(
     dte_restored,
     lit,
     np,
+    outputs,
     pl,
     timezone,
     tract_index,
@@ -402,7 +411,9 @@ def _(
     for sat, conf in dte_conf.items():
         for i, night in enumerate(dte_nights):
             clear_px = (conf[i] >= 0.95) & lit
-            tract_clear = np.bincount(tract_index[clear_px], minlength=len(tract_lit))
+            tract_clear = np.bincount(
+                tract_index[clear_px & (tract_index >= 0)], minlength=len(tract_lit)
+            )
             with np.errstate(all="ignore"):
                 tract_share = tract_clear / tract_lit
             dte_rows.append(
@@ -417,6 +428,7 @@ def _(
                 }
             )
     dte_table = pl.DataFrame(dte_rows)
+    dte_table.write_csv(outputs / "dte_nights.csv")
     dte_table.filter(pl.col("hours_after_storm").is_between(0, 100)).sort("night", "satellite")
     return (dte_table,)
 
@@ -472,8 +484,8 @@ def _(mo):
     data rather than cloud. The table above says cloud: GIBS has a cloud-mask value for every
     lit pixel on both nights, and almost none is clear. The raw picture agrees. Below,
     NOAA-20's uncorrected day/night band on a clear night (July 30) and on August 1 and 2:
-    sharp city lights on the clear night, a diffuse glow of light scattered through cloud on
-    the other two.
+    sharp city lights on the clear night; on the other two, cloud texture covers the
+    territory and the cities show only as a diffuse glow.
     """)
     return
 
@@ -728,7 +740,8 @@ def _(mo):
     mo.md(r"""
     The headline: on the same county nights, how often each satellite had a clear reading.
     If the blindness were one sensor's fault, the two would disagree. If it's cloud, they
-    agree, because the two satellites pass about 50 minutes apart through the same weather.
+    agree, because the two fly the same orbit and pass within an hour of each other (50
+    minutes apart until NOAA-21 joined, about 25 minutes since), through the same weather.
     """)
     return
 
@@ -746,6 +759,9 @@ def _(first_two, pl):
             "neither_clear": round(float((~rows["noaa20_clear"] & ~rows["snpp_clear"]).mean()), 4),
             "noaa20_no_data": round(float((rows["no_data_share_NOAA20"] >= 0.5).mean()), 4),
             "snpp_no_data": round(float((rows["no_data_share_SNPP"] >= 0.5).mean()), 4),
+            "snpp_clear_where_it_has_data": round(
+                float(rows.filter(pl.col("no_data_share_SNPP") < 0.5)["snpp_clear"].mean()), 4
+            ),
         }
 
     visibility = {
@@ -1044,6 +1060,34 @@ def _(
     }
     (outputs / "summary.json").write_text(json.dumps(summary, indent=2, default=str))
     print(json.dumps(summary, indent=2, default=str))
+    return
+
+
+@app.cell
+def _(dte_results, mo, per_storm_spearman, pooled_raw, visibility, weighted_mean):
+    _all = visibility["all"]
+    _summer = visibility["summer_may_sep"]
+    _n20 = dte_results["NOAA20"]
+    _rhos = ", ".join(
+        f"{r['storm']} {r['spearman']:.2f} (n = {r['clear_county_nights']})"
+        for r in per_storm_spearman.iter_rows(named=True)
+    )
+    mo.md(f"""
+    ## Result
+
+    - **It's cloud, not the sensor.** On the same {_all["county_nights"]:,} first-two-night
+      county nights after {_all["storms"]} storms, NOAA-20 had a clear reading on
+      {_all["noaa20_clear"]:.1%} and S-NPP on {_all["snpp_clear"]:.1%}
+      ({_all["snpp_clear_where_it_has_data"]:.1%} where S-NPP has data). The two agree on
+      {_all["both_clear"] + _all["neither_clear"]:.0%} of county nights. In summer storms
+      (May to September) it is {_summer["noaa20_clear"]:.1%} on NOAA-20.
+    - **DTE, July 2026:** {_n20["tracts_clear_first_48h"]} of {_n20["tracts"]} tracts had a
+      clear reading in the first 48 hours on either satellite. The first clear night was
+      {_n20["first_clear_night"]}, {_n20["first_clear_hours"]:.0f} hours after the storm, when
+      DTE's curve implies {_n20["dte_out_share_then"]:.1%} of its customers were still out.
+    - **Where it can see:** {_rhos}. Pooled, {pooled_raw:.2f}; the weighted mean of the
+      per-storm values is {weighted_mean:.2f}.
+    """)
     return
 
 
