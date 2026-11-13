@@ -431,6 +431,8 @@ def _(WELL_RULE, agreed_wrong_wells, fields, matched, page_review, reduced):
         "of the added pages, not in the results table at all": sum(matched.get(p) is None for p in _new),
         "pages in review before": len(_before),
         "pages in review after": len(_after),
+        "fields in review before": sum(any(r != WELL_RULE for r in f["reasons"]) for f in fields),
+        "fields in review after": sum(bool(f["reasons"]) for f in fields),
     }
     print(json.dumps(well_check, indent=1))
     print("wells it flags, as Gemini read them:", Counter(reduced["gemini"][f["page"]]["well"] for f in _flagged))
