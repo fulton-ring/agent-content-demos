@@ -1,0 +1,69 @@
+{
+ "attempt": 1,
+ "model": "anthropic/claude-haiku-5.5",
+ "answer": {
+  "hospitals": 2283,
+  "hospital_storm_pairs": 3178,
+  "storms": 212,
+  "hospitals_more_than_once": 696,
+  "top_hospital_ids": [
+   "0017270631",
+   "0001742717",
+   "0003232168",
+   "0003341701",
+   "0003839474",
+   "0004339121",
+   "0004341339",
+   "0005032424",
+   "0011532721",
+   "0011932763"
+  ],
+  "by_trauma_level": [
+   {
+    "group": "none",
+    "hospitals": 1679
+   },
+   {
+    "group": "LEVEL IV",
+    "hospitals": 285
+   },
+   {
+    "group": "LEVEL III",
+    "hospitals": 139
+   },
+   {
+    "group": "LEVEL I",
+    "hospitals": 80
+   },
+   {
+    "group": "LEVEL II",
+    "hospitals": 76
+   },
+   {
+    "group": "other designation (no level)",
+    "hospitals": 23
+   },
+   {
+    "group": "LEVEL V",
+    "hospitals": 1
+   }
+  ],
+  "method": "Hospitals from HIFLD Next hospitals-3 v1.1.0 (GeoParquet), keeping STATUS = OPEN and joining on COUNTYFIPS. Counties from Zenodo 23010005 v1.2 data__utility_by_county.parquet, keeping declared = TRUE, available = TRUE and source = utility_records. A county-storm qualifies when peak_share_out >= 0.10 and either hours_to_90pct_restored > 72 or hours_to_90pct_reason = not_restored_in_window (never restored in the window). That gives 1,304 county-storm rows across 242 storms and 962 counties before the hospital join. Pairs are distinct hospital source_ID and event_id. Trauma groups use the hospital TRAUMA field, taking the highest level listed (Level I > II > III > IV > V); non-level designations are grouped separately and 'none' means NOT AVAILABLE. Top-10 ties at 4 storms were broken by ascending source_ID.",
+  "caveats": [
+   "Counties with reporting_drop or peak_mismatch (about 1,738 declared county rows) have no 90% restoration time and were excluded, so long outages could be undercounted.",
+   "Counties whose peak exceeded the customer estimate (peak_above_customer_estimate, about 250 rows) or have no customers_total have no peak share and were excluded, which may undercount.",
+   "Not-restored counties are censored by the 45-day outage window (cut at 31 Dec 2025 for late storms), so some may have been restored after the window.",
+   "The storm catalog is not limited to major storms: it has 672 events from 2012 to 2026 of all kinds (severe storms, floods, tornadoes, etc.). I did not apply a separate past-decade or major-storm filter beyond the stated criteria.",
+   "The top-10 list is not unique: many hospitals tie at 4 storms, so the list depends on the source_ID tie-break.",
+   "Hospital COUNTYFIPS is the hospital's recorded county, and the hospital layer's TRAUMA field is free text that was normalized into groups. Trauma designations are not the same as the separate trauma-levels dataset, which I did not use.",
+   "Associating a hospital with a county outage is an ecological proxy. It does not show that the hospital lost power or stayed open.",
+   "Also-known-as FEMA numbers are not separate storm rows, so there is no double counting in the storms table."
+  ]
+ },
+ "seconds": 54,
+ "cost_usd": 0.0599158,
+ "requests": 13,
+ "tool_calls": 22,
+ "input_tokens": 545808,
+ "output_tokens": 10670
+}

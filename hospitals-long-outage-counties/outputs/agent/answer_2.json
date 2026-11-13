@@ -1,0 +1,63 @@
+{
+ "attempt": 2,
+ "model": "anthropic/claude-haiku-5.5",
+ "answer": {
+  "hospitals": 2283,
+  "hospital_storm_pairs": 3178,
+  "storms": 242,
+  "hospitals_more_than_once": 696,
+  "top_hospital_ids": [
+   "0017270631",
+   "0001742717",
+   "0003232168",
+   "0003341701",
+   "0003839474",
+   "0004339121",
+   "0004341339",
+   "0005032424",
+   "0011532721",
+   "0011932763"
+  ],
+  "by_trauma_level": [
+   {
+    "group": "none",
+    "hospitals": 1702
+   },
+   {
+    "group": "IV",
+    "hospitals": 285
+   },
+   {
+    "group": "III",
+    "hospitals": 139
+   },
+   {
+    "group": "I",
+    "hospitals": 80
+   },
+   {
+    "group": "II",
+    "hospitals": 76
+   },
+   {
+    "group": "V",
+    "hospitals": 1
+   }
+  ],
+  "method": "Storm outage data: Heimdall Storm Blackout and Restoration v1.2 (Zenodo 23010005), data__utility_by_county.parquet, joined to data__storms.parquet. A county-storm qualifies when declared = true, available = true, peak_customers_out is present, customers_total > 0, peak_customers_out >= 10% of customers_total, and either hours_to_90pct_restored > 72 or hours_to_90pct_reason = 'not_restored_in_window'. That gave 1,304 county-storm rows, 242 storms and 962 counties. Hospitals: HIFLD Hospitals (hospitals-3) v1.1.0 geoparquet, STATUS = 'OPEN' (7,966 hospitals), joined on COUNTYFIPS = county geoid. Pairs are distinct (source_ID, storm). Trauma levels are parsed from the TRAUMA text (first LEVEL I\u2013V token); hospitals with no level token, including NOT AVAILABLE and TRH/TRF/CTH-type codes, are grouped as 'none'. The trauma-levels HIFLD layer was not used because it has no hospital key.",
+  "caveats": [
+   "Strict 10% test: 244 declared, utility-covered county-storm rows have a null customers_total (no customer estimate, or the peak exceeds the estimate). They are excluded because the share cannot be computed from the table. Of these, 137 have hours_to_90pct > 72 and 12 are not restored in the window; some of these could qualify under a looser reading.",
+   "Rows with hours_to_90pct_reason = 'reporting_drop' (the utility feed stopped reporting, so no restoration time exists) are excluded rather than treated as unrestored. Rows with peak_mismatch are also excluded.",
+   "The top-10 list is cut at 4 storms, and many hospitals tie at 4 qualifying storms; ties were broken by ascending source_ID.",
+   "Trauma grouping is a text parse of the HIFLD TRAUMA field, which is inconsistent in format; 'none' (1,702) includes hospitals with no trauma designation and those with non-level codes.",
+   "Counts are of open HIFLD hospitals matched by county FIPS. Hospitals in a county are assigned the county's outage status for the storm, not their own service-area outage. Outages are county-level and the peak is per county, not a simultaneous statewide count.",
+   "Night-light fields and the ability to flag power outage are not used. Results are not for real-time emergency decisions, per the dataset's own notice."
+  ]
+ },
+ "seconds": 57,
+ "cost_usd": 0.0613929,
+ "requests": 13,
+ "tool_calls": 22,
+ "input_tokens": 560334,
+ "output_tokens": 10719
+}
