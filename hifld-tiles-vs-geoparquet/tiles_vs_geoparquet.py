@@ -60,7 +60,7 @@ def _(mo):
     table, and reading tiles fetches far fewer bytes. So an analyst or an agent may answer a
     question from the tiles. Do they get the same number?
 
-    We ask 20 plain questions of seven layers, answer each with the same SQL over the GeoParquet
+    We ask 21 plain questions of seven layers, answer each with the same SQL over the GeoParquet
     (the answer key) and over the tiles, at three zoom levels and three ways of reading the tiles,
     and measure the error, the bytes read and the time.
     """)
@@ -199,14 +199,15 @@ def _(LAYERS, DATA, con_key, pd, read_zoom, tile_meta):
                 "pieces with an id": f"{_pieces.feature_id.notna().mean():.0%}",
                 "distinct ids": _pieces.feature_id.nunique(),
                 "source features": len(_source),
-                "id = row number in the source file": _id_is_row,
+                "id = GeoParquet row number": _id_is_row,
+                "missing at top zoom": len(_source) - _pieces.feature_id.nunique(),
                 "only in GeoParquet": ", ".join(
                     sorted(set(_source.columns) - set(_pieces.columns))
                 ),
                 "only in tiles": ", ".join(
                     sorted(set(_pieces.columns) - set(_source.columns) - _decoder_columns)
                 ),
-                "id = a source key column": bool(
+                "id = OBJECTID or id column": bool(
                     _key is not None
                     and (_first.feature_id.astype(str) == _first[_key].astype(str)).mean() > 0.99
                 ),
@@ -219,18 +220,27 @@ def _(LAYERS, DATA, con_key, pd, read_zoom, tile_meta):
 
 @app.cell
 def _(feature_ids, mo):
-    _rowids = feature_ids["id = row number in the source file"].sum()
+    _stable = int(
+        (
+            feature_ids["id = GeoParquet row number"] | feature_ids["id = OBJECTID or id column"]
+        ).sum()
+    )
     mo.md(f"""
-    Every piece has an id, and on {_rowids} of 7 layers the id is the feature's **row number** in
-    the file tippecanoe read, not a key from the data. Tippecanoe numbers features as it reads
-    them. So ids are good for gluing pieces inside one tileset, which is all the merge below needs,
-    but they are **not stable across versions**: a reordered or edited source renumbers every
-    feature after the change, and an id cannot be joined back to the GeoParquet. Making them stable
-    takes one tippecanoe flag, `--use-attribute-for-id=OBJECTID`, for layers whose key is an
-    integer. The MVT spec allows only unsigned integer ids, so layers keyed by a string (hospitals'
-    `ID` such as `0002299752`, fire stations' `GLOBALID`) need an integer key added first.
-    Where the source has fewer distinct ids than features at the top zoom, tippecanoe dropped
-    features there (see the transmission lines).
+    Every piece has an id, so pieces can be glued back together inside one tileset, which is all
+    the merge below needs. But on {7 - _stable} of 7 layers the id matches **neither** the
+    feature's key column nor its row in the GeoParquet: it is a number from the build, not from
+    the data. So an id can't be joined back to the GeoParquet, and nothing promises it stays the
+    same in the next version. Making ids stable takes one tippecanoe flag,
+    `--use-attribute-for-id=OBJECTID`, on layers with an integer key. The MVT spec allows only
+    unsigned integer ids, so a layer keyed by a string (fire stations' `GLOBALID`) or with no key
+    (power plants) needs an integer key added first.
+
+    Two more things the table shows. The columns differ between the two files of the same
+    version: the hospitals tiles call the source key `ID` where the GeoParquet calls it
+    `source_ID`, and the fire station tiles lack three columns. So the tiles were not built from
+    exactly this GeoParquet, and a query written for one file can fail on the other. And the
+    transmission line tiles are missing some lines even at the top zoom (tippecanoe drops lines
+    shorter than a grid cell; section 7 measures them).
     """)
     return
 
@@ -408,7 +418,7 @@ def _(mo):
     mo.md(r"""
     ## 4. The questions
 
-    Twenty questions an analyst or agent would ask, each one SQL statement over tables named
+    Twenty-one questions an analyst or agent would ask, each one SQL statement over tables named
     `hospitals`, `fire`, `plants`, `lines`, `territories`, `counties` and `states`. Every table
     has `geom` in longitude/latitude and `geom_m` in metres (CONUS Albers, EPSG:5070) for lengths,
     areas and distances. The **same SQL** runs against both sources; only the tables differ.
@@ -471,7 +481,7 @@ def _(pd):
                 "C5",
                 "count",
                 "Total operating capacity of Texas power plants (MW)?",
-                "SELECT sum(OPER_CAP) FROM plants WHERE STATE = 'TX'",
+                "SELECT sum(OPER_CAP) FROM plants WHERE STATE = 'TX' AND OPER_CAP >= 0",
                 {"plants": None},
             ),
             (
@@ -619,7 +629,7 @@ def _(mo):
 def _(DATA, LAYERS, con_key, duckdb, layers, pd, questions, time):
     _crs = layers.crs.str.replace("EPSG:4326", "OGC:CRS84")
 
-    def key_views(con: object, source: str) -> None:
+    def key_views(con: duckdb.DuckDBPyConnection, source: str) -> None:
         for name, (dataset, _) in LAYERS.items():
             path = layers.loc[name, "parquet_url"] if source == "remote" else DATA / dataset
             path = path if source == "remote" else f"{path}.parquet"
@@ -696,14 +706,16 @@ def _(
     tile_meta,
     time,
 ):
-    def compare(key: object, answer: object) -> float:
+    def compare(key: float | str | list, answer: float | str | list | None) -> float:
         """Error in percent: relative for numbers, 100 for a wrong name, 1 - Jaccard for lists."""
         if isinstance(key, list):
-            union = set(key) | set(answer or [])
-            return 0.0 if not union else 100 * (1 - len(set(key) & set(answer or [])) / len(union))
+            got = set(answer) if isinstance(answer, list) else set()
+            union = set(key) | got
+            return 0.0 if not union else 100 * (1 - len(set(key) & got) / len(union))
         if isinstance(key, str):
             return 0.0 if key == answer else 100.0
-        return 100 * (float(answer or 0) - float(key)) / float(key)
+        number = float(answer) if isinstance(answer, int | float) else 0.0
+        return 100 * (number - float(key)) / float(key)
 
     _con = duckdb.connect()
     _con.execute("LOAD spatial; SET geometry_always_xy = true")
@@ -793,7 +805,7 @@ def _(results):
 @app.cell
 def _(mo):
     mo.md(r"""
-    **Range of error on totals** (counts, lengths and areas, which are 14 of the questions), at
+    **Range of error on totals** (the 13 questions with a numeric count, length or area answer), at
     each zoom, reading raw versus merged by feature id. Negative means the tiles under-report.
     """)
     return
@@ -833,6 +845,45 @@ def _(questions, results):
 
 
 @app.cell
+def _(DATA, LAYERS, con_key, feature_ids, mo, read_zoom, tile_meta):
+    _invalid, _all = con_key.execute(
+        f"SELECT count(*) FILTER (NOT ST_IsValid(geometry)), count(*) "
+        f"FROM '{DATA / LAYERS['territories'][0]}.parquet'"
+    ).fetchall()[0]
+    _naive, _valid = con_key.execute(
+        "SELECT ST_Area(geom_m) / 1e6, ST_Area(ST_MakeValid(geom_m)) / 1e6 "
+        "FROM territories ORDER BY ST_Area(geom_m) DESC LIMIT 1"
+    ).fetchall()[0]
+    _in_tiles = read_zoom("lines", tile_meta["lines"]["header"]["max_zoom"], None)["pieces"]
+    _cursor = con_key.cursor()
+    _cursor.register("_in_tiles", _in_tiles[["OBJECTID"]].drop_duplicates())
+    _missing = _cursor.execute(
+        "SELECT quantile_cont(ST_Length(geom_m), [0, 0.5, 1]) FROM lines "
+        "WHERE OBJECTID::VARCHAR NOT IN (SELECT OBJECTID FROM _in_tiles)"
+    ).fetchall()[0][0]
+    mo.md(f"""
+    Reading the table:
+
+    - **Raw** tiles overcount every total, by 5% to 11% for points (each point near a tile edge
+      is stored again in its neighbour's buffer) and by far more for polygons: Texas has 254
+      counties, and the raw tiles return a row for every piece of every county in every tile.
+    - **Clip** fixes points without needing ids, but a line or polygon is still one row per tile.
+    - **Merge by id** gets counts and lengths right to within 0.1%. What's left is real loss:
+      the {int(feature_ids.loc["lines", "missing at top zoom"])} transmission lines missing from
+      the tiles. They run {_missing[0]:.0f} m to
+      {_missing[2]:.0f} m (median {_missing[1]:.0f} m), shorter than the zoom 8 grid cell, so
+      lengths barely move but a count of 345 kV lines is short by two.
+    - **The biggest-territory area (A2)** is off by more than anything else, and the GeoParquet
+      is partly to blame: {_invalid} of its {_all} territory polygons are invalid
+      (self-overlapping). DuckDB's `ST_Area` on the largest, WAPA, gives {_naive:,.0f} km²,
+      but repaired with `ST_MakeValid` it is {_valid:,.0f} km². The tiles, which tippecanoe
+      repaired its own way, land between the two. The answer key is only as good as its
+      geometry.
+    """)
+    return
+
+
+@app.cell
 def _(mo):
     mo.md(r"""
     **Bytes read and query time**, top zoom, merged tiles against the GeoParquet. Proximity
@@ -862,8 +913,9 @@ def _(mo):
     mo.md(r"""
     ## 8. Which file answers which question
 
-    The table a reader keeps, filled in from the results above: a question type gets "tiles are
-    fine" only if every question of that type was within 1% at the top zoom when merged by id.
+    The table a reader keeps, filled in from the results above. A question type gets the tiles
+    only if every question of that type was within 1% at the top zoom when merged by id **and**
+    the tiles read fewer bytes than the GeoParquet for the median question of that type.
     """)
     return
 
@@ -875,21 +927,26 @@ def _(pd, results):
     _raw = _top[_top["mode"] == "raw"].groupby("type").within_1pct.agg(["sum", "count"])
     _low = results[(results.zoom == "max-4") & (results["mode"] == "merge")]
     _low = _low.groupby("type").within_1pct.agg(["sum", "count"])
+    _bytes = _top[_top["mode"] == "merge"].groupby("type")[["tile_bytes", "key_bytes"]].median()
+
+    def share(counts: pd.DataFrame) -> pd.Series:
+        return counts["sum"].astype(str) + "/" + counts["count"].astype(str)
+
     guide = pd.DataFrame(
         {
-            "within 1%, top zoom, merged": _merge["sum"].astype(str)
-            + "/"
-            + _merge["count"].astype(str),
-            "within 1%, top zoom, raw": _raw["sum"].astype(str) + "/" + _raw["count"].astype(str),
-            "within 1%, 4 zooms down, merged": _low["sum"].astype(str)
-            + "/"
-            + _low["count"].astype(str),
-            "use": [
-                "GeoParquet" if s < c else "PMTiles at top zoom, merged by id"
-                for s, c in zip(_merge["sum"], _merge["count"], strict=True)
-            ],
+            "within 1%, top zoom, merged": share(_merge),
+            "within 1%, top zoom, raw": share(_raw),
+            "within 1%, 4 zooms down, merged": share(_low),
+            "median tile MB": (_bytes.tile_bytes / 1e6).round(2),
+            "median GeoParquet MB": (_bytes.key_bytes / 1e6).round(2),
         }
     )
+    guide["use"] = [
+        "PMTiles, top zoom, merged by id" if s == c and t < k else "GeoParquet"
+        for s, c, t, k in zip(
+            _merge["sum"], _merge["count"], _bytes.tile_bytes, _bytes.key_bytes, strict=True
+        )
+    ]
     guide
     return (guide,)
 
