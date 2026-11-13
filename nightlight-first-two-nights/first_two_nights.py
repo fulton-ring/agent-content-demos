@@ -819,7 +819,7 @@ def _(first_two, outputs, pl, plt):
             heimdall_clear=pl.col("heimdall_clear").mean(),
             heimdall_product=pl.col("product").first(),
         )
-        .sort("impact")
+        .sort("impact", "event_id")
     )
     per_storm.write_csv(outputs / "storms_first_two_nights.csv")
     fig_storms, ax_storms = plt.subplots(figsize=(5.8, 5.4))

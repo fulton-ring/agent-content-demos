@@ -104,9 +104,9 @@ first raises it to 0.10, and the per-storm values weighted by clear county night
 ```
 
 Needs [uv](https://docs.astral.sh/uv/). No keys, no paid services, $0. The first run downloads
-about 3.3 GB into `data/` (set `DATA_DIR` to put it elsewhere): EAGLE-I 2023 and 2024
+about 3.5 GB into `data/` (set `DATA_DIR` to put it elsewhere): EAGLE-I 2023 and 2024
 (2.6 GB), Heimdall's county table (0.7 GB) and about 1,760 GIBS images (110 MB). Raw pulls
-are cached there, and reruns take under a minute. To read it interactively:
+are cached there. From a fresh clone the run took 8 minutes; reruns take under a minute. To read it interactively:
 `uv run marimo edit first_two_nights.py`.
 
 ## What didn't work, and what this doesn't show
