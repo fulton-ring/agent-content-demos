@@ -845,7 +845,7 @@ def _(questions, results):
 
 
 @app.cell
-def _(DATA, LAYERS, con_key, feature_ids, mo, read_zoom, tile_meta):
+def _(DATA, LAYERS, OUT, con_key, feature_ids, json, mo, read_zoom, tile_meta):
     _invalid, _all = con_key.execute(
         f"SELECT count(*) FILTER (NOT ST_IsValid(geometry)), count(*) "
         f"FROM '{DATA / LAYERS['territories'][0]}.parquet'"
@@ -861,6 +861,18 @@ def _(DATA, LAYERS, con_key, feature_ids, mo, read_zoom, tile_meta):
         "SELECT quantile_cont(ST_Length(geom_m), [0, 0.5, 1]) FROM lines "
         "WHERE OBJECTID::VARCHAR NOT IN (SELECT OBJECTID FROM _in_tiles)"
     ).fetchall()[0][0]
+    (OUT / "geometry_notes.json").write_text(
+        json.dumps(
+            {
+                "invalid_territory_polygons": _invalid,
+                "territory_polygons": _all,
+                "largest_territory_km2_st_area": round(_naive),
+                "largest_territory_km2_after_make_valid": round(_valid),
+                "missing_lines_metres_min_median_max": [round(m, 1) for m in _missing],
+            },
+            indent=2,
+        )
+    )
     mo.md(f"""
     Reading the table:
 
