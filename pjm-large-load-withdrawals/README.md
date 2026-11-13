@@ -43,7 +43,9 @@ The issue says TEAC. Most owners present supplemental needs at the subregional c
    ultimate MW, estimated cost, in-service date, lines cut into, existing and new substations.
 3. Each need is followed by number. "Presented" is its needs-meeting date; "withdrawn" is the first deck
    that lists it as withdrawn or cancelled. A **large load** is a customer-load need of 100 MW or more
-   (our line; PJM's decks define none).
+   (our line; PJM's decks define none). Dominion often writes "in excess of 100 MW", which we read as
+   100 MW, so 34 of Dominion's 76 large loads sit exactly on the line. Counting only needs above 100 MW
+   gives 17 of 181 withdrawn (9%), 8.4 of 97.4 GW.
 4. Resubmission check: a withdrawn need counts as resubmitted if a later need from the same owner names
    the same new substation, or the same area and a common existing substation.
 5. Named existing substations are matched by normalised name within the state, as in
@@ -74,7 +76,7 @@ Full table, including DEOK, PECO (PE), UGI and BGE with one withdrawal each:
 `outputs/large_load_by_owner.csv`.
 
 - **Time to withdrawal:** median 11 months from first presentation (4.8 to 46). 10 of the 26 had a
-  solution and a cost estimate presented before they were withdrawn, among them ComEd's $245M DeKalb
+  solution presented before they were withdrawn (one, ComEd-2025-027, priced at $0M), among them ComEd's $245M DeKalb
   project (ComEd-2025-009), withdrawn a month after its solution was shown.
 - **Cohort first presented in 2025 or later:** 14 of 164 large-load needs withdrawn (9%).
 - **Not resolved yet:** 75 large-load needs have no solution and no withdrawal in any deck so far.
@@ -97,7 +99,7 @@ fixed the prompt, the spike spent about $0.85 of its $5 budget.
 ## Is the dropout argument right?
 
 Partly. Withdrawals are not rare at ComEd, which withdrew 9 of its 19 large-load requests (40% of the
-GW and 26% of the estimated cost), and Dominion cancelled 13 old requests in three decks in autumn 2026.
+GW and 26% of the estimated cost), and Dominion cancelled 13 requests (9 from 2023-24, 4 from October 2025) in three decks in autumn 2026.
 Across PJM as a whole, 12% of requests and 9% of GW were withdrawn. AEP, PPL and Dayton, with half the
 requested GW between them, withdrew none. So the churn is real but concentrated in a few owners, and
 the queue elsewhere looks firmer than a flat 50% dropout assumes. Many requests are too new to judge.
