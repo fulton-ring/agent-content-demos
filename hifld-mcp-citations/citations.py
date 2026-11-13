@@ -300,7 +300,7 @@ def _(mo):
        the server already publishes: layer title and slug, version, retrieval date, producer
        agency, license, the version's GeoParquet URL and checksum, a pinned OGC features URL,
        and for SQL, the same query rewritten to read the pinned GeoParquet file in DuckDB.
-       It is Pydantic AI's `process_tool_call` hook, about 40 lines in the next cell; the
+       It is Pydantic AI's `process_tool_call` hook, about 60 lines in the next cell; the
        server is untouched.
 
     The license field needs a judgment: v1.0.0 layers say `"license": "other"`, and HIFLD
@@ -647,6 +647,9 @@ def _(CACHE, LAYER_NAMES, LAYER_OF, duckdb, http, key, pl, re, runs):
         return bool(a) and bool(b) and (a in b or b in a)
 
     def found_in(value: str, cells: list[str]) -> bool:
+        # A number must match a numeric cell, not a digit inside an address or ZIP code.
+        if num(value) is not None:
+            return any(num(str(c)) is not None and same(value, str(c)) for c in cells)
         return any(same(value, str(c)) for c in cells)
 
     def run_ogc(url: str, kind: str) -> tuple[bool, list[str]]:
@@ -674,7 +677,7 @@ def _(CACHE, LAYER_NAMES, LAYER_OF, duckdb, http, key, pl, re, runs):
         # "(then filter…)", a code fence or a newline.
         found = []
         for m in re.finditer(
-            r"\bselect\b[\s\S]+?(?=\.\s+[A-Z(]|;|\s+\([a-z]+\s|```|\n|$)", text, re.IGNORECASE
+            r"\bselect\b[\s\S]+?(?=\.\s+[A-Z(]|;|(?-i:\s+\([a-z]+\s)|```|\n|$)", text, re.IGNORECASE
         ):
             sql = m.group(0).rstrip(" ;.")
             files = re.findall(r"https?://[^\s'\"]+\.parquet", sql)

@@ -73,8 +73,9 @@ or `FROM source_0`), not from a file a reader can open, and 23 answers said the 
 retrieval date. The agent can only cite what the server hands it.
 
 **With the proxy**, 39 of 40 answers carried all six fields and 29 reproduced exactly. Of the
-other 10, 8 gave a working pinned SQL whose output needs a last step (it groups by status and
-the reader adds the rows), which the rubric counts as effort; one agent edited the SQL and
+other 10, 8 gave a working pinned SQL whose output needs a last step (7 group by status and the
+reader adds the rows; 1 lists the 5 stations and the reader counts them), which the rubric
+counts as effort; one agent edited the SQL and
 dropped its `GROUP BY`; one wrote its SQL against the server's alias instead of the file the
 proxy gave it. The one not reproducible
 answer searched the wrong layer and said it didn't know.
