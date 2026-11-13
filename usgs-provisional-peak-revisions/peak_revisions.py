@@ -272,7 +272,7 @@ def _(mo):
     correction); a peak revision much larger than it means the peak itself was edited (a spike removed, a gap
     filled, ice).
 
-    The HADS feed also carries garbage readings: a 1,213 ft stage at a gage that never tops 30 ft, from a
+    The HADS feed also carries garbage readings: an 883 ft stage at a gage that peaked at 38 ft, from a
     garbled radio message. USGS's website doesn't show those, so before taking the transmitted peak we drop
     any reading more than 1 ft (and more than 10%) away from the median of its five-reading neighbourhood
     (25% and 500 cfs for discharge), and any reading more than 25% and 2 ft above the highest value USGS
