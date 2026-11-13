@@ -376,7 +376,7 @@ def _(reports):
             if not _blocks or _row["date"] < _blocks[-1][-1]["date"]:
                 _blocks.append([])
             _blocks[-1].append(_row)
-        wells_wet[_r["id"]] = sorted({row["name"] for row in _rows if row["name"]})
+        wells_wet[_r["id"]] = sorted({str(row["name"]) for row in _rows if row["name"]})
         _dropped = 0
         for _block in _blocks:
             _names = [row["name"] for row in _block if row["name"]]
