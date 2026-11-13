@@ -16,6 +16,7 @@ with app.setup:
     import marimo as mo
     import pyarrow as pa
     import pyarrow.parquet as pq
+    import pypdfium2 as pdfium
     from PIL import Image, ImageDraw
 
     HERE = Path(__file__).parent
@@ -244,6 +245,38 @@ def _(pages, period, reduced, reports, same, well_name):
     print(f"{len(pages_in_review)} of {len(lab_pages) + len(page_review)} pages have something in review")
     print(Counter(r for f in reviewed for r in f["reasons"]).most_common())
     return WELL_RULE, fields, lab_pages, page_review, pages_in_review, reviewed
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    **Pages with more than one sample.** The frozen schema has one well and one date per page. Some AEP lab
+    pages print two to four samples. On born-digital pages the text layer says how many samples a page holds,
+    so we count those pages and what the models did with them. A page both models accept or both reject loses
+    every sample but one without going to review.
+    """)
+    return
+
+
+@app.cell
+def _(pages, reduced):
+    _multi = Counter()
+    _samples = 0
+    for _key, _page in pages.items():
+        if _page["kind"] != "born-digital":
+            continue
+        _pdf = pdfium.PdfDocument(OUT / "pdfs" / f"{_page['report']}.pdf")
+        _text = _pdf[_page["page"] - 1].get_textpage().get_text_range()
+        _n = len(re.findall(r"Cust Sample ID|Customer Sample ID|Sample Number:|Client Sample ID", _text))
+        if _n >= 2:
+            _samples += _n
+            _g, _m = reduced["gemini"][_key] is not None, reduced["mistral"][_key] is not None
+            _multi[
+                "sent to review" if _g != _m else "not reviewed: both accept" if _g else "not reviewed: both reject"
+            ] += 1
+    multi_sample = {"pages": sum(_multi.values()), "samples on them": _samples, **_multi}
+    print(f"born-digital pages holding two or more samples: {json.dumps(multi_sample)}")
+    return (multi_sample,)
 
 
 @app.cell(hide_code=True)
@@ -675,7 +708,7 @@ def _(cost, lab_pages, pages, reports):
 
 
 @app.cell
-def _(MODELS, accuracy, confidence_caught, cost, rows, sizing, suspect_pages, well_check, well_scores):
+def _(MODELS, accuracy, confidence_caught, cost, multi_sample, rows, sizing, suspect_pages, well_check, well_scores):
     (RESULTS / "results.json").write_text(
         json.dumps(
             {
@@ -683,6 +716,7 @@ def _(MODELS, accuracy, confidence_caught, cost, rows, sizing, suspect_pages, we
                 "accuracy": accuracy,
                 "well_names": well_scores,
                 "well_check": well_check,
+                "multi_sample_pages": multi_sample,
                 "dataset_rows": len(rows),
                 "pages_with_suspect_boxes": len(suspect_pages),
                 "confidence_caught": confidence_caught,
