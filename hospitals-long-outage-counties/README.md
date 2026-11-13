@@ -83,8 +83,9 @@ chose the right columns, and filtered to open hospitals and declared counties wi
 
 **What it got wrong:**
 - **It lost Connecticut every time without saying so.** It joined on HIFLD's `COUNTYFIPS`,
-  which holds Connecticut's new planning-region codes. Heimdall uses the old county codes. Our
-  notebook reproduces its counts exactly with that join: 47 Connecticut hospitals drop out.
+  which holds Connecticut's new planning-region codes. Heimdall uses the old county codes. With
+  that join our notebook gets its hospital and pair counts (2,283 and 3,178; 697 repeaters
+  against its 696): 47 Connecticut hospitals drop out.
 - **It counted Hurricane Eta twice,** because Eta has two rows in Heimdall's storm list.
 - **Its storm count changed meaning between runs:** storms with a hospital in one run, any
   qualifying county in the other two.

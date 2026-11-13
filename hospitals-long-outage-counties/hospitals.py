@@ -302,6 +302,10 @@ def _(OUT, pairs, pl):
         .sort(["long_storms", "total_hours_to_90", "source_ID"], descending=[True, True, False])
     )
     ranking.write_csv(OUT / "hospital_ranking.csv")
+    print(
+        "States of hospitals with 3+ long storms:",
+        ranking.filter(pl.col("long_storms") >= 3)["STATE"].value_counts(sort=True).head(5).rows(),
+    )
     _per_storm = ranking.group_by("long_storms").len().sort("long_storms")
     _per_storm
     return (ranking,)
