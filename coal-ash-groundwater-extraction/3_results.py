@@ -178,7 +178,7 @@ def _():
     - **the well must be on the report's well list** (every well name in its results table). Disagreement can't
       catch a misread both models make, such as `HLF-10` for `HLF-1O`; this check can (issue #223);
     - **the date must fall in the period the results table covers**, give or take three days. In #188 this check
-      was "in or just before the report's year", but AEP's reports carry lab reports going back to 2017, so it
+      was "in or just before the report's year", but AEP's reports carry lab reports going back to 2016, so it
       flagged most of their pages.
 
     Every other field is accepted as read.
@@ -252,8 +252,8 @@ def _():
     mo.md(r"""
     **Pages with more than one sample.** The frozen schema has one well and one date per page. Some AEP lab
     pages print two to four samples. On born-digital pages the text layer says how many samples a page holds,
-    so we count those pages and what the models did with them. A page both models accept or both reject loses
-    every sample but one without going to review.
+    so we count those pages and what the models did with them. A page both models accept loses every sample
+    but one without going to review; a page both reject loses all of them.
     """)
     return
 

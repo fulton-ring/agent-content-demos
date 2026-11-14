@@ -162,7 +162,7 @@ def _():
     (see the README): in AEP's, Alabama Power's and Georgia Power's reports the scans are custody forms and
     field sheets, and the lab pages are born-digital. Duke Energy's and TVA's sites refuse scripted requests.
     Most AEP reports leave the lab reports out; Northeastern (Oklahoma) and Welsh (Texas) include them. The AEP
-    sample is four of those, covering two labs: AEP's Shreveport lab (2017 to 2019 samples) and AEP's Dolan lab
+    sample is four of those, covering two labs: AEP's Shreveport lab (2016 to 2019 samples) and AEP's Dolan lab
     (2020 samples, metals in µg/L).
     """)
     return
