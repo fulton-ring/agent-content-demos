@@ -126,7 +126,7 @@ def _(API, DATA, http, pd):
 @app.cell
 def _(DATA, LAYERS, deserialize_header, duckdb, gzip, json, layers):
     con_key = duckdb.connect()
-    con_key.execute("LOAD spatial; SET geometry_always_xy = true")
+    con_key.execute("INSTALL spatial; LOAD spatial; SET geometry_always_xy = true")
     tile_meta = {}
     for _name, (_dataset, _) in LAYERS.items():
         with open(DATA / f"{_dataset}.pmtiles", "rb") as _f:
@@ -652,7 +652,8 @@ def _(DATA, LAYERS, con_key, duckdb, layers, pd, questions, time):
 
     con_remote = duckdb.connect()
     con_remote.execute(
-        "LOAD spatial; SET geometry_always_xy = true; INSTALL httpfs; LOAD httpfs; "
+        "INSTALL spatial; LOAD spatial; SET geometry_always_xy = true; "
+        "INSTALL httpfs; LOAD httpfs; "
         "SET enable_external_file_cache = false; "
         "CALL enable_logging('HTTP')"
     )
@@ -718,7 +719,7 @@ def _(
         return 100 * (number - float(key)) / float(key)
 
     _con = duckdb.connect()
-    _con.execute("LOAD spatial; SET geometry_always_xy = true")
+    _con.execute("INSTALL spatial; LOAD spatial; SET geometry_always_xy = true")
     _con.register("_probes", probes)
     _con.execute(
         "CREATE TABLE probes AS SELECT ID, ST_GeomFromWKB(wkb) AS geom FROM _probes"

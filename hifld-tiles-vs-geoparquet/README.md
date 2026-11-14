@@ -71,8 +71,8 @@ Error on the 13 numeric totals: top zoom raw **−99.9% to +640.6%** (median +7.
   (+7% on hospitals). A line or polygon is one row per tile it touches: Texas's 254 counties came
   back as 1,881 rows, and 345 kV lines were overcounted by 44%.
 - **Merging fixes it, and needs ids.** Merged counts were exact except 345 kV lines (2,598 vs
-  2,600): 803 lines, all 2 to 71 m long, are missing from the tiles even at the top zoom because
-  tippecanoe drops lines too small to draw. Lengths were within 0.1%.
+  2,600). 803 of 94,619 lines, all 2 to 71 m long, are missing from the tiles even at the top zoom
+  because tippecanoe drops lines too small to draw; two of them are 345 kV. Lengths were within 0.1%.
 - **Lower zooms drop features.** The tiles were built with `--drop-densest-as-needed`, so point
   counts two zooms down are short by 80% to 95%, and proximity lists lose most of their members.
   Polygon layers keep every feature at lower zooms, so county and territory answers held.
@@ -89,8 +89,8 @@ Bytes and time (medians, top zoom, merged):
 | Proximity (7) | 0.05 | 2.15 | 0.33 | 0.19 |
 | Totals (14) | 6.93 | 28.42 | 38.7 | 0.31 |
 
-Attribute counts (hospitals in Texas, solar plants) read 0.04 to 0.09 MB of GeoParquet against
-1.2 to 9.0 MB of tiles. Tile times are our pure-Python decoder and merge, which is slow on
+Counts that filter only on a column (hospitals in Texas, solar plants, Texas counties) read 0.04
+to 0.10 MB of GeoParquet against 1.2 to 9.0 MB of tiles. Tile times are our pure-Python decoder and merge, which is slow on
 whole layers (about a minute to glue 67,000 territory pieces); a compiled reader would be
 faster, but it can't avoid fetching every tile.
 
