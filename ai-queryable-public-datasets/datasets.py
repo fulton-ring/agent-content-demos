@@ -12,6 +12,7 @@ def _():
     import re
     import threading
     import time
+    from urllib.parse import urlparse
 
     import duckdb
     import httpx
@@ -51,6 +52,7 @@ def _():
         re,
         threading,
         time,
+        urlparse,
     )
 
 
@@ -159,7 +161,7 @@ def _(duckdb, threading):
     def connect() -> duckdb.DuckDBPyConnection:
         con = duckdb.connect()
         con.execute("INSTALL httpfs; LOAD httpfs; INSTALL spatial; LOAD spatial;")
-        con.execute("INSTALL excel; LOAD excel; SET s3_region = 'us-west-2';")
+        con.execute("INSTALL excel; LOAD excel; SET GLOBAL s3_region = 'us-west-2';")
         return con
 
     def run_sql_text(con: duckdb.DuckDBPyConnection, sql: str, timeout_s: float) -> str:
@@ -312,7 +314,12 @@ def _(Agent, BaseModel, Field, MODEL, connect, run_sql_text):
         @agent.tool_plain
         def run_sql(sql: str) -> str:
             """Run one DuckDB SQL statement and return up to 50 rows as text."""
-            return run_sql_text(con, sql, timeout_s=360)[:8000]
+            # The model may call this tool in parallel; each call gets its own cursor.
+            cur = con.cursor()
+            try:
+                return run_sql_text(cur, sql, timeout_s=360)[:8000]
+            finally:
+                cur.close()
 
         return agent
 
@@ -437,7 +444,11 @@ def _(mo):
     ### Scoring the agent
 
     Read straight from the saved transcripts, so `RESCORE=1` gives the same numbers without a
-    model call. A dataset passes the agent test if at least two of its three runs are right.
+    model call. A run is **right** if its value matches the key and appears in a tool result.
+    It is **from this dataset** if the data URL it reports is on the same host as the access
+    path we test (for Hugging Face, the same repository): an agent that finds the number in a
+    mirror or a different file from the same agency answered the question, but not from this
+    dataset. A dataset passes the agent test if a majority of its runs are both.
     """)
     return
 
@@ -452,8 +463,16 @@ def _(
     datasets,
     is_right,
     pl,
+    urlparse,
 ):
     _key = {d["id"]: d for d in datasets.iter_rows(named=True)}
+
+    def _source(path: str) -> str:
+        # The host for web and S3 paths; owner/repo for hf://datasets/<owner>/<repo>/...
+        u = urlparse(path)
+        if u.scheme in ("http", "https", "s3"):
+            return u.netloc
+        return "/".join(u.path.strip("/").split("/")[:2])
 
     def _tool_text(transcript: str | None) -> str:
         if not transcript:
@@ -484,17 +503,20 @@ def _(
                 "id": _r["id"],
                 "repeat": _r["repeat"],
                 "right": _grounded,
+                "from_dataset": _source(_d["access_path"]) in (_r.get("data_url") or ""),
                 "matched_but_ungrounded": _matches and not _grounded,
                 "seconds": _r.get("seconds"),
                 "cost_usd": _r.get("cost_usd", 0.0),
                 "tool_calls": _r.get("tool_calls", 0),
                 "value": _r.get("value"),
+                "data_url": _r.get("data_url") or "",
                 "blocker": _r.get("blocker") or _r.get("error") or "",
             }
         )
     scored = pl.DataFrame(_rows, infer_schema_length=None)
     agent_summary = scored.group_by("id").agg(
         agent_right=pl.col("right").sum(),
+        agent_right_from_dataset=(pl.col("right") & pl.col("from_dataset")).sum(),
         agent_runs=pl.len(),
         agent_seconds=pl.col("seconds").median(),
         agent_cost_usd=pl.col("cost_usd").sum(),
@@ -520,7 +542,9 @@ def _(OUT, agent_summary, datasets, docs, one_liners, pl):
         .join(one_liners.select("id", "duckdb_pass", "duckdb_seconds"), on="id")
         .join(docs.select("id", "docs_pass"), on="id")
         .join(agent_summary, on="id", how="left")
-        .with_columns(agent_pass=pl.col("agent_right").fill_null(0) >= 2)
+        .with_columns(
+            agent_pass=pl.col("agent_right_from_dataset").fill_null(0) * 2 > pl.col("agent_runs")
+        )
         .with_columns(all_three=pl.col("duckdb_pass") & pl.col("docs_pass") & pl.col("agent_pass"))
     )
     results.write_csv(OUT / "results.csv")
@@ -531,6 +555,7 @@ def _(OUT, agent_summary, datasets, docs, one_liners, pl):
         "duckdb_seconds",
         "docs_pass",
         "agent_right",
+        "agent_right_from_dataset",
         "agent_runs",
         "agent_seconds",
         "all_three",
@@ -552,6 +577,7 @@ def _(OUT, json, mo, results, scored):
         "assistant_named_all_three": int(_assist["all_three"].sum()),
         "agent_runs_paid": _paid.height,
         "agent_runs_right": int(scored["right"].sum()),
+        "agent_runs_right_from_dataset": int((scored["right"] & scored["from_dataset"]).sum()),
         "agent_runs_matched_but_ungrounded": int(scored["matched_but_ungrounded"].sum()),
         "total_cost_usd": round(float(scored["cost_usd"].sum()), 4),
         "cost_per_question_usd": round(float(_paid["cost_usd"].mean() or 0), 4),
@@ -564,8 +590,10 @@ def _(OUT, json, mo, results, scored):
 
     - DuckDB one-liner: {summary["duckdb_pass"]} of {summary["datasets"]} pass.
     - Schema and vintage readable over HTTP: {summary["docs_pass"]} of {summary["datasets"]}.
-    - Agent right in at least two of three runs: {summary["agent_pass"]} of
-      {summary["datasets"]}.
+    - Agent right, from this dataset, in a majority of runs: {summary["agent_pass"]} of
+      {summary["datasets"]}. Across all runs, {summary["agent_runs_right"]} of
+      {summary["agent_runs_paid"]} paid runs got the right answer, but only
+      {summary["agent_runs_right_from_dataset"]} got it from the dataset under test.
     - Of the {summary["assistant_named"]} datasets AI assistants recommended,
       **{summary["assistant_named_all_three"]}** pass all three.
     - Model cost: **${summary["total_cost_usd"]:.2f}** for {summary["agent_runs_paid"]} agent
@@ -604,7 +632,13 @@ def _(docs, one_liners, pl, results, scored):
     for _id in results.filter(~pl.col("agent_pass"))["id"]:
         _runs = scored.filter(pl.col("id") == _id)
         _why = " | ".join(
-            f"run {r['repeat']}: {r['value'] or '-'}; {r['blocker'][:160]}"
+            f"run {r['repeat']}: {r['value'] or '-'}; "
+            + (
+                ("right" if r["from_dataset"] else "right, but from another source: ")
+                + ("" if r["from_dataset"] else r["data_url"][:120])
+                if r["right"]
+                else r["blocker"][:160]
+            )
             for r in _runs.iter_rows(named=True)
         )
         _fails.append({"id": _id, "test": "agent", "why": _why})

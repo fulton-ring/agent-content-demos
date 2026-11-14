@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Run the notebook as a script, so every number in outputs/ comes from the code the reader sees.
 # Needs OPENROUTER_API_KEY; a full run spends well under $1 on OpenRouter and takes about
-# 15 minutes (the Future Risk Index XLSX alone takes about 4.5 minutes to read remotely).
+# 35 minutes, mostly the Future Risk Index XLSX, which takes about 4.5 minutes per remote read.
 # RESCORE=1 ./run.sh reruns the DuckDB and documentation tests and rescores the committed
 # agent runs in outputs/ without calling any model.
 set -euo pipefail
