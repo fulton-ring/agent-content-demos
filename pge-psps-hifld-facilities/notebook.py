@@ -660,8 +660,8 @@ def _(mo):
       with several meters counts several times on PG&E's side and once, or not at all, on ours.
       The gap is partly a unit mismatch, and public data can't size that part.
     - **Status fields are old.** HIFLD Next's facility layers were last validated between
-      2008 and 2024, depending on the layer. Fire stations, dialysis centres, EOCs and cellular towers have no usable
-      status field, so closed sites can still count.
+      2008 and 2024, depending on the layer. Fire stations, dialysis centres, EOCs and
+      cellular towers have no usable status field, so closed sites can still count.
     - **Generator matching is loose.** Table 15 names a district or a site type, not an
       address.
     - **Polygons are approximate.** See the edge counts above.
