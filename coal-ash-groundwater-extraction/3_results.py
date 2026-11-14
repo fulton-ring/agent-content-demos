@@ -173,7 +173,8 @@ def _():
     **Pages with more than one sample.** The frozen schema has one well and one date per page. Some AEP lab
     pages print two to four samples. On born-digital pages the text layer says how many samples a page holds,
     so we count those pages and what the models did with them. A page both models accept loses every sample
-    but one without going to review; a page both reject loses all of them.
+    but one without going to review; a page both reject loses all of them. `4_multi_sample.py` reads these
+    pages again with a second schema that allows several samples a page (#275).
     """)
     return
 
