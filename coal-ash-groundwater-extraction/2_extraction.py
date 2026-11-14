@@ -19,10 +19,12 @@ with app.setup:
     from pydantic_ai.models.openrouter import OpenRouterModelSettings
 
     HERE = Path(__file__).parent
-    OUT = Path(os.environ.get("CCR_OUTPUT_DIR", HERE / "output"))
+    UTILITY = os.environ.get("CCR_UTILITY", "pacificorp")
+    OUT = Path(os.environ.get("CCR_OUTPUT_DIR", HERE / "output")) / ("" if UTILITY == "pacificorp" else UTILITY)
     PAGES = OUT / "pages"
     ANSWERS = HERE / "answers"
-    BUDGET_USD = 4.5
+    # Counted across every saved answer: PacifiCorp (#188) spent $2.10, and AEP (#223) may add up to $3.
+    BUDGET_USD = 5.1
 
 
 @app.cell(hide_code=True)
@@ -57,7 +59,8 @@ def _():
     temperature 0 and low thinking effort, as in `scanned-990ez-extraction/`. Each call gets up to four attempts,
     and Pydantic AI retries malformed output twice within each. Every attempt is paid for and counted, at the cost
     OpenRouter reports. Answers are saved under `answers/`, **which is committed**, so anyone can rescore from a
-    clean checkout without paying again. The run stops if spending passes the $4.50 budget.
+    clean checkout without paying again. The run stops if total spending passes $5.10: the $2.10 PacifiCorp
+    cost plus up to $3 for AEP.
     """)
     return
 
@@ -249,6 +252,7 @@ async def _(pages, read, readings):
         for p in pages
         if p["kind"] == "scanned" and (readings["gemini"][p["key"]]["output"] or {}).get("is_lab_result_page")
     ][:10]
+    _lab = _lab if UTILITY == "pacificorp" else []  # the Qwen trial is PacifiCorp's only
     qwen = dict(
         zip(_lab, await asyncio.gather(*(read("qwen", "openrouter:qwen/qwen3.8-27b", k) for k in _lab)), strict=True)
     )
