@@ -13,17 +13,16 @@ with app.setup:
 
     import marimo as mo
     from pydantic import BaseModel, Field
-    from pydantic_ai import Agent, BinaryContent, capture_run_messages
-    from pydantic_ai.messages import ModelResponse
-    from pydantic_ai.models import infer_model
-    from pydantic_ai.models.openrouter import OpenRouterModelSettings
+
+    from ccr import ask, spent
 
     HERE = Path(__file__).parent
     UTILITY = os.environ.get("CCR_UTILITY", "pacificorp")
     OUT = Path(os.environ.get("CCR_OUTPUT_DIR", HERE / "output")) / ("" if UTILITY == "pacificorp" else UTILITY)
     PAGES = OUT / "pages"
     ANSWERS = HERE / "answers"
-    # Counted across every saved answer: PacifiCorp (#188) spent $2.10, and AEP (#223) may add up to $3.
+    # Counted across every answer saved under this schema: PacifiCorp (#188) spent $2.10, and AEP (#223) up to $3.
+    # The multi-sample schema in 4_multi_sample.py has its own folder and budget.
     BUDGET_USD = 5.1
 
 
@@ -58,7 +57,8 @@ def _():
     **Calling a model.** Models are named by a Pydantic AI model string and called through OpenRouter at
     temperature 0 and low thinking effort, as in `scanned-990ez-extraction/`. Each call gets up to four attempts,
     and Pydantic AI retries malformed output twice within each. Every attempt is paid for and counted, at the cost
-    OpenRouter reports. Answers are saved under `answers/`, **which is committed**, so anyone can rescore from a
+    OpenRouter reports (the call itself is `ask` in `ccr.py`, shared with `4_multi_sample.py`). Answers are saved
+    under `answers/`, **which is committed**, so anyone can rescore from a
     clean checkout without paying again. The run stops if total spending passes $5.10: the $2.10 PacifiCorp
     cost plus up to $3 for AEP.
     """)
@@ -66,53 +66,7 @@ def _():
 
 
 @app.cell
-def _():
-    def response_cost(m: ModelResponse) -> float:
-        return float((m.provider_details or {}).get("cost") or 0.0)
-
-    async def ask(
-        model: str, output_type: type[BaseModel], instructions: str, prompt: str, pngs: list[Path], save: Path
-    ) -> dict:
-        """One typed model call, with its cost and time, saved to `save` and reused if it's already there."""
-        if save.exists():
-            return json.loads(save.read_text())
-        agent = Agent(
-            infer_model(model),
-            output_type=output_type,
-            instructions=instructions,
-            retries=2,
-            model_settings=OpenRouterModelSettings(
-                temperature=0, max_tokens=12000, thinking="low", openrouter_usage={"include": True}
-            ),
-        )
-        parts = [prompt] + [BinaryContent(p.read_bytes(), media_type="image/png") for p in pngs]
-        result = {"usd": 0.0, "seconds": 0.0, "failed_attempts": 0, "output": None, "error": None}
-        for attempt in range(4):
-            t0 = time.time()
-            with capture_run_messages() as messages:
-                try:
-                    result["output"] = (await agent.run(parts)).output.model_dump(mode="json")
-                except Exception as e:  # rate limits, network errors, malformed output after retries
-                    result["error"] = f"{type(e).__name__}: {str(e)[:300]}"
-            result["usd"] += sum(response_cost(m) for m in messages if isinstance(m, ModelResponse))
-            result["seconds"] += time.time() - t0
-            if result["output"] is not None:
-                result["error"] = None
-                break
-            result["failed_attempts"] += 1
-            await asyncio.sleep(10 * (attempt + 1))
-        save.parent.mkdir(parents=True, exist_ok=True)
-        save.write_text(json.dumps(result, indent=1))
-        return result
-
-    def spent() -> float:
-        return sum(json.loads(p.read_text())["usd"] for p in ANSWERS.rglob("*.json"))
-
-    return ask, spent
-
-
-@app.cell
-async def _(ask, page_png):
+async def _(page_png):
     class DraftField(BaseModel):
         name: str = Field(description="Short field name.")
         where: str = Field(description="Where it is printed: page header, or a column of the results table.")
@@ -208,7 +162,7 @@ def _():
 
 
 @app.cell
-async def _(LabPage, SCHEMA_HASH, ask, page_png, spent):
+async def _(LabPage, SCHEMA_HASH, page_png):
     MODELS = {"gemini": "openrouter:google/gemini-3.8-flash", "mistral": "openrouter:mistralai/mistral-small-2603"}
     INSTRUCTIONS = "\n".join(
         [
@@ -222,7 +176,7 @@ async def _(LabPage, SCHEMA_HASH, ask, page_png, spent):
 
     async def read(name: str, model: str, key: str) -> dict:
         async with slots:
-            if spent() > BUDGET_USD:
+            if spent(ANSWERS / SCHEMA_HASH) > BUDGET_USD:
                 raise RuntimeError(f"spent more than the ${BUDGET_USD} budget")
             save = ANSWERS / SCHEMA_HASH / name / f"{key}.json"
             return await ask(model, LabPage, INSTRUCTIONS, PROMPT, [page_png[key]], save)
@@ -232,7 +186,7 @@ async def _(LabPage, SCHEMA_HASH, ask, page_png, spent):
         name: dict(zip(page_png, await asyncio.gather(*(read(name, model, k) for k in page_png)), strict=True))
         for name, model in MODELS.items()
     }
-    print(f"read in {time.time() - t0:.0f} s; ${spent():.2f} spent on model calls so far, including the schema draft")
+    print(f"read in {time.time() - t0:.0f} s; ${spent(ANSWERS / SCHEMA_HASH):.2f} spent on reading with this schema")
     for name, by_page in readings.items():
         ok = [r for r in by_page.values() if r["output"]]
         lab = [r for r in ok if r["output"]["is_lab_result_page"]]

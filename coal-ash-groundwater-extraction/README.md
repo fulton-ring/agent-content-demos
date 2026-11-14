@@ -7,7 +7,7 @@ Every US coal plant with an ash pond or landfill must post an annual groundwater
 3. A field goes to review when the models disagree or the field fails a check, including a check of each page's well and date against the report's own results table.
 4. Every value keeps its page and box, and the error rate is measured.
 
-Issue #188 asked whether this can extract every year of a set like EIP's for cents a page, at an error rate a nonprofit could show a funder. Issue #223 added a page-level well check and ran the same notebooks on a second utility (AEP).
+Issue #188 asked whether this can extract every year of a set like EIP's for cents a page, at an error rate a nonprofit could show a funder. Issue #223 added a page-level well check and ran the same notebooks on a second utility (AEP). Issue #275 added a second schema for lab pages that hold several samples.
 
 ![The lab printed HLF-1O with a letter O; both models read HLF-10](screenshots/agreed-wrong-well-huntington_ccr-landfill_2018_p0129.png)
 
@@ -15,11 +15,14 @@ Issue #188 asked whether this can extract every year of a set like EIP's for cen
 
 ## Read it
 
-Three marimo notebooks, each meant to be read top to bottom. Open one with `uv run marimo edit 1_documents.py`, or read it as plain Python. `CCR_UTILITY=aep` runs a notebook on AEP's reports; the default is PacifiCorp.
+Four marimo notebooks, each meant to be read top to bottom. Open one with `uv run marimo edit 1_documents.py`, or read it as plain Python. `CCR_UTILITY=aep` runs a notebook on AEP's reports; the default is PacifiCorp.
 
 1. [`1_documents.py`](1_documents.py): the question, the reports, finding lab result pages, and parsing the answer key (one parser per utility's table layout).
 2. [`2_extraction.py`](2_extraction.py): drafting and freezing the schema, and the two models reading every page.
 3. [`3_results.py`](3_results.py): the review rule, the well check before and after, the scores, cost, the dataset and the size of the whole job.
+4. [`4_multi_sample.py`](4_multi_sample.py): pages with several samples (#275): the second schema, the sample-count check against the text layer, and their scores.
+
+`ccr.py` holds what two notebooks share: the model call and the rules for reading a result.
 
 ## Run it
 
@@ -27,9 +30,9 @@ Three marimo notebooks, each meant to be read top to bottom. Open one with `uv r
 ./run.sh
 ```
 
-You need [uv](https://docs.astral.sh/uv/). The model answers are committed under `answers/`, so a re-run rescores without calling a model and needs no key. Reading a page that isn't saved needs `OPENROUTER_API_KEY`, and spending stops when all saved answers together pass $5.10.
+You need [uv](https://docs.astral.sh/uv/). The model answers are committed under `answers/`, so a re-run rescores without calling a model and needs no key. Reading a page that isn't saved needs `OPENROUTER_API_KEY`. Spending stops when the first schema's saved answers pass $5.10, or the second schema's pass $2.
 
-`run.sh` runs the three notebooks on PacifiCorp, then on AEP. They download eleven reports (about 175 MB) to `output/`, which is not committed (set `CCR_OUTPUT_DIR` to put it elsewhere), and write the datasets to `results/` and `results/aep/`. Model spending: **$2.10** for PacifiCorp in #188 and **$1.28** for AEP in #223 (12 minutes of reading), $3.38 in all.
+`run.sh` runs the first three notebooks on PacifiCorp, then on AEP, then downloads three newer AEP reports and runs `4_multi_sample.py`. They download fourteen reports (about 210 MB) to `output/`, which is not committed (set `CCR_OUTPUT_DIR` to put it elsewhere), and write the datasets to `results/`, `results/aep/` and `results/multi_sample/`. Model spending: **$2.10** for PacifiCorp in #188, **$1.28** for AEP in #223 (12 minutes of reading) and **$0.46** for the multi-sample pages in #275 (3 minutes), $3.84 in all.
 
 ## The data
 
@@ -37,6 +40,7 @@ All of it is public, and none of it is committed.
 
 - **PacifiCorp (#188).** One page per coal plant lists every annual groundwater report: 136 reports. The sample is seven, chosen to cover scanned lab pages (Hunter and Huntington, 2018 and 2019) and born-digital ones (Dave Johnston 2022, Jim Bridger 2021, Naughton 2022). The answer key is the consultant's (WET) results table, which `pdfplumber` parses exactly: 26,127 values in 1,556 samples.
 - **AEP (#223).** One page per plant at `aep.com/environment/ccr/` lists 168 reports at 18 plants. Most leave the lab reports out. The sample is the four 2020–2021 reports from Northeastern (Oklahoma) and Welsh (Texas) that include them: Northeastern landfill 2020 and bottom ash pond 2020 and 2021, and Welsh bottom ash pond 2020. Two labs: AEP's Shreveport lab (samples from 2016 to 2019) and AEP's Dolan lab (2020 samples, metals in µg/L). The answer key is the consultant's (Geosyntec) results table: 7,226 values in 442 samples.
+- **AEP from 2022 on (#275).** Three Northeastern reports posted in 2023 and 2024 (landfill 2023 and 2024, bottom ash pond 2023), all lab pages from AEP's Dolan lab. The answer key is again Geosyntec's table (5,903 values in 640 samples).
 - **Pages.** A page counts as *scanned* if one picture covers most of it. Both models read every scanned candidate page and a seeded sample of born-digital candidates (15 a report at PacifiCorp, 25 at AEP).
 - **Models.** Gemini 3.8 Flash (Google) and Mistral Small 2603 (Mistral, open weights) through OpenRouter, typed with Pydantic AI, with the schema frozen in #188.
 - **`adjudications.json`, `adjudications_aep.json`** (committed): every field where the answer key was in doubt, with the value seen on the page and a note.
@@ -78,17 +82,37 @@ Same notebooks, same frozen schema, same models.
 | Well names wrong (41 pages) | 0 | 6 | 0 accepted wrong |
 
 - **The answer key differed 77 times, the models never.** On Welsh's 2016 lab pages, both models read non-detects at the lab's reporting limit (`< 0.005`), while the table gives estimates or non-detects below it (`0.00156793`, `< 0.00007`). The lab pages are born-digital, so each of the 77 was checked against the page's own text layer, and the models matched every one.
-- **Review rate: high, for a reason the schema causes.** 29 of 1,108 fields (2.6%) went to review (15 before the well check), but 49 of 84 pages have something in review. 19 of the 86 born-digital pages hold two to four samples (55 samples in all), and the frozen schema has one well per page. Gemini turns those pages away; Mistral reads the first sample. 16 went to review on that disagreement. On 3 both models agreed (1 page read with only its first sample, 2 pages turned away whole), so those samples were lost without review. That's the one failure this utility found.
-- **The well check** flags 29 pages and adds 14 to review, all field duplicates, equipment blanks and wells the report's table doesn't list. It also flags Mistral's 6 wrong wells (it read lab numbers such as `192190-005` as the well), which disagreement already caught.
-- **Cost.** $0.0035 per page read, but only 64 of the 365 pages read were single-sample lab pages, so **$0.020 per lab page** for the models. Most scanned candidates were custody forms. Assumed review comes to $2.23 per lab page, because each page sent to review whole counts as 20 fields. So the national estimate below rests on PacifiCorp's mix; on AEP's mix the same formula gives about 14 times as much.
+- **Review rate: high, for a reason the schema causes.** 57 of 1,109 fields (5.1%) went to review (43 before the well check), but 49 of 84 pages have something in review. 19 of the 86 born-digital pages hold two to four samples (55 samples in all), and the frozen schema has one well per page. Gemini turns those pages away; Mistral reads the first sample. 16 went to review on that disagreement. On 3 both models agreed (1 page read with only its first sample, 2 pages turned away whole), so those samples were lost without review. That's the one failure this utility found.
+- **The well check** flags 29 pages and adds 12 to review, all field duplicates, equipment blanks and wells the report's table doesn't list. It also flags Mistral's 6 wrong wells (it read lab numbers such as `192190-005` as the well), which disagreement already caught.
+- **Cost.** $0.0035 per page read, but only 64 of the 365 pages read were single-sample lab pages, so **$0.020 per lab page** for the models. Most scanned candidates were custody forms. Assumed review comes to $2.38 per lab page, because each page sent to review whole counts as 20 fields. So the national estimate below rests on PacifiCorp's mix; on AEP's mix the same formula gives about 16 times as much.
+- **Changed in #275.** On some pages AEP's labs print a code, `Q18`, where a value would be. The result reader took it for 18 mg/L. It is now an unreadable result, which sends 28 more fields to review (all on duplicate-sample pages the well check had already sent there, so no accepted value changes). `Residue, Filterable, TDS` is now read as TDS, which adds one field. That moved the review numbers above from 29 of 1,108 fields to 57 of 1,109.
 
 **How much had to change.** The answer-key parser is new (about 70 lines): Geosyntec prints one table per well with the well in the title, the units in their own row, and the qualifier in the value's cell, and metals in µg/L have to be converted to mg/L. Everything else was a setting or a small rule change. The report list is fetched from a different site, born-digital pages are 25 a report instead of 15, the page finder also accepts "Sample Number" (Dolan's label), and results printed in µg/L are converted. The date check is the one described above.
+
+## Results: pages with several samples (#275)
+
+![A Dolan lab page from 2023 with three samples](screenshots/multi_sample/three-samples-northeastern_lf_2024_p0136.png)
+
+A second schema, frozen and hashed beside the first, lets a page hold a list of samples, each with its well, date and results. Only the multi-sample pages were read with it, so every answer and number above stays valid. Pages: #223's 19 multi-sample pages (55 samples), and every multi-sample lab page in the three newer reports: 38 of their 122 lab pages, holding 88 of their 172 samples. Same models, same review rule per sample, scored against the results table.
+
+| | Gemini alone | Mistral alone | The pair, with review |
+|---|---|---|---|
+| Samples listed (143 on 57 pages) | 143 | 133 | **0 lost without review** (#223 lost 3 pages' worth) |
+| Sample count matches the text layer (57 pages) | 57 | 52 | both wrong the same way on 0 |
+| Wrong or missing values (409 scored) | 0 | 22 missing | **0 of 357 accepted** (95% interval 0% to 1.06%) |
+
+- **The sample count can be checked on born-digital pages.** Each lab starts a sample with the same words (`Customer Sample ID`, `Sample Number:`, `Cust Sample ID`), so the text layer's count is exact. A page goes to review when the two models' counts differ or either differs from the text layer. Gemini's count was right on every page. Mistral's was wrong on 5, where it split each sample in two at a section heading (metals, then wet chemistry); disagreement and the count check both caught all 5.
+- **#223's three lost pages are covered.** Both models listed every sample on all three (3, 2 and 4 samples). Five were accepted. Four went to review on the well check: `MW-8D`, which the report's table doesn't list, a duplicate, and two `SP-10` samples whose IDs carry a date (one of them dissolved metals).
+- **Review.** 21 of 57 pages and 44 of 143 samples have something in review; 21 of 551 values (3.8%). Most of it is the well check: field duplicates, blanks, landfill leachate and IDs with the unit added (`SP-1 BAP`) aren't on the well list. Assumed review comes to $0.55 per sample.
+- **Cost.** $0.46 for both models on 57 pages: **$0.0081 per page, $0.0032 per sample**, about 8 seconds a page for Gemini and 17 for Mistral.
+- **The text layer settles the key.** Where the table and the page's text layer differ, the text layer wins, so no hand adjudication was needed. They differed on 9 values: 8 on one Welsh page from May 2019 (the table's numbers for that event aren't the lab page's), and one chromium non-detect printed as `< 0.007 ug/L` on the page and `<0.007` mg/L in the table.
+- **Scans: the custody form checks a job, not a page.** No AEP lab page here is scanned. A scanned custody form (for example `northeastern_lf_2024` page 134) lists each sample in a lab job, its date and the analyses ordered, under the job number the lab pages print. So it can check that every sample in a job turns up somewhere in that job's pages, but not how many a given page holds, and it is itself a scan a model would have to read. We didn't test it.
 
 ## What didn't work, and what it doesn't show
 
 - **No second utility with scanned lab pages.** AEP, Alabama Power and Georgia Power post reports a script can fetch. In the 38 of their 2018–2023 reports we looked at, the scanned pages are custody forms, field sheets and QC summaries, and the lab pages are born-digital. Duke Energy's and TVA's sites refuse scripted requests, and we didn't try to get around that. So AEP tests a new utility, consultant, lab and table, but not new scans.
-- **Born-digital lab pages don't need a model.** Their text layer gives every value exactly; we used it to check the answer key. A text-layer parser per lab layout would read AEP's pages for free.
-- **The schema assumes one sample per page.** It doesn't hold for AEP's labs, and AEP's reports from 2022 on (Dolan's newer layout) print several samples a page. They weren't sampled.
+- **Born-digital lab pages don't need a model.** Their text layer gives every value exactly; we used it to check the answer key and, in #275, to count samples and settle differences with the table. A text-layer parser per lab layout would read AEP's pages for free. Its one trap: a code such as `Q18` printed where a value would be.
+- **Multi-sample pages were tested only born-digital and only at AEP.** The count check needs a text layer; for a scanned multi-sample page we have only the untested custody-form idea above. The 2022+ sample is three reports from one plant and one lab layout.
 - **The well check needs a results table.** Here the table is in the same PDF. A utility without one would need the monitoring network section instead, which we didn't parse.
 - **Mostly one lab per utility.** PacifiCorp's lab pages come from two labs and one consultant, AEP's from two AEP labs and one consultant. Handwritten pages and other consultants will do worse.
 - **The checking was done by the agent that built this, not a person.** Every decision is in the adjudication files.
@@ -98,10 +122,11 @@ Same notebooks, same frozen schema, same models.
 ## Files
 
 - `1_documents.py`, `2_extraction.py`, `3_results.py`: the demo, as three marimo notebooks
-- `answers/`: every model answer, with its cost and time, so the scores can be rerun for free
+- `4_multi_sample.py`: pages with several samples (#275); `ccr.py`: the model call and result rules the notebooks share
+- `answers/`: every model answer, with its cost and time, so the scores can be rerun for free (`90270e929cb3/` the first schema, `76dfe1ee0faa/` the second)
 - `adjudications.json`, `adjudications_aep.json`: every field checked on the page
-- `results/` (PacifiCorp) and `results/aep/`: `groundwater_results.csv` and `.parquet`, `review_queue.csv`, `accuracy.csv`, `results.json`, and [`DATA_DICTIONARY.md`](results/DATA_DICTIONARY.md)
-- `screenshots/`: every page where both models read the same wrong well
+- `results/` (PacifiCorp) and `results/aep/`: `groundwater_results.csv` and `.parquet`, `review_queue.csv`, `accuracy.csv`, `results.json`, and [`DATA_DICTIONARY.md`](results/DATA_DICTIONARY.md); `results/multi_sample/`: `results.json`, `samples.csv` (every sample, found or not, accepted or in review) and `review_queue.csv`
+- `screenshots/`: every page where both models read the same wrong well, and a multi-sample page
 - `run.sh`, `pyproject.toml`, `uv.lock`: the one command and its pinned environment
 
 What we looked at first: vendor tools ship the same steps (Reducto, Extend, Azure Document Intelligence, Textract with A2I; see the reading research in #58), but none publishes its error rate on public records. The pipeline is the 990-EZ spike's, with `pdfplumber` added for the answer-key tables.
