@@ -237,7 +237,19 @@ def _(fetch, gpd, pd, re, session):
         ("private-schools", "Private schools", "Government", None),
         ("colleges-and-universities", "Colleges", "Government", lambda d: d["STATUS"] == "A"),
         ("prison-boundaries-1", "Jails and prisons", "Government", lambda d: d["STATUS"] == "OPEN"),
-        ("power-plants-1", "Power plants", "Energy", lambda d: d["STATUS"] == "OP"),
+        # PG&E's own plants are its assets, not CFI customers.
+        (
+            "power-plants-1",
+            "Power plants (not PG&E's)",
+            "Energy",
+            lambda d: (d["STATUS"] == "OP") & ~d["OPERATOR"].str.startswith("PACIFIC GAS"),
+        ),
+        (
+            "power-plants-1",
+            "PG&E's own power plants",
+            "Not CFI",
+            lambda d: (d["STATUS"] == "OP") & d["OPERATOR"].str.startswith("PACIFIC GAS"),
+        ),
         (
             "icis-wastewater-treatment-plants",
             "Wastewater plants",
@@ -381,7 +393,7 @@ def _(gpd, inside_oct14, mo):
     _cfi = inside_oct14[inside_oct14["sector"] != "Not CFI"]
     _blobs = gpd.GeoSeries([_cfi.buffer(50).union_all()], crs=3310).explode(index_parts=False)
     sites_oct14 = len(_blobs)
-    _plants = _cfi[_cfi["layer"] == "Power plants"]
+    _plants = _cfi[_cfi["layer"] == "Power plants (not PG&E's)"]
     mo.md(
         f"Points are not sites either. Merging every CFI-type point within 100 m of another "
         f"into one site leaves **{sites_oct14} sites** from {len(_cfi)} points: some fire stations "
@@ -579,9 +591,10 @@ def _(facilities, oct14, plt, results):
     _xmin, _ymin, _xmax, _ymax = oct14.total_bounds
     _shown = facilities.cx[_xmin:_xmax, _ymin:_ymax]
     _shown = _shown[_shown.intersects(oct14.union_all()) & (_shown["sector"] != "Not CFI")]
+    _shown = _shown.set_geometry(_shown.representative_point())  # jails are outlines
     for _sector, _g in _shown.groupby("sector"):
         _g.plot(ax=_ax, markersize=6, label=f"{_sector} ({len(_g)})")
-    _ax.legend(loc="lower left", fontsize=8)
+    _ax.legend(loc="upper right", fontsize=8)
     _ax.set_axis_off()
     _ax.set_title("HIFLD Next facilities inside PG&E's October 14, 2026 de-energized areas")
     _fig.savefig(results / "map_oct14.png", dpi=150, bbox_inches="tight")
@@ -646,12 +659,15 @@ def _(mo):
     - **Accounts against points.** PG&E counts service points. A school or water district
       with several meters counts several times on PG&E's side and once, or not at all, on ours.
       The gap is partly a unit mismatch, and public data can't size that part.
-    - **Status fields are old.** Most HIFLD Next facility layers were last validated between
-      2019 and 2024. Fire stations, dialysis centres, EOCs and cellular towers have no usable
+    - **Status fields are old.** HIFLD Next's facility layers were last validated between
+      2008 and 2024, depending on the layer. Fire stations, dialysis centres, EOCs and cellular towers have no usable
       status field, so closed sites can still count.
     - **Generator matching is loose.** Table 15 names a district or a site type, not an
       address.
     - **Polygons are approximate.** See the edge counts above.
+    - **Our first power plant count was wrong.** It counted PG&E's own hydro plants (Pit,
+      Balch, Drum, Caribou and others) as CFI. They are PG&E's assets, not customers, so they
+      now sit in a separate row outside the total.
     """)
     return
 
