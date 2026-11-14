@@ -65,8 +65,8 @@ Night light tracked outages moderately on two storms and not at all on three. Th
 mostly reflects differences in baseline between storms. On Kentucky and Illinois, Heimdall's
 counties read about half their usual brightness for the week after, even where EAGLE-I shows
 under 1% of customers out. On Oklahoma they read near normal. Pooling stacks those offsets,
-so the pooled rank mostly says which storm a county night came from. Ranking within each storm
-first raises it to 0.10, and the per-storm values weighted by clear county nights average 0.13.
+so the pooled rank mostly says which storm a county night came from. Centering each storm on its
+own mean first raises it to 0.10, and the per-storm values weighted by clear county nights average 0.13.
 
 ## How we measured it
 

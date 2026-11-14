@@ -482,7 +482,7 @@ def _(mo):
     mo.md(r"""
     The earlier spike asked whether its last two nights (August 1 and 2) were missing GIBS
     data rather than cloud. The table above says cloud: GIBS has a cloud-mask value for every
-    lit pixel on both nights, and almost none is clear. The raw picture agrees. Below,
+    lit pixel on both nights, and none is clear. The raw picture agrees. Below,
     NOAA-20's uncorrected day/night band on a clear night (July 30) and on August 1 and 2:
     sharp city lights on the clear night; on the other two, cloud texture covers the
     territory and the cities show only as a diffuse glow.
@@ -585,15 +585,11 @@ def _(data_dir, download, pl):
         ),
         infer_schema_length=0,
     )
-    heimdall_storms = pl.read_csv(
-        download(zenodo + "data__storms.csv/content", data_dir / "heimdall_storms.csv"),
-        infer_schema_length=0,
-    )
     declared = heimdall_summary.filter(pl.col("declared") == "True").select(
         "event_id", "geoid", "state", "product", impact=pl.col("impact_date").str.to_date()
     )
     print(f"{declared['event_id'].n_unique()} storms, {declared.height:,} declared counties")
-    return declared, heimdall_daily, heimdall_storms, zenodo
+    return declared, heimdall_daily
 
 
 @app.cell
@@ -973,10 +969,10 @@ def _(mo):
     (Illinois and Kentucky) Heimdall's counties read about half their usual brightness for
     the week after, even on county nights where EAGLE-I shows under 1% of customers out, while
     on Oklahoma they read near normal. Pooling stacks those offsets on top of each other, so
-    the pooled rank correlation mostly measures which storm a county night came from. Ranking
-    within each storm first (subtracting each storm's mean deficit and mean share out) removes
-    the offsets; the per-storm values, and their average weighted by clear county nights, are
-    the honest summary.
+    the pooled rank correlation mostly measures which storm a county night came from. Centering
+    each storm first (subtracting each storm's mean deficit and mean share out) and then ranking
+    removes most of the offsets; the per-storm values, and their average weighted by clear
+    county nights, are the honest summary.
     """)
     return
 
