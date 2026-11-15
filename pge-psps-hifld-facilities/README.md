@@ -8,9 +8,9 @@ them, layer by layer. Issue [#278](https://github.com/fulton-ring/agent-content-
 [proposal card](https://app.notion.com/p/418cc69045cb8143bcd0fe547c462ee1).
 
 **Short answer: HIFLD Next finds 290 CFI-type facilities (243 distinct sites) inside the October 14
-polygons, against PG&E's 1,864 CFI customers. That's 16%.** It finds the one open hospital,
-and 7 of the 11 sites that got PG&E generators: 7 of the 8 school sites and none of the 3
-water systems. What it misses is mainly water systems and communications sites. HIFLD Next has
+polygons, against PG&E's 1,864 CFI customers. That's 16%** (HIFLD points against PG&E service accounts, so not a like-for-like share). HIFLD Next
+has one open hospital inside (PG&E gives no hospital count to check it against), and it finds 7 of the 11 sites that got PG&E generators: 7 of the 8 school sites and none of the 3
+water systems. What it misses is probably mostly water systems and communications sites. HIFLD Next has
 no drinking-water layer at all, and its cell tower layer is a thin FCC subset. We can't put a
 number on that split, because PG&E publishes the CFI total and no count by sector.
 
