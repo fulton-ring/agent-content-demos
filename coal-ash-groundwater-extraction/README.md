@@ -93,7 +93,7 @@ Same notebooks, same frozen schema, same models.
 
 ![A Dolan lab page from 2023 with three samples](screenshots/multi_sample/three-samples-northeastern_lf_2024_p0136.png)
 
-A second schema, frozen and hashed beside the first, lets a page hold a list of samples, each with its well, date and results. Only the multi-sample pages were read with it, so every answer and number above stays valid. Pages: #223's 19 multi-sample pages (55 samples), and every multi-sample lab page in the three newer reports: 38 of their 122 lab pages, holding 88 of their 172 samples. Same models, same review rule per sample, scored against the results table.
+A second schema, frozen and hashed beside the first, lets a page hold a list of samples, each with its well, date and results. Only the multi-sample pages were read with it, so every answer and number above stays valid. Pages: #223's 19 multi-sample pages (55 samples), and every multi-sample lab page in the three newer reports: 38 of their 122 lab pages, holding 88 of their 172 samples. Same models, same review rule per sample. The truth is the page's own text layer, scored only where the consultant's results table also has the value.
 
 | | Gemini alone | Mistral alone | The pair, with review |
 |---|---|---|---|
