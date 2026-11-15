@@ -28,7 +28,9 @@ def _():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
     log = logging.getLogger("floodnet")
     here = Path(mo.notebook_dir() or ".")
-    cache = Path(os.environ.get("FLOODNET_CACHE", Path.home() / ".cache" / "floodnet-street-flooding"))
+    cache = Path(
+        os.environ.get("FLOODNET_CACHE", Path.home() / ".cache" / "floodnet-street-flooding")
+    )
     results = Path(os.environ.get("FLOODNET_RESULTS", here / "results"))
     for _d in (cache / "tide", cache / "rain", cache / "nfhl", results):
         _d.mkdir(parents=True, exist_ok=True)
@@ -45,7 +47,7 @@ def _():
                 return response
             except requests.RequestException as error:
                 log.warning("%s attempt %d: %s", url, attempt + 1, error)
-                time.sleep(min(2**attempt, 30))
+                time.sleep(min(5 * 2**attempt, 60))  # NOAA and IEM throttle bursts
         raise RuntimeError(f"{url} failed {attempts} times with {params}")
 
     def fetch(url: str, name: str) -> Path:
@@ -165,9 +167,9 @@ def _(events, pd, sensors):
         .astype(int)
     )
     network.loc["All"] = network.sum()
-    network["events_per_sensor_with_events"] = (
-        network.events / network.sensors_with_events
-    ).round(1)
+    network["events_per_sensor_with_events"] = (network.events / network.sensors_with_events).round(
+        1
+    )
 
     # The 2024 paper's window: October 2020 to May 2023.
     _paper_end = pd.Timestamp("2023-06-01", tz="UTC")
@@ -179,6 +181,10 @@ def _(events, pd, sensors):
         "sensors_with_events_before_june_2023": int(
             events[events.flood_start_time < _paper_end].sensor_id.nunique()
         ),
+        # The paper's 87 sensors are "as of February 2024".
+        "sensors_installed_before_march_2024": int(
+            (sensors.date_installed < pd.Timestamp("2024-03-01")).sum()
+        ),
     }
     print(f"Data cutoff {cutoff:%Y-%m-%d}. Paper window in today's feed: {paper_window}")
     network
@@ -187,16 +193,21 @@ def _(events, pd, sensors):
 
 @app.cell
 def _(cutoff, mo, network, paper_window):
-    _a = network.loc["All"]
+    _a = network.loc["All"].drop("events_per_sensor_with_events").astype(int)
     mo.md(f"""
     As of the data cutoff ({cutoff:%Y-%m-%d}), the feed lists **{_a.sensors_ever} sensors**
     ever deployed, **{_a.active_now} still active**, and **{_a.events:,} events** at
-    {_a.sensors_with_events} sensors, of which {_a.floods_4in:,} reached 4 inches. The 2024 paper
-    counted 87 sensors and 360 events from October 2020 to May 2023. Today's feed has
-    {paper_window["events_in_feed_before_june_2023"]} events and
-    {paper_window["sensors_installed_before_june_2023"]} sensors installed in that same window,
-    so the published record for those years differs from the paper's count (FloodNet reviews and
-    republishes events, so a historical count can move).
+    {_a.sensors_with_events} sensors, of which {_a.floods_4in:,} reached 4 inches.
+
+    The 2024 paper's two numbers come from different dates: 87 sensors installed "as of February
+    2024", and 360 events its team classed as floods out of 6,641 raw events from October 2020
+    to May 2023. Today's feed lists {paper_window["sensors_installed_before_march_2024"]} sensors
+    installed before March 2024, so the network is now about
+    {_a.sensors_ever / 87:.1f} times the paper's size by sensors ever deployed. For October 2020
+    to May 2023 the feed has {paper_window["events_in_feed_before_june_2023"]} events at
+    {paper_window["sensors_with_events_before_june_2023"]} sensors, not 360. The feed doesn't say
+    why; FloodNet's events go through manual review, and the paper's count may include events
+    the published feed leaves out or splits differently.
 
     Sensors are not spread evenly: compare the boroughs above. A few coastal sensors that flood
     with the tide account for many of the events, which is why the next step splits them out.
@@ -375,9 +386,7 @@ def _(UTM, events, gauges, gpd, np, pd, rain, stations, tide):
         _w = station_rain.loc[start - pd.Timedelta("3h") : peak + pd.Timedelta("1h")]
         return float(_w.sum()) if len(_w) else np.nan
 
-    _by_station = {
-        s: g.set_index("time").p01i.sort_index() for s, g in rain.groupby("station")
-    }
+    _by_station = {s: g.set_index("time").p01i.sort_index() for s, g in rain.groupby("station")}
     events["rain_in"] = [
         rain_total(_by_station[s], a, p)
         for s, a, p in zip(events.station, events.flood_start_time, events.peak_time, strict=True)
@@ -394,13 +403,21 @@ def _(UTM, events, gauges, gpd, np, pd, rain, stations, tide):
 
 
 @app.cell
-def _(events, np, pd):
+def _(events, np, pd, tide):
     def classify(
-        rain_in: pd.Series, tide_ft: pd.Series, min_rain: float = 0.10, min_tide: float = 0.0
+        rain_in: pd.Series,
+        tide_ft: pd.Series,
+        tide_reaches: pd.Series,
+        min_rain: float = 0.10,
+        min_tide: float = 0.0,
     ) -> pd.Series:
-        """Rain only, tide only, both or neither, from a rain total (in) and a tide (ft vs MHW)."""
+        """Rain only, tide only, both or neither, per event.
+
+        rain_in is inches of rain in the window, tide_ft is feet above MHW at the gauge, and
+        tide_reaches says whether the tide can reach the sensor at all.
+        """
         _rain = rain_in.fillna(0) >= min_rain
-        _tide = tide_ft.fillna(-99) >= min_tide
+        _tide = tide_reaches & (tide_ft.fillna(-99) >= min_tide)
         return pd.Series(
             np.select(
                 [_rain & ~_tide, _tide & ~_rain, _rain & _tide],
@@ -410,23 +427,46 @@ def _(events, np, pd):
             index=rain_in.index,
         )
 
-    events["cause"] = classify(events.rain_in, events.tide_ft_above_mhw)
+    # How often is the water at a gauge within 90 minutes of being above MHW, at any time?
+    _rolling = [
+        g.set_index("time").ft_above_mhw.sort_index().rolling("180min", center=True).max()
+        for _, g in tide.groupby("gauge")
+    ]
+    tide_base_rate = float((pd.concat(_rolling) >= 0).mean())
+    _gauge_only = classify(
+        events.rain_in, events.tide_ft_above_mhw, pd.Series(True, index=events.index)
+    )
+    tide_high_at_nontidal = float(
+        _gauge_only[events.tidally_influenced == "No"].isin(["tide only", "both"]).mean()
+    )
+    events["cause"] = classify(
+        events.rain_in, events.tide_ft_above_mhw, events.tidally_influenced == "Yes"
+    )
     _order = ["rain only", "tide only", "both", "neither"]
-    causes = pd.DataFrame(
-        {
-            "all events": events.cause.value_counts(),
-            "floods (4 in+)": events[events.flood].cause.value_counts(),
-            "at sensors FloodNet flags tidal": events[
-                events.tidally_influenced == "Yes"
-            ].cause.value_counts(),
-            "at sensors FloodNet flags non-tidal": events[
-                events.tidally_influenced == "No"
-            ].cause.value_counts(),
-        }
-    ).reindex(_order).fillna(0).astype(int)
+    causes = (
+        pd.DataFrame(
+            {
+                "all events": events.cause.value_counts(),
+                "floods (4 in+)": events[events.flood].cause.value_counts(),
+                "at sensors FloodNet flags tidal": events[
+                    events.tidally_influenced == "Yes"
+                ].cause.value_counts(),
+                "at sensors FloodNet flags non-tidal": events[
+                    events.tidally_influenced == "No"
+                ].cause.value_counts(),
+            }
+        )
+        .reindex(_order)
+        .fillna(0)
+        .astype(int)
+    )
     cause_share = (causes / causes.sum() * 100).round(1)
+    print(
+        f"Gauge within 90 min of MHW: {tide_base_rate:.0%} of all times; "
+        f"{tide_high_at_nontidal:.0%} of events at non-tidal sensors"
+    )
     causes
-    return cause_share, causes, classify
+    return cause_share, causes, classify, tide_base_rate, tide_high_at_nontidal
 
 
 @app.cell
@@ -436,36 +476,51 @@ def _(cause_share):
 
 
 @app.cell
-def _(mo):
-    mo.md(r"""
-    Read the two right-hand columns as a check on the method: events at sensors FloodNet flags as
-    tidal should come out mostly "tide only" or "both", and events at non-tidal sensors mostly
-    "rain only". "Neither" means no gauge saw enough rain and the nearest tide gauge was below
-    MHW: a downpour that missed the airport gauges, a sensor glitch, snow, or a tide that runs
-    higher or later in a bay than at the gauge (Jamaica Bay has no long-running NOAA gauge).
+def _(mo, tide_base_rate, tide_high_at_nontidal):
+    mo.md(f"""
+    **Why the tide only counts where FloodNet says it reaches.** Water at a gauge is within 90
+    minutes of being above MHW about {tide_base_rate:.0%} of the time, twice a day, every day.
+    At sensors FloodNet flags as non-tidal, {tide_high_at_nontidal:.0%} of events happen near a
+    high tide, so a gauge-only rule would label many inland downpours as tidal. The rule above
+    therefore lets the tide explain an event only at sensors FloodNet flags as tidally
+    influenced, and uses the gauges and rain to sort the events at those sensors. The flag still
+    can't catch a high tide backing up an outfall and flooding an inland street.
 
-    **How much do the thresholds matter?** The same counts under looser and stricter rules, and
-    with rain taken at whichever of the four stations saw the most:
+    "Neither" means the nearest airport gauge saw under 0.10 inch and the tide didn't qualify: a
+    downpour that missed the airport gauges, a sensor glitch, snow, or a tide that runs higher or
+    later in a bay than at the gauge (Jamaica Bay has no long-running NOAA gauge).
+
+    **How much do the thresholds matter?** The same shares (% of all events) under looser and
+    stricter rules, with rain taken at whichever of the four stations saw the most, and with
+    the gauges alone deciding the tide:
     """)
     return
 
 
 @app.cell
 def _(classify, events, pd):
+    _tidal = events.tidally_influenced == "Yes"
+    _everywhere = pd.Series(True, index=events.index)
     _rows = []
-    for _label, _rain_col, _r, _t in [
-        ("as above: 0.10 in rain, tide at MHW", "rain_in", 0.10, 0.0),
-        ("any rain (0.01 in)", "rain_in", 0.01, 0.0),
-        ("heavier rain (0.25 in)", "rain_in", 0.25, 0.0),
-        ("tide 0.5 ft below MHW", "rain_in", 0.10, -0.5),
-        ("tide 0.5 ft above MHW", "rain_in", 0.10, 0.5),
-        ("rain at the wettest of 4 stations", "rain_any_station_in", 0.10, 0.0),
+    for _label, _rain_col, _reach, _r, _t in [
+        ("as above: 0.10 in rain, tide at MHW", "rain_in", _tidal, 0.10, 0.0),
+        ("any rain (0.01 in)", "rain_in", _tidal, 0.01, 0.0),
+        ("heavier rain (0.25 in)", "rain_in", _tidal, 0.25, 0.0),
+        ("tide 0.5 ft below MHW", "rain_in", _tidal, 0.10, -0.5),
+        ("tide 0.5 ft above MHW", "rain_in", _tidal, 0.10, 0.5),
+        ("rain at the wettest of 4 stations", "rain_any_station_in", _tidal, 0.10, 0.0),
+        ("tide from the gauges alone, at every sensor", "rain_in", _everywhere, 0.10, 0.0),
     ]:
-        _share = classify(events[_rain_col], events.tide_ft_above_mhw, _r, _t).value_counts(
+        _share = classify(events[_rain_col], events.tide_ft_above_mhw, _reach, _r, _t).value_counts(
             normalize=True
         )
         _rows.append({"rule": _label} | (_share * 100).round(1).to_dict())
-    sensitivity = pd.DataFrame(_rows).set_index("rule")[["rain only", "tide only", "both", "neither"]]
+    sensitivity = (
+        pd.DataFrame(_rows)
+        .set_index("rule")
+        .reindex(columns=["rain only", "tide only", "both", "neither"])
+        .fillna(0)
+    )
     sensitivity
     return (sensitivity,)
 
@@ -535,7 +590,9 @@ def _(ThreadPoolExecutor, cache, get, json, sensors):
 
 @app.cell
 def _(UTM, cache, fetch, gpd, sensors, zipfile):
-    _zip = fetch("https://data.cityofnewyork.us/download/9i7c-xyvv/application%2Fzip", "stormwater.zip")
+    _zip = fetch(
+        "https://data.cityofnewyork.us/download/9i7c-xyvv/application%2Fzip", "stormwater.zip"
+    )
     _dir = cache / "stormwater"
     if not _dir.exists():
         with zipfile.ZipFile(_zip) as _z:
@@ -564,7 +621,14 @@ def _(UTM, cache, fetch, gpd, sensors, zipfile):
 
 @app.cell
 def _(events, pd, sensors):
-    _cols = ["sensor_id", "fema", "sw_moderate", "sw_moderate_strict", "sw_extreme_2080"]
+    _cols = [
+        "sensor_id",
+        "fema",
+        "sw_moderate",
+        "sw_moderate_strict",
+        "sw_extreme_2080",
+        "sw_extreme_2080_rain_only",
+    ]
     _ev = events.merge(sensors[_cols], on="sensor_id", how="left")
 
     def outside_share(frame: pd.DataFrame) -> dict[str, float]:
@@ -581,6 +645,9 @@ def _(events, pd, sensors):
             ),
             "outside stormwater extreme 2080 (20 m)": round(
                 (~frame.sw_extreme_2080).mean() * 100, 1
+            ),
+            "outside stormwater extreme 2080 rain layers (20 m)": round(
+                (~frame.sw_extreme_2080_rain_only).mean() * 100, 1
             ),
             "outside every map (FEMA 0.2% and extreme 2080)": round(
                 (_no_fema & ~frame.sw_extreme_2080).mean() * 100, 1
@@ -607,19 +674,30 @@ def _(events, pd, sensors):
 def _(mo, outside):
     _f = outside.loc["sensors with a 4 in flood"]
     _r = outside.loc["rain-only floods"]
+    _t = outside.loc["tide-only floods"]
     mo.md(f"""
     Of the {int(_f.n)} sensors that have recorded at least one 4-inch flood,
     **{_f["outside FEMA SFHA"]}% sit outside FEMA's 1% floodplain** and
     {_f["outside stormwater moderate (20 m)"]}% are more than 20 m from the city's moderate
-    stormwater flood area. For rain-only floods, {_r["outside FEMA SFHA"]}% happened outside
-    the SFHA, which is what you'd expect: FEMA doesn't map rain flooding. The stormwater maps are
-    the right comparison for those, and {_r["outside stormwater moderate (20 m)"]}% of rain-only
-    floods were more than 20 m from the moderate scenario's mapped areas.
+    stormwater flood areas. Each map misses the other kind of flood:
 
-    Remember the selection: FloodNet sites were chosen because people already knew they flood,
-    partly from 311 complaints and community input, so this is not an estimate of how much
-    flooding the maps miss citywide. It says that at known flood spots, the official maps often
-    don't show the flooding the sensors record.
+    - **Rain-only floods:** {_r["outside FEMA SFHA"]}% happened outside the SFHA, as you'd
+      expect, since FEMA doesn't map rain flooding. The stormwater map does better:
+      {_r["outside stormwater moderate (20 m)"]}% were more than 20 m from its moderate
+      scenario, and {_r["outside stormwater extreme 2080 rain layers (20 m)"]}% from the rain
+      layers of its most extreme scenario.
+    - **Tide-only floods:** {_t["outside FEMA SFHA"]}% outside the SFHA, but
+      {_t["outside stormwater moderate (20 m)"]}% outside the moderate stormwater map, which
+      models rain only.
+    - **Together**, FEMA's 0.2% zone plus the extreme 2080 stormwater scenario (its "future
+      high tides 2080" layer reaches every tide-only flood site here) leave
+      {_f["outside every map (FEMA 0.2% and extreme 2080)"]}% of flooding sensors unmapped.
+
+    So the sensors don't find flooding the maps have never imagined. They show which map
+    applies where, and that someone reading only the FEMA map would miss most of the places the
+    sensors record rain flooding. Remember the selection, too: FloodNet puts sensors where
+    flooding is known or expected (see Bauer's notes on the FloodNet data description and
+    Ceferino et al. 2023), so none of this estimates what the maps miss citywide.
     """)
     return
 
@@ -666,15 +744,21 @@ def _(UTM, cutoff, events, fetch, get, gpd, io, pd, sensor_points, sensors):
     _frames = []
     for _type, _path in _layers.items():
         _name = _path.split("/")[0]
-        _g = gpd.read_parquet(fetch(f"{_hifld}/{_path}/geoparquet/{_name}.parquet", f"{_name}.parquet"))
+        _g = gpd.read_parquet(
+            fetch(f"{_hifld}/{_path}/geoparquet/{_name}.parquet", f"{_name}.parquet")
+        )
         _g = _g[_g.STATE == "NY"]
         if "STATUS" in _g.columns and _type == "hospital":
             _g = _g[_g.STATUS == "OPEN"]
-        _frames.append(gpd.GeoDataFrame({"type": _type, "name": _g.NAME}, geometry=_g.geometry).to_crs(UTM))
-    _mta = pd.read_csv(io.BytesIO(get("https://data.ny.gov/resource/i9wp-a4ja.csv", {"$limit": 50000}).content))
+        _frames.append(
+            gpd.GeoDataFrame({"facility": _type, "name": _g.NAME}, geometry=_g.geometry).to_crs(UTM)
+        )
+    _mta = pd.read_csv(
+        io.BytesIO(get("https://data.ny.gov/resource/i9wp-a4ja.csv", {"$limit": 50000}).content)
+    )
     _frames.append(
         gpd.GeoDataFrame(
-            {"type": "subway entrance", "name": _mta.stop_name},
+            {"facility": "subway entrance", "name": _mta.stop_name},
             geometry=gpd.points_from_xy(_mta.entrance_longitude, _mta.entrance_latitude),
             crs=4326,
         ).to_crs(UTM)
@@ -687,10 +771,10 @@ def _(UTM, cutoff, events, fetch, get, gpd, io, pd, sensor_points, sensors):
     near_facilities = (
         pd.DataFrame(
             {
-                "in NYC": facilities.type.value_counts(),
+                "in NYC": facilities.facility.value_counts(),
                 "within 250 m of a frequent sensor": _near.drop_duplicates(
-                    subset=["type", "name", "geometry"]
-                ).type.value_counts(),
+                    subset=["facility", "name", "geometry"]
+                ).facility.value_counts(),
             }
         )
         .fillna(0)
@@ -698,12 +782,33 @@ def _(UTM, cutoff, events, fetch, get, gpd, io, pd, sensor_points, sensors):
     )
     near_list = (
         _near.merge(sensors[["sensor_id", "sensor_name", "floods_per_year"]], on="sensor_id")
-        .sort_values(["type", "floods_per_year"], ascending=[True, False])
-        .drop_duplicates(["type", "name"])[["type", "name", "sensor_name", "floods_per_year"]]
+        .sort_values(["facility", "floods_per_year"], ascending=[True, False])
+        .drop_duplicates(["facility", "name"])[
+            ["facility", "name", "sensor_name", "floods_per_year"]
+        ]
     )
     print(f"{int(sensors.frequent.sum())} frequently flooding sensors")
     near_facilities
     return boroughs, near_facilities, near_list
+
+
+@app.cell
+def _(mo, near_facilities, near_list, sensors):
+    _freq = sensors[sensors.frequent]
+    _n = near_facilities["within 250 m of a frequent sensor"]
+    _stations = near_list[near_list.facility == "subway entrance"].name.nunique()
+    _boroughs = ", ".join(f"{b} {n}" for b, n in _freq.borough.value_counts().items())
+    _tidal = int((_freq.tidally_influenced == "Yes").sum())
+    mo.md(f"""
+    **{len(_freq)} sensors flood often** by this rule ({_boroughs}); {_tidal} of them are
+    flagged tidal. Within 250 m of them are {_n["public school"]} public schools,
+    {_n["fire or EMS station"]} fire or EMS stations, {_n["subway entrance"]} subway entrances
+    at {_stations} stations, {_n["hospital"]} hospitals and {_n["nursing home"]} nursing homes.
+    The list below names them with the sensor that floods most often near each. A sensor
+    floods at one street corner; a school or station 200 m away may stay dry, so this is a list
+    to check, not a list of flooded buildings.
+    """)
+    return
 
 
 @app.cell
@@ -714,11 +819,7 @@ def _(near_list):
 
 @app.cell
 def _(boroughs, events, plt, results, sensor_points, sensors):
-    _main = (
-        events[events.flood]
-        .groupby("sensor_id")
-        .cause.agg(lambda c: c.value_counts().idxmax())
-    )
+    _main = events[events.flood].groupby("sensor_id").cause.agg(lambda c: c.value_counts().idxmax())
     _pts = sensor_points.assign(
         cause=sensors.sensor_id.map(_main).fillna("no 4 in flood").to_numpy(),
         floods=sensors.floods_4in.to_numpy(),
@@ -742,7 +843,9 @@ def _(boroughs, events, plt, results, sensor_points, sensors):
             alpha=0.75,
             label=f"{_cause} ({len(_p)})",
         )
-    _pts[_pts.frequent].plot(ax=_ax, facecolor="none", edgecolor="black", markersize=120, linewidth=0.8)
+    _pts[_pts.frequent].plot(
+        ax=_ax, facecolor="none", edgecolor="black", markersize=120, linewidth=0.8
+    )
     _ax.legend(title="Most common cause of a sensor's 4 in floods", loc="upper left", fontsize=8)
     _ax.set_title("FloodNet sensors: size = floods of 4 in or more; black ring = frequent")
     _ax.set_axis_off()
@@ -826,7 +929,7 @@ def _(
     )
     summary = {
         "data_cutoff": f"{cutoff:%Y-%m-%d}",
-        "network": network.loc["All"].to_dict(),
+        "network": network.loc["All"].drop("events_per_sensor_with_events").astype(int).to_dict(),
         "paper_window_in_feed": paper_window,
         "cause_share_all_events_pct": cause_share["all events"].to_dict(),
         "cause_share_floods_pct": cause_share["floods (4 in+)"].to_dict(),
