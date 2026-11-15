@@ -666,9 +666,9 @@ def _(mo):
       so the Future Risk Index agent starts from the raw README instead.
     - **Free keys count as a failure here.** The Census API (since 2026) and Data Commons
       need a free key from a sign-up form. An agent can't get one by itself, which is the
-      point of the test, but a person who registers once gets through. Set `CENSUS_API_KEY`
-      or `DC_API_KEY` to see how far each gets with a key (the Census one-liner would need it
-      appended to the URL).
+      point of the test, but a person who registers once gets through. Set `DC_API_KEY` to
+      run the Data Commons agent through its MCP server; a Census key would have to be
+      appended to the one-liner's URL by hand (#282 retests both with keys).
     - **Our test, our judgment.** The schema and vintage URLs and evidence strings are our
       reading of each publisher's docs; `doc_note` in `datasets.csv` says what we found.
     - **One model.** A stronger model may get further from a poor landing page; a weaker one
