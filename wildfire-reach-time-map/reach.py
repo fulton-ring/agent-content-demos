@@ -179,6 +179,7 @@ def _(mo):
     USFS [Wildfire Risk to Communities](https://wildfirerisk.org/download/) publishes, for every county, its national
     rank for **risk to homes** (`RISK_NATIONAL_RANK`, 0 to 1). The rule: walk counties from the highest rank down,
     breaking ties by burn-probability rank, and take the first with at least 25 fire and EMS stations in HIFLD Next.
+    We count stations for the top ten so the runners-up are visible.
     Twenty-five stations is enough for the reach bands to have shape; a county with a handful of stations would just
     be a few circles. Station counts come from the MCP server: the county outline goes into the SQL as a WKB literal.
     """)
@@ -201,7 +202,7 @@ async def _(MIN_STATIONS, download, gpd, hifld_rows, pd, polygon_sql, shapely, s
         ["RISK_NATIONAL_RANK", "BP_NATIONAL_RANK"], ascending=False
     )
     _checked = []
-    for _row in _ranked.head(30).itertuples():
+    for _row in _ranked.head(10).itertuples():
         _outline = counties.loc[_row.GEOID].geometry
         _candidates = await hifld_rows(
             f"SELECT ST_AsHexWKB(geometry) AS g FROM st WHERE ST_Intersects(geometry, {polygon_sql(_outline)})"
@@ -218,13 +219,12 @@ async def _(MIN_STATIONS, download, gpd, hifld_rows, pd, polygon_sql, shapely, s
                 "hifld_stations": _n,
             }
         )
-        if _n >= MIN_STATIONS:
-            break
     county_choice = pd.DataFrame(_checked)
-    county_geoid = county_choice.iloc[-1]["GEOID"]
-    assert county_choice.iloc[-1]["hifld_stations"] >= MIN_STATIONS, "no county in the top 30 has enough stations"
+    _eligible = county_choice[county_choice.hifld_stations >= MIN_STATIONS]
+    assert len(_eligible) > 0, "no county in the top 10 has enough stations"
+    county_geoid = _eligible.iloc[0]["GEOID"]
     county = counties.loc[county_geoid]
-    county_name = county_choice.iloc[-1]["county"]
+    county_name = _eligible.iloc[0]["county"]
     county_state = wrc.set_index("GEOID").loc[county_geoid, "STATE_NAME"]
     stage_seconds["pick_county"] = time.perf_counter() - _started
     county_choice
@@ -232,11 +232,11 @@ async def _(MIN_STATIONS, download, gpd, hifld_rows, pd, polygon_sql, shapely, s
 
 
 @app.cell
-def _(county_choice, county_name, mo):
+def _(county_choice, county_geoid, county_name, mo):
+    _pick = county_choice.set_index("GEOID").loc[county_geoid]
     mo.md(f"""
-    **{county_name}** is the county: risk-to-homes rank {county_choice.iloc[-1]["risk_to_homes_rank"]:.3f},
-    {county_choice.iloc[-1]["hifld_stations"]} HIFLD stations. The table shows every county the rule looked at
-    before it stopped.
+    **{county_name}** is the county: risk-to-homes rank {_pick["risk_to_homes_rank"]:.3f}, burn-probability rank
+    {_pick["burn_probability_rank"]:.3f}, {_pick["hifld_stations"]} HIFLD stations.
     """)
     return
 
@@ -845,6 +845,15 @@ def _(mo):
       buffered and simplified before it goes into the query, and the exact cut happens here afterwards.
     - **Wildfire Risk to Communities' 30 m rasters** come as one 11 GB zip per state for California, so hazard comes
       from the 270 m national WHP file instead. Shares of land are therefore at 270 m resolution.
+    - **Isochrones follow roads.** Valhalla's 30-minute polygons are strips along the roads, often narrower than a
+      270 m hazard cell, so the share of land "beyond 30 minutes" depends on how far from a road counts as reached.
+      That is why the result is also given by distance from reach, and with any touched cell counted.
+    - **Census details.** The per-county TIGER/Line PL block file has no population or housing counts (the
+      state-wide 2020 block file does), and OGR's `COUNTYFP20 = '073'` filter on that file silently returns nothing,
+      so blocks are picked by GEOID prefix.
+    - **The station lists disagree on position more than on existence.** Most HIFLD stations without an OSM
+      station within 300 m have one 0.4 to 5 km away with a similar name, or are on Camp Pendleton; see
+      `outputs/station_differences.csv`.
     - **Road reach is not response.** No turnout time, traffic, staffing, engine type, aircraft, staging or travel
       off the road network. Stations across the Mexican border aren't in HIFLD and aren't counted.
     """)
