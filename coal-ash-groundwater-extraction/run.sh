@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # One command: run the three notebooks as scripts, in order, so every number comes from the code the reader sees.
-# First on PacifiCorp's reports (#188), then the same notebooks on AEP's (#223).
+# First on PacifiCorp's reports (#188), then the same notebooks on AEP's (#223), then pages with several samples (#275).
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -15,3 +15,6 @@ for utility in pacificorp aep; do
   CCR_UTILITY=$utility uv run 2_extraction.py
   CCR_UTILITY=$utility uv run 3_results.py
 done
+echo "== pages with several samples"
+CCR_UTILITY=aep2022 uv run 1_documents.py
+uv run 4_multi_sample.py

@@ -19,6 +19,8 @@ with app.setup:
     import pypdfium2 as pdfium
     from PIL import Image, ImageDraw
 
+    from ccr import canonical, checks, in_mg_per_l, meaning, same, well_name
+
     HERE = Path(__file__).parent
     UTILITY = os.environ.get("CCR_UTILITY", "pacificorp")
     SUB = "" if UTILITY == "pacificorp" else UTILITY
@@ -52,78 +54,14 @@ def _():
     - anything else is a number, so `0.0088` and `0.00880` are the same value.
 
     Constituent names are matched to the twenty Appendix III and IV constituents the results table holds. Radium,
-    conductivity, alkalinity and the rest are kept in the dataset but not scored.
+    conductivity, alkalinity and the rest are kept in the dataset but not scored. These rules are the functions
+    `meaning`, `in_mg_per_l`, `same`, `canonical` and `well_name` in `ccr.py`, shared with `4_multi_sample.py`.
     """)
     return
 
 
 @app.cell
 def _():
-    CANONICAL = {
-        "antimony": "antimony",
-        "arsenic": "arsenic",
-        "barium": "barium",
-        "beryllium": "beryllium",
-        "boron": "boron",
-        "cadmium": "cadmium",
-        "calcium": "calcium",
-        "chloride": "chloride",
-        "chromium": "chromium",
-        "cobalt": "cobalt",
-        "fluoride": "fluoride",
-        "lead": "lead",
-        "lithium": "lithium",
-        "mercury": "mercury",
-        "molybdenum": "molybdenum",
-        "selenium": "selenium",
-        "sulfate": "sulfate",
-        "thallium": "thallium",
-        "total dissolved solids": "tds",
-        "tds": "tds",
-        "solids, total dissolved": "tds",
-    }
-
-    def canonical(name: str) -> str | None:
-        text = name.lower().strip()
-        if re.fullmatch(r"ph\b.*", text) or text.startswith("ph,"):
-            return "ph"
-        return next((c for k, c in CANONICAL.items() if text.startswith(k) or text.split(",")[0] == k), None)
-
-    def number(text: str | None) -> float | None:
-        match = re.search(r"\d*\.?\d+(?:[eE]-?\d+)?", (text or "").replace(",", ""))
-        return float(match.group()) if match else None
-
-    def meaning(printed: str | None, reporting_limit: str | None = None) -> tuple[bool, float | None] | None:
-        """(non-detect, value) for a printed result, or None if it can't be read."""
-        text = re.sub(r"(MG/L|UG/L|S\.?U\.?)$", "", (printed or "").strip().upper().replace(" ", ""))
-        if not text:
-            return None
-        if text.startswith("<"):
-            return True, number(text)
-        if text in ("ND", "U", "<RL", "NOTDETECTED"):
-            return True, number(reporting_limit)
-        value = number(text)
-        return None if value is None else (False, value)
-
-    def in_mg_per_l(value: tuple | None, units: str) -> tuple | None:
-        unit = units.lower().replace(" ", "")
-        if value is None or value[1] is None or unit not in ("ug/l", "µg/l", "μg/l"):
-            return value
-        return value[0], value[1] / 1000
-
-    def same(a: tuple | None, b: tuple | None) -> bool:
-        if a is None or b is None or a[0] != b[0] or a[1] is None or b[1] is None:
-            return False
-        return math.isclose(a[1], b[1], rel_tol=1e-9, abs_tol=1e-12)
-
-    def well_name(text: str | None) -> str:
-        return re.sub(r"\s+", "", (text or "").upper()).translate(str.maketrans("‐‑‒–", "----"))
-
-    return canonical, in_mg_per_l, meaning, same, well_name
-
-
-@app.cell
-def _(canonical, in_mg_per_l, meaning, well_name):
     reports = {r["id"]: r for r in json.loads((OUT / "reports.json").read_text())}
     pages = {p["key"]: p for p in json.loads((OUT / "pages.json").read_text())}
     key_rows = json.loads((OUT / "key.json").read_text())
@@ -181,32 +119,14 @@ def _():
       was "in or just before the report's year", but AEP's reports carry lab reports going back to 2016, so it
       flagged most of their pages.
 
-    Every other field is accepted as read.
+    Every other field is accepted as read. The value checks are `checks` in `ccr.py`.
     """)
     return
 
 
 @app.cell
-def _(pages, period, reduced, reports, same, well_name):
-    UNITS_OK = {"ph": {"s.u.", "su", "s.u", "units", "std units", "ph units", "none", ""}}
+def _(pages, period, reduced, reports):
     WELL_RULE = "well not on the report's well list"
-
-    def checks(analyte: str, value: tuple | None, units: str) -> list[str]:
-        failed = []
-        if value is None or value[1] is None:
-            return ["unreadable result"]
-        unit = units.lower().strip()
-        if analyte == "ph":
-            if unit not in UNITS_OK["ph"]:
-                failed.append(f"units {units}")
-            if not 0 <= value[1] <= 14:
-                failed.append("pH outside 0-14")
-        else:
-            if unit not in ("mg/l", "ug/l", "µg/l", "μg/l"):
-                failed.append(f"units {units}")
-            if not 0 <= value[1] <= 100_000:
-                failed.append("implausible value")
-        return failed
 
     fields, page_review = [], {}
     for _key, _page in pages.items():
@@ -253,7 +173,8 @@ def _():
     **Pages with more than one sample.** The frozen schema has one well and one date per page. Some AEP lab
     pages print two to four samples. On born-digital pages the text layer says how many samples a page holds,
     so we count those pages and what the models did with them. A page both models accept loses every sample
-    but one without going to review; a page both reject loses all of them.
+    but one without going to review; a page both reject loses all of them. `4_multi_sample.py` reads these
+    pages again with a second schema that allows several samples a page (#275).
     """)
     return
 
@@ -301,7 +222,7 @@ def _():
 
 
 @app.cell
-def _(adjudications, fields, key, meaning, pages, reduced, same):
+def _(adjudications, fields, key, pages, reduced):
     def loose(well: str) -> str:
         return well.replace("O", "0")
 

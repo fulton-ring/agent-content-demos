@@ -23,13 +23,14 @@ with app.setup:
     import pypdfium2.raw as pdfium_raw
 
     HERE = Path(__file__).parent
-    # PacifiCorp is the main sample (#188); CCR_UTILITY=aep runs the same steps on AEP's reports (#223).
+    # PacifiCorp is the main sample (#188); CCR_UTILITY=aep runs the same steps on AEP's reports (#223), and
+    # CCR_UTILITY=aep2022 on three of AEP's newer reports, whose lab pages hold several samples (#275).
     UTILITY = os.environ.get("CCR_UTILITY", "pacificorp")
-    assert UTILITY in ("pacificorp", "aep"), f"unknown CCR_UTILITY {UTILITY}"
+    assert UTILITY in ("pacificorp", "aep", "aep2022"), f"unknown CCR_UTILITY {UTILITY}"
     OUT = Path(os.environ.get("CCR_OUTPUT_DIR", HERE / "output")) / ("" if UTILITY == "pacificorp" else UTILITY)
     PDFS = OUT / "pdfs"
     PAGES = OUT / "pages"
-    SITE = {"pacificorp": "https://www.pacificorp.com", "aep": "https://www.aep.com"}[UTILITY]
+    SITE = "https://www.pacificorp.com" if UTILITY == "pacificorp" else "https://www.aep.com"
 
 
 @app.cell(hide_code=True)
@@ -164,6 +165,10 @@ def _():
     Most AEP reports leave the lab reports out; Northeastern (Oklahoma) and Welsh (Texas) include them. The AEP
     sample is four of those, covering two labs: AEP's Shreveport lab (2016 to 2019 samples) and AEP's Dolan lab
     (2020 samples, metals in µg/L).
+
+    **AEP from 2022 on** (`CCR_UTILITY=aep2022`, issue #275). Three Northeastern reports posted in 2023 and
+    2024 (landfill 2023 and 2024, bottom ash pond 2023), whose Dolan lab pages often print two or three samples a
+    page. Only `4_multi_sample.py` reads them; this notebook downloads them and parses their answer key.
     """)
     return
 
@@ -185,6 +190,11 @@ def _(all_reports, fetch):
             "NE-BAP-GWMonitoringCorrectiveActionRpt-031320.pdf",
             "NE-BAP-GWMonitoringCorrectiveActionRpt-01312021.pdf",
             "WH-BASP-GWMonitoringCorrectiveActionRpt-013120.pdf",
+        ],
+        "aep2022": [
+            "NE-LF-GWMonitoringCorrectiveActionRpt-01312023.pdf",
+            "NE-LF-GWMonitoringCorrectiveActionRpt-01312024.pdf",
+            "NE-BAP-GWMonitoringCorrectiveActionRpt-01312023.pdf",
         ],
     }[UTILITY]
     reports = []
@@ -248,9 +258,9 @@ def _(reports):
         "Sulfate",
         "Thallium",
     ]
-    BORN_DIGITAL_PER_REPORT, SEED = {"pacificorp": 15, "aep": 25}[UTILITY], 2018
+    BORN_DIGITAL_PER_REPORT, SEED = {"pacificorp": 15, "aep": 25, "aep2022": 25}[UTILITY], 2018
     # AEP's Dolan lab prints "Sample Number" where the others print "Sample ID".
-    SAMPLE_WORDS = {"pacificorp": ("Sample ID",), "aep": ("Sample ID", "Sample Number")}[UTILITY]
+    SAMPLE_WORDS = ("Sample ID",) if UTILITY == "pacificorp" else ("Sample ID", "Sample Number")
 
     def picture_share(page: pdfium.PdfPage) -> float:
         """The largest share of the page covered by one image."""
@@ -443,7 +453,7 @@ def _(reports, squash):
         "thallium": "thallium",
     }
     key_geosyntec, wells_geosyntec = [], {}
-    for _r in reports if UTILITY == "aep" else []:
+    for _r in reports if UTILITY != "pacificorp" else []:
         _n0 = len(key_geosyntec)
         wells_geosyntec[_r["id"]] = set()
         with pdfplumber.open(PDFS / f"{_r['id']}.pdf") as _pdf:
