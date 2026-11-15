@@ -6,15 +6,17 @@ app = marimo.App(width="medium")
 with app.setup:
     import io
     import time
-    import urllib.request
     import zipfile
     from pathlib import Path
 
+    import duckdb
     import geopandas as gpd
     import marimo as mo
     import numpy as np
     import pandas as pd
+    import requests
     import shapely
+    from rapidfuzz import fuzz
 
     from shared import (
         DATA,
@@ -166,7 +168,7 @@ def _():
     }
     _raw = pd.read_csv(fetch(CMS_POS_HOSPITALS, "cms-pos-hospitals-2026q3.csv"), dtype=str, encoding="latin1")
     _raw = _raw[_raw["PRVDR_CTGRY_CD"] == "01"]
-    pos = pd.DataFrame(
+    pos_records = pd.DataFrame(
         {
             "registry_id": _raw["PRVDR_NUM"],
             "reg_name": _raw["FAC_NAME"],
@@ -182,7 +184,7 @@ def _():
             "reg_in_scope": ~_raw["PRVDR_CTGRY_SBTYP_CD"].isin(["03", "20"]),
         }
     ).reset_index(drop=True)
-    pos["reg_link"] = "https://www.medicare.gov/care-compare/details/hospital/" + pos["registry_id"]
+    pos_records["reg_link"] = "https://www.medicare.gov/care-compare/details/hospital/" + pos_records["registry_id"]
 
     _types = {
         "3": "home health agency",
@@ -219,10 +221,10 @@ def _():
         }
     ).reset_index(drop=True)
     mo.md(
-        f"CMS hospitals: {len(pos):,} records, {(pos['reg_status'] == 'active').sum():,} active. "
+        f"CMS hospitals: {len(pos_records):,} records, {(pos_records['reg_status'] == 'active').sum():,} active. "
         f"Other certified providers in iQIES: {len(iqies):,}."
     )
-    return iqies, pos
+    return iqies, pos_records
 
 
 @app.cell(hide_code=True)
@@ -243,24 +245,22 @@ def _():
         path = DATA / name
         if not path.exists():
             answers = []
-            for start in range(0, len(rows), 5000):
+            for start in range(0, len(rows), 1000):
                 body = io.StringIO()
-                rows.iloc[start : start + 5000].to_csv(body, header=False, index=False)
-                boundary = "----spike-geocode"
-                payload = (
-                    f'--{boundary}\r\nContent-Disposition: form-data; name="benchmark"\r\n\r\nPublic_AR_Current\r\n'
-                    f'--{boundary}\r\nContent-Disposition: form-data; name="addressFile"; filename="a.csv"\r\n'
-                    f"Content-Type: text/csv\r\n\r\n{body.getvalue()}\r\n--{boundary}--\r\n"
-                ).encode()
-                request = urllib.request.Request(
-                    CENSUS_GEOCODER,
-                    data=payload,
-                    headers={"Content-Type": f"multipart/form-data; boundary={boundary}", "User-Agent": USER_AGENT},
-                )
-                with urllib.request.urlopen(request, timeout=1800) as response:
-                    if response.status != 200:
-                        raise RuntimeError(f"Census geocoder returned HTTP {response.status}")
-                    answers.append(response.read().decode())
+                rows.iloc[start : start + 1000].to_csv(body, header=False, index=False)
+                for attempt in range(4):
+                    response = requests.post(
+                        CENSUS_GEOCODER,
+                        data={"benchmark": "Public_AR_Current"},
+                        files={"addressFile": ("addresses.csv", body.getvalue(), "text/csv")},
+                        headers={"User-Agent": USER_AGENT},
+                        timeout=600,
+                    )
+                    if response.status_code == 200:
+                        break
+                    time.sleep(10 * 2**attempt)
+                response.raise_for_status()
+                answers.append(response.text if response.text.endswith("\n") else response.text + "\n")
             path.write_text("".join(answers))
         out = pd.read_csv(path, header=None, dtype=str, names=list(range(8)))
         xy = out[5].str.split(",", expand=True)
@@ -270,14 +270,18 @@ def _():
 
 
 @app.cell
-def _(geocode, pos):
-    _g = geocode(pos[["registry_id", "reg_address", "reg_city", "reg_state", "reg_zip"]], "census-geocode-cms-pos.csv")
-    _g = _g.set_index("id")
-    pos["reg_lon"] = pos["registry_id"].map(_g["lon"])
-    pos["reg_lat"] = pos["registry_id"].map(_g["lat"])
-    pos["reg_location"] = "geocoded address, " + pos["registry_id"].map(_g["geocode"]).fillna("no match").str.lower()
+def _(geocode, pos_records):
+    _g = geocode(
+        pos_records[["registry_id", "reg_address", "reg_city", "reg_state", "reg_zip"]], "census-geocode-cms-pos.csv"
+    ).set_index("id")
+    pos = pos_records.assign(
+        reg_lon=pos_records["registry_id"].map(_g["lon"]),
+        reg_lat=pos_records["registry_id"].map(_g["lat"]),
+        reg_location="geocoded address, "
+        + pos_records["registry_id"].map(_g["geocode"]).fillna("no match").str.lower(),
+    )
     pos["reg_location"].value_counts()
-    return
+    return (pos,)
 
 
 @app.cell(hide_code=True)
@@ -373,7 +377,7 @@ def _():
     _gens = _gens[pd.to_numeric(_gens["Plant Code"], errors="coerce").notna()]
     _gens["Plant Code"] = _gens["Plant Code"].astype(int).astype(str)
     _best = _gens.groupby("Plant Code").agg(rank=("rank", "min"), technology=("Technology", "first"))
-    _year = _gens[_gens["sheet"] == "Retired and Canceled"].groupby("Plant Code")["Retirement Year"].max()
+    _year = pd.to_numeric(_gens["Retirement Year"], errors="coerce").groupby(_gens["Plant Code"]).max()
     _status = _best["rank"].map({0: "active", 1: "proposed", 2: "retired", 3: "cancelled"})
     eia = pd.DataFrame(
         {
@@ -481,9 +485,73 @@ def _(ccd, eia, hifld, osm, pos):
         ]
         _con.sql(f"COPY ({' UNION ALL '.join(_selects)}) TO '{places_path}.part' (FORMAT parquet)")
         Path(f"{places_path}.part").rename(places_path)
-    places = pd.read_parquet(places_path).drop_duplicates("id")
-    mo.md(f"{len(_cells):,} grid cells; {len(places):,} Overture places in them.")
-    return (places,)
+    _kinds = sorted({c for cs in LAYERS["overture_categories"] for c in cs if not c.startswith("infrastructure")})
+    _in = ", ".join(f"'{c}'" for c in _kinds)
+    _con = duckdb.connect()
+    _total = _con.sql(f"SELECT count(*) FROM '{places_path}'").fetchone()
+    places = _con.sql(
+        f"""SELECT DISTINCT ON (id) id, name, basic_category, coalesce(category, basic_category) AS category,
+                   operating_status, lon, lat
+            FROM '{places_path}' WHERE basic_category IN ({_in}) OR category IN ({_in})"""
+    ).df()
+    _n = _total[0] if _total else 0
+    mo.md(f"{len(_cells):,} grid cells; {_n:,} Overture places in them, {len(places):,} of them same-kind.")
+    return places, places_path
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    **Same name, any category.** Sixteen million places are too many to compare name by name in memory, so DuckDB
+    first pairs each point with the places within 250 m that share a word of its name (one of its distinctive words,
+    or any word if it has none), and only those pairs are scored with the same name matcher.
+    """)
+    return
+
+
+@app.cell
+def _(ccd, eia, hifld, places_path, pos):
+    _seeds = [hifld[["lon", "lat", "name"]].assign(key="h" + hifld.index.astype(str))]
+    for _layer, _reg in [("Hospitals", pos), ("Public schools", ccd), ("Power plants", eia)]:
+        _r = _reg.rename(columns={"reg_lon": "lon", "reg_lat": "lat", "reg_name": "name"})[["lon", "lat", "name"]]
+        _seeds.append(_r.assign(key=f"{_layer}:" + _r.index.astype(str)))
+    _seeds = pd.concat(_seeds).dropna(subset=["lon", "lat"])
+    _norm = {n: normalise(n) for n in _seeds["name"].unique()}
+    _seeds["word"] = [(_norm[n][1] or _norm[n][0]).split() for n in _seeds["name"]]
+    _seeds = _seeds.explode("word").dropna(subset=["word"])
+    _con = duckdb.connect()
+    _con.sql("SET memory_limit = '4GB'")
+    _con.register("seeds", _seeds[["key", "lon", "lat", "word"]])
+    _pairs = _con.sql(f"""
+        WITH s AS (
+            SELECT key, lon, lat, word, CAST(floor(lon / 0.01) AS INTEGER) + dx AS cx,
+                   CAST(floor(lat / 0.01) AS INTEGER) + dy AS cy
+            FROM seeds, (SELECT unnest([-1, 0, 1]) AS dx), (SELECT unnest([-1, 0, 1]) AS dy)
+        ),
+        p AS (
+            SELECT id, name, coalesce(category, basic_category) AS category, operating_status, lon, lat,
+                   CAST(floor(lon / 0.01) AS INTEGER) AS cx, CAST(floor(lat / 0.01) AS INTEGER) AS cy,
+                   unnest(string_split_regex(lower(name), '[^a-z0-9]+')) AS word
+            FROM '{places_path}' WHERE name IS NOT NULL
+        )
+        SELECT DISTINCT s.key, p.id, p.name, p.category, p.operating_status,
+               sqrt(pow((p.lon - s.lon) * 111320 * cos(radians(s.lat)), 2) + pow((p.lat - s.lat) * 110540, 2))
+                 AS distance_m
+        FROM s JOIN p ON s.word = p.word AND s.cx = p.cx AND s.cy = p.cy
+        WHERE sqrt(pow((p.lon - s.lon) * 111320 * cos(radians(s.lat)), 2) + pow((p.lat - s.lat) * 110540, 2))
+              <= {NEAR}
+    """).df()
+    _names = dict(zip(_seeds["key"], _seeds["name"], strict=False))
+    _pnorm = {n: normalise(n) for n in _pairs["name"].unique()}
+    _pairs["name_score"] = [
+        name_score(_norm[_names[k]], _pnorm[n]) for k, n in zip(_pairs["key"], _pairs["name"], strict=True)
+    ]
+    _pairs = _pairs[_pairs["name_score"] >= MATCH].sort_values(["distance_m", "id"])
+    ov_any = _pairs.drop_duplicates("key").set_index("key")
+    ov_any = ov_any.add_prefix("ov_any_")
+    ov_any["ov_any_distance_m"] = ov_any["ov_any_distance_m"].round(1)
+    mo.md(f"{len(_pairs):,} same-name pairs within 250 m; {len(ov_any):,} points have one.")
+    return (ov_any,)
 
 
 @app.cell(hide_code=True)
@@ -541,48 +609,773 @@ def _():
 
 
 @app.cell
-def _(best_within, ccd, eia, hifld, osm, places, pos, to_metric):
+def _(best_within, ccd, eia, hifld, osm, ov_any, places, pos, to_metric):
     _categories = {
         layer: set(spec["overture_categories"]) for layer, spec in LAYERS.iterrows() if layer != "Power plants"
     }
-    _places = places.assign(category=places["category"].fillna(places["basic_category"]))
-    _places_m = to_metric(_places)
+    _places_m = to_metric(places)
     _osm_open_m = to_metric(osm[~osm["osm_closed"]].rename(columns={"osm_id": "id"}))
     _osm_closed_m = to_metric(osm[osm["osm_closed"]].rename(columns={"osm_id": "id"}))
     _registries = {"Hospitals": pos, "Public schools": ccd, "Power plants": eia}
 
-    def open_map_evidence(points: pd.DataFrame, layer: str) -> pd.DataFrame:
-        """What OSM and Overture have within 250 m of each point (lon, lat, name), same kind and any kind."""
+    def open_map_evidence(points: pd.DataFrame, layer: str, keys: pd.Series | None = None) -> pd.DataFrame:
+        """What OSM and Overture have within 250 m of each point (lon, lat, name): same kind, and (for points
+        with a key) the same-name Overture place of any category."""
         pts = to_metric(points)
-        kind = _places_m[
-            _places_m["basic_category"].isin(_categories.get(layer, set()))
-            | _places_m["category"].isin(_categories.get(layer, set()))
-        ]
+        kinds = _categories.get(layer, set())
+        kind = _places_m[_places_m["basic_category"].isin(kinds) | _places_m["category"].isin(kinds)]
         parts = [
             best_within(pts, _osm_open_m[_osm_open_m["layer"] == layer], NEAR, "osm", ["osm_tag"]),
             best_within(pts, _osm_closed_m[_osm_closed_m["layer"] == layer], NEAR, "osm_closed", ["osm_tag"]),
             best_within(pts, kind, NEAR, "ov", ["category", "operating_status"]),
-            best_within(pts, _places_m, NEAR, "ov_any", ["category", "operating_status"]),
         ]
         out = pd.DataFrame(index=points.index)
         for part in parts:
             out = out.join(part)
+        if keys is not None:
+            out = out.join(ov_any.reindex(keys.values).set_axis(points.index))
         return out
 
     _evidence = []
     for _layer in LAYERS.index:
         _h = hifld[hifld["layer"] == _layer]
-        _evidence.append(open_map_evidence(_h[["lon", "lat", "name"]], _layer))
+        _evidence.append(open_map_evidence(_h[["lon", "lat", "name"]], _layer, "h" + _h.index.astype(str)))
     hifld_maps = pd.concat(_evidence)
-    registry_maps = {
-        _layer: open_map_evidence(
-            _reg.rename(columns={"reg_lon": "lon", "reg_lat": "lat", "reg_name": "name"})[["lon", "lat", "name"]],
-            _layer,
-        )
-        for _layer, _reg in _registries.items()
-    }
+    registry_maps = {}
+    for _layer, _reg in _registries.items():
+        _r = _reg.rename(columns={"reg_lon": "lon", "reg_lat": "lat", "reg_name": "name"})[["lon", "lat", "name"]]
+        registry_maps[_layer] = open_map_evidence(_r, _layer, f"{_layer}:" + _r.index.astype(str))
     hifld_maps.notna().groupby(hifld["layer"]).mean().round(2)[["osm_id", "osm_closed_id", "ov_id", "ov_any_id"]]
     return hifld_maps, open_map_evidence, registry_maps
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ## Linking each HIFLD record to its registry entry
+
+    - **Schools and power plants** join by ID: HIFLD's `NCESID` is the NCES school ID, its `PLANT_CODE` the EIA
+      plant code. We still compare names and locations: a name that doesn't match (score under 60) or a registry
+      record with the same name nearer the point than the ID's own record is an **ID conflict**.
+    - **Hospitals** have no CMS ID in HIFLD, so we link by name and address: every CMS hospital in the same ZIP
+      code or within 2 km of the HIFLD point, scored on name and on street (house number and street name). A link
+      is a name match, or the same street address with a name score of 50 or more. An active CMS record wins over a
+      terminated one at the same place, because a hospital that converts (to critical access, say) gets a new CCN
+      and the old one is terminated with code 07. A name score of 60–84 with nothing else is a **weak** link.
+    - A HIFLD hospital with no CMS hospital link is looked up in the iQIES file the same way, to find nursing
+      homes, surgery centres and clinics filed as hospitals.
+    """)
+    return
+
+
+@app.cell
+def _(best_within, ccd, eia, hifld, iqies, pos, to_metric):
+    def street_key(address: pd.Series) -> pd.Series:
+        """House number and the first word of the street name, e.g. '600 E Alabama Ave' -> '600 ALABAMA'."""
+        parts = (
+            address.fillna("")
+            .str.upper()
+            .str.extract(r"^\s*(\d+)[A-Z]?\s+(?:(?:N|S|E|W|NE|NW|SE|SW|NORTH|SOUTH|EAST|WEST)\.?\s+)?([A-Z0-9]+)")
+        )
+        return (parts[0] + " " + parts[1]).where(parts[0].notna())
+
+    def strict_score(a: str, b: str) -> float:
+        """The usual name score, averaged with a word-order-free ratio, so that one shared word ("Longview")
+        doesn't make "Longview Rehabilitation Hospital" the same as "Longview Regional Medical Center"."""
+        na, nb = normalise(a), normalise(b)
+        lenient = name_score(na, nb)
+        return (lenient + fuzz.token_sort_ratio(na[1] or na[0], nb[1] or nb[0])) / 2 if lenient else 0.0
+
+    _h = hifld[hifld["layer"] == "Hospitals"].copy()
+    _h["street"] = street_key(_h["address"])
+    _pos = pos.assign(street=street_key(pos["reg_address"]))
+    _byzip = _h.reset_index(names="h").merge(
+        _pos, left_on=["state", "zip"], right_on=["reg_state", "reg_zip"], suffixes=("", "_reg")
+    )
+    _near = gpd.sjoin(
+        to_metric(_h)[["geometry"]],
+        to_metric(_pos.rename(columns={"reg_lon": "lon", "reg_lat": "lat"}))[["registry_id", "geometry"]],
+        predicate="dwithin",
+        distance=2000,
+    ).reset_index(names="h")[["h", "registry_id"]]
+    _near = _near.merge(_h.reset_index(names="h"), on="h").merge(_pos, on="registry_id", suffixes=("", "_reg"))
+    _pairs = pd.concat([_byzip, _near[_byzip.columns]]).drop_duplicates(["h", "registry_id"])
+    _pairs["link_score"] = [strict_score(a, b) for a, b in zip(_pairs["name"], _pairs["reg_name"], strict=True)]
+    _pairs["same_street"] = _pairs["street"].notna() & (_pairs["street"] == _pairs["street_reg"])
+    _pairs["strong"] = (_pairs["link_score"] >= MATCH) | (_pairs["same_street"] & (_pairs["link_score"] >= 50))
+    _pairs["weak"] = ~_pairs["strong"] & (_pairs["link_score"] >= 60)
+    _pairs["active"] = _pairs["reg_status"] == "active"
+    _pairs = _pairs[_pairs["strong"] | _pairs["weak"]].sort_values(
+        ["strong", "active", "link_score", "registry_id"], ascending=[False, False, False, True]
+    )
+    _hosp = _pairs.drop_duplicates("h").set_index("h")
+    _hosp["link"] = np.where(_hosp["strong"], "name and address", "weak name")
+
+    _iq = iqies.assign(street=street_key(iqies["iqies_address"]))
+    _iqp = _h.reset_index(names="h").merge(_iq, left_on=["state", "zip"], right_on=["iqies_state", "iqies_zip"])
+    _iqp["score"] = [strict_score(a, b) for a, b in zip(_iqp["name"], _iqp["iqies_name"], strict=True)]
+    _same = _iqp["street_x"].notna() & (_iqp["street_x"] == _iqp["street_y"])
+    _iqp = _iqp[(_iqp["score"] >= MATCH) | (_same & (_iqp["score"] >= 50))]
+    _iq_best = _iqp.sort_values(["score", "iqies_id"], ascending=[False, True]).drop_duplicates("h").set_index("h")
+
+    _reg_cols = [c for c in pos.columns if c.startswith("reg") or c == "registry_id"]
+    _frames = [
+        _hosp[["link", "link_score", *_reg_cols]].join(_iq_best[["iqies_id", "iqies_name", "iqies_type"]], how="outer")
+    ]
+    for _layer, _reg in [("Public schools", ccd), ("Power plants", eia)]:
+        _x = hifld[hifld["layer"] == _layer]
+        _ids = _x["hifld_id"].str.replace(r"\.0$", "", regex=True)
+        _ids = _ids.str.zfill(12) if _layer == "Public schools" else _ids
+        _joined = (
+            pd.DataFrame({"registry_id": _ids}, index=_x.index)
+            .merge(_reg, on="registry_id", how="left")
+            .set_index(_x.index)
+        )
+        _joined["link"] = np.where(_joined["reg_name"].notna(), "id", None)
+        _names = {n: normalise(n) for n in pd.concat([_x["name"], _joined["reg_name"].fillna("")]).unique()}
+        _joined["link_score"] = [
+            name_score(_names[a], _names[b]) if isinstance(b, str) else np.nan
+            for a, b in zip(_x["name"], _joined["reg_name"], strict=True)
+        ]
+        # The registry record with a matching name nearest the HIFLD point, whatever its ID.
+        _spatial = best_within(
+            to_metric(_x[["lon", "lat", "name"]]),
+            to_metric(
+                _reg.rename(columns={"registry_id": "id", "reg_name": "name", "reg_lon": "lon", "reg_lat": "lat"})
+            ),
+            NEAR,
+            "near",
+            [],
+        )
+        _joined = _joined.join(_spatial[["near_id", "near_name_score"]])
+        _frames.append(_joined)
+    linked = pd.concat(_frames)
+    linked = hifld.join(linked, how="left")
+    _h_pts = gpd.GeoSeries.from_xy(linked["lon"], linked["lat"], crs=4326).to_crs(METRIC)
+    _r_pts = gpd.GeoSeries.from_xy(linked["reg_lon"], linked["reg_lat"], crs=4326).to_crs(METRIC)
+    linked["reg_distance_m"] = _h_pts.distance(_r_pts).round(1)
+    linked["id_conflict"] = (
+        (linked["near_name_score"] >= MATCH)
+        & (linked["near_id"] != linked["registry_id"])
+        & ((linked["link_score"].fillna(0) < 60) | (linked["reg_distance_m"].fillna(np.inf) > NEAR))
+    )
+    # Two HIFLD records linked to one registry entry. A hospital CCN can cover several campuses, so for hospitals
+    # only records within 250 m of each other count.
+    _ids = linked.loc[linked["link"].notna(), ["layer", "registry_id", "lon", "lat"]].reset_index(names="a")
+    _pairs = _ids.merge(_ids, on=["layer", "registry_id"], suffixes=("", "_b"))
+    _pairs = _pairs[_pairs["a"] != _pairs["a_b"]]
+    _gap = np.hypot(
+        (_pairs["lon"] - _pairs["lon_b"]) * 111_320 * np.cos(np.radians(_pairs["lat"])),
+        (_pairs["lat"] - _pairs["lat_b"]) * 110_540,
+    )
+    _pairs = _pairs[(_pairs["layer"] != "Hospitals") | (_gap <= NEAR)]
+    linked["duplicate_registry"] = linked.index.isin(_pairs["a"])
+    pd.crosstab(linked["layer"], linked["link"].fillna("none"))
+    return (linked,)
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ## Proposals, and when the sources agree
+
+    Each HIFLD record gets one proposal from its registry entry:
+
+    | Registry says | Proposal |
+    |---|---|
+    | no entry | **remove** (`not_in_registry`) |
+    | terminated, closed, inactive, retired or cancelled | **remove** (`registry_closed`) |
+    | proposed or future (not built yet) | **remove** if HIFLD calls it operating (`registry_not_built_yet`) |
+    | another kind of facility (iQIES provider, a vet by name, another NCES school type) | **retype** |
+    | active, but more than 250 m from the HIFLD point | **move** |
+    | active, within 250 m | **keep** |
+
+    Then the open maps vote. *On the maps* means a same-name OSM feature or Overture place (same kind, or any
+    category) within 250 m, or a same-kind one within 50 m. *Closed on the maps* means a same-name OSM feature with
+    a lifecycle prefix, or a same-name Overture place marked `permanently_closed`.
+
+    - **keep** is final when the facility is on the maps; else it goes to review (`registry_active_not_on_maps`).
+    - **remove** is final when the facility is *not* on the maps; else review (`..._but_on_maps`).
+    - **retype** is final when no same-kind map feature carries the name; else review. A school-type change is final
+      on NCES alone, since neither map records school type.
+    - **move** is final when the maps have the name within 250 m of the registry point and not of HIFLD's, and the
+      registry point isn't a geocoded address; else review (`location_differs`).
+    - These always go to review: a weak name link, an ID whose name doesn't match (`id_name_mismatch`, score under
+      60), an ID conflict, and two HIFLD records linked to one registry entry (`duplicate_registry`).
+    - **Fire/EMS and police** have no registry: on the maps is a final keep, closed on the maps or absent from them
+      is a removal for review. Federal hospitals (military, VA, Indian Health Service) aren't certified by CMS, so
+      they're treated the same way.
+    """)
+    return
+
+
+@app.cell
+def _(ccd, eia, hifld_maps, linked, pos, registry_maps):
+    _r = linked.join(hifld_maps)
+    # Is the registry's own point on the maps (same name within 250 m)? Used to settle a move.
+    _reg_on_maps = {}
+    for _layer, _reg in [("Hospitals", pos), ("Public schools", ccd), ("Power plants", eia)]:
+        _ev = registry_maps[_layer]
+        _named = (_ev[["osm_name_score", "ov_name_score", "ov_any_name_score"]].fillna(0) >= MATCH).any(axis=1)
+        _reg_on_maps[_layer] = _named.groupby(_reg.loc[_ev.index, "registry_id"].values).max().to_dict()
+    _r["reg_on_maps"] = [
+        bool(_reg_on_maps.get(lay, {}).get(rid, False)) for lay, rid in zip(_r["layer"], _r["registry_id"], strict=True)
+    ]
+    _open = lambda s: s.fillna("") != "permanently_closed"  # noqa: E731
+    _named = lambda p: _r[f"{p}_name_score"].fillna(0) >= MATCH  # noqa: E731
+    _r["on_maps"] = (
+        _named("osm")
+        | (_named("ov") & _open(_r["ov_operating_status"]))
+        | (_named("ov_any") & _open(_r["ov_any_operating_status"]))
+        | (_r["osm_distance_m"] <= 50)
+        | (_r["ov_distance_m"] <= 50)
+    )
+    _r["closed_on_maps"] = _named("osm_closed") | (_named("ov_any") & ~_open(_r["ov_any_operating_status"]))
+    _r["same_kind_named"] = _named("osm") | _named("ov")
+    _federal = (_r["layer"] == "Hospitals") & (
+        (_r["facility_type"] == "MILITARY")
+        | _r["name"].str.contains(r"\bVA\b|VETERANS|INDIAN HEALTH|\bIHS\b|PHS INDIAN", case=False, regex=True)
+    )
+    _vet = (_r["layer"] == "Hospitals") & _r["name"].str.contains(
+        r"\bANIMAL\b|VETERINAR|\bPET\b|EQUINE", case=False, regex=True
+    )
+    _planned_in_hifld = _r["status"].isin(["P", "L", "T", "U", "V", "TS", "OT"])
+
+    def propose(row: pd.Series, federal: bool, vet: bool, planned: bool) -> tuple[str, str, bool]:
+        """(proposal, reason, agreed) for one HIFLD record."""
+        has_registry = row["layer"] in ("Hospitals", "Public schools", "Power plants") and not federal
+        linked_ok = isinstance(row["link"], str)
+        if vet:
+            return "retype", "veterinary_by_name", not row["same_kind_named"]
+        if not has_registry:
+            if row["on_maps"] and not row["closed_on_maps"]:
+                return "keep", "on_maps", True
+            reason = "federal_not_in_cms" if federal else "no_registry"
+            reason += "_closed_on_maps" if row["closed_on_maps"] else "_not_on_maps"
+            return "remove", reason, False
+        if row["layer"] == "Hospitals" and isinstance(row["iqies_type"], str) and row.get("reg_status") != "active":
+            return "retype", "registry_other_provider_type", not row["same_kind_named"]
+        if not linked_ok:
+            return (
+                ("remove", "not_in_registry_but_on_maps", False)
+                if row["on_maps"]
+                else ("remove", "not_in_registry", True)
+            )
+        status = row["reg_status"]
+        if status in ("proposed", "future"):
+            if planned:
+                return "keep", "registry_not_built_yet_hifld_agrees", True
+            return "remove", "registry_not_built_yet", False
+        if status != "active":
+            if row["on_maps"] and not row["closed_on_maps"]:
+                return "remove", "registry_closed_but_on_maps", False
+            return "remove", f"registry_{status.replace(' ', '_')}", True
+        if (
+            row["layer"] == "Public schools"
+            and isinstance(row["reg_type"], str)
+            and row["reg_type"] != row["facility_type"]
+        ):
+            return "retype", "school_type_differs", True
+        if row["reg_distance_m"] > NEAR:
+            if str(row["reg_location"]).startswith("geocoded"):
+                return "move", "location_differs_geocoded", False
+            if row["layer"] == "Power plants" and any(k in row["facility_type"] for k in ("SOLAR", "WIND")):
+                return "move", "location_differs_wind_solar", False
+            if row["reg_in_scope"] is False:
+                return "move", "location_differs_virtual", False
+            if row["reg_on_maps"] and not row["on_maps"]:
+                return "move", "location_differs_maps_agree", True
+            return "move", "location_differs", False
+        if row["closed_on_maps"] and not row["on_maps"]:
+            return "keep", "registry_active_closed_on_maps", False
+        if not row["on_maps"]:
+            return "keep", "registry_active_not_on_maps", False
+        return "keep", "registry_active_on_maps", True
+
+    _out = [
+        propose(row, f, v, p)
+        for (_, row), f, v, p in zip(_r.iterrows(), _federal, _vet, _planned_in_hifld, strict=True)
+    ]
+    _r["proposal"] = [o[0] for o in _out]
+    _r["reason"] = [o[1] for o in _out]
+    _r["agreed"] = [o[2] for o in _out]
+    # Problems with the link itself send any proposal to review, with that as the reason.
+    for _flag, _reason in [
+        (_r["link"] == "weak name", "weak_name_match"),
+        ((_r["link"] == "id") & (_r["link_score"] < 60), "id_name_mismatch"),
+        (_r["id_conflict"].fillna(False).astype(bool), "id_conflict"),
+        (_r["duplicate_registry"].fillna(False).astype(bool), "duplicate_registry"),
+    ]:
+        _r.loc[_flag, "reason"] = _reason
+        _r.loc[_flag, "agreed"] = False
+    proposals = _r
+    pd.crosstab([proposals["layer"], proposals["proposal"]], proposals["agreed"].map({True: "agreed", False: "review"}))
+    return (proposals,)
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ## Additions
+
+    A registry facility is an **add** when it is active, has no HIFLD record of that layer by ID or link, and no
+    HIFLD record of that layer within 250 m with a matching name. It is final when it's on the open maps at the
+    registry's location; otherwise it goes to review (`add_not_on_maps`, or `add_no_location` without
+    coordinates). Records likely out of HIFLD's scope (virtual schools, transplant centres, religious non-medical
+    institutions) are counted but not proposed.
+
+    For fire/EMS and police, an add is a same-kind OSM feature with no HIFLD record within 250 m that Overture also
+    has by name within 250 m: two independent maps agreeing. One-sided features aren't proposed (see
+    `crosswalk.py`'s `other_only.csv` for those counts).
+    """)
+    return
+
+
+@app.cell
+def _(best_within, ccd, eia, hifld, open_map_evidence, osm, pos, proposals, registry_maps, to_metric):
+    _hifld_m = to_metric(hifld)
+    _adds = []
+    for _layer, _reg in [("Hospitals", pos), ("Public schools", ccd), ("Power plants", eia)]:
+        _taken = set(proposals.loc[proposals["layer"] == _layer, "registry_id"].dropna())
+        _cand = _reg[(_reg["reg_status"] == "active") & ~_reg["registry_id"].isin(_taken)].copy()
+        _near = best_within(
+            to_metric(_cand.rename(columns={"reg_lon": "lon", "reg_lat": "lat", "reg_name": "name"})),
+            _hifld_m[_hifld_m["layer"] == _layer].rename(columns={"hifld_id": "id"}),
+            NEAR,
+            "hifld",
+            [],
+        )
+        _cand = _cand.join(_near).join(registry_maps[_layer])
+        _cand = _cand[~(_cand["hifld_name_score"].fillna(0) >= MATCH)]
+        _cand["layer"] = _layer
+        _adds.append(_cand)
+    adds = pd.concat(_adds)
+    _named = lambda p: adds[f"{p}_name_score"].fillna(0) >= MATCH  # noqa: E731
+    adds["on_maps"] = (
+        _named("osm") | _named("ov") | _named("ov_any") | (adds["osm_distance_m"] <= 50) | (adds["ov_distance_m"] <= 50)
+    )
+    adds["proposal"] = np.where(adds["reg_in_scope"], "add", "out of scope")
+    adds["reason"] = np.select(
+        [adds["reg_lon"].isna(), adds["on_maps"]], ["add_no_location", "add_on_maps"], "add_not_on_maps"
+    )
+    adds["agreed"] = adds["reason"] == "add_on_maps"
+
+    _two_maps = []
+    for _layer in ["Fire and EMS stations", "Local law enforcement"]:
+        _o = osm[(osm["layer"] == _layer) & ~osm["osm_closed"]].rename(columns={"osm_id": "registry_id"})
+        _o = _o.join(
+            best_within(
+                to_metric(_o),
+                _hifld_m[_hifld_m["layer"] == _layer].rename(columns={"hifld_id": "id"}),
+                NEAR,
+                "hifld",
+                [],
+            )
+        )
+        _o = _o[_o["hifld_id"].isna()]
+        _o = _o.join(
+            open_map_evidence(_o[["lon", "lat", "name"]], _layer)[
+                ["ov_id", "ov_name", "ov_name_score", "ov_category", "ov_operating_status", "ov_distance_m"]
+            ]
+        )
+        _o = _o[_o["ov_name_score"].fillna(0) >= MATCH]
+        _two_maps.append(
+            _o.assign(
+                layer=_layer,
+                reg_name=_o["name"],
+                reg_lon=_o["lon"],
+                reg_lat=_o["lat"],
+                reg_status="on OSM and Overture",
+                reg_link="https://www.openstreetmap.org/" + _o["registry_id"],
+                osm_id=_o["registry_id"],
+                proposal="add",
+                reason="add_on_both_maps",
+                agreed=True,
+            )
+        )
+    adds = pd.concat([adds, *_two_maps], ignore_index=True)
+    pd.crosstab([adds["layer"], adds["proposal"]], adds["agreed"].map({True: "agreed", False: "review"}))
+    return (adds,)
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ## Review queues
+
+    Every proposal that isn't final goes to `output/review_queue_<layer>.csv`, one row per record, sorted by
+    priority (the reasons most likely to be a real error first, then the largest distance). Each row says what
+    every source says, the distances, links to the OSM feature, the registry entry and dated imagery (NAIP in the
+    Planetary Computer explorer, and Esri Wayback for before/after), and has empty `reviewer_decision` and
+    `reviewer_note` columns.
+
+    **Reading decisions back.** Copy a queue into `review/` and fill in `reviewer_decision` with `accept` (the
+    proposal stands), `reject` (leave HIFLD as it is), or another action (`keep`, `remove`, `retype`, `move`,
+    `add`). On the next run those records leave the queue and the decision goes into the outputs.
+    """)
+    return
+
+
+@app.cell
+def _(adds, proposals):
+    _priority = [
+        "registry_closed_but_on_maps",
+        "id_conflict",
+        "duplicate_registry",
+        "location_differs",
+        "registry_not_built_yet",
+        "not_in_registry_but_on_maps",
+        "registry_other_provider_type",
+        "veterinary_by_name",
+        "registry_active_closed_on_maps",
+        "no_registry_closed_on_maps",
+        "federal_not_in_cms_closed_on_maps",
+        "weak_name_match",
+        "id_name_mismatch",
+        "location_differs_geocoded",
+        "location_differs_wind_solar",
+        "location_differs_virtual",
+        "registry_active_not_on_maps",
+        "add_not_on_maps",
+        "add_no_location",
+        "federal_not_in_cms_not_on_maps",
+        "no_registry_not_on_maps",
+    ]
+    _h = proposals.assign(record="HIFLD")
+    _a = adds[adds["proposal"] == "add"].assign(record="registry", name=adds["reg_name"], hifld_id=None)
+    _every = pd.concat([_h, _a], ignore_index=True)
+    _every["slug"] = _every["layer"].str.lower().str.replace(r"[^a-z]+", "-", regex=True)
+    _lon = _every["lon"].fillna(_every["reg_lon"])
+    _lat = _every["lat"].fillna(_every["reg_lat"])
+    queue_rows = pd.DataFrame(
+        {
+            "layer": _every["layer"],
+            "slug": _every["slug"],
+            "priority": _every["reason"].map({r: i + 1 for i, r in enumerate(_priority)}),
+            "record": _every["record"],
+            "hifld_id": _every["hifld_id"].fillna("").astype(str),
+            "registry_id": _every["registry_id"].fillna("").astype(str),
+            "name": _every["name"],
+            "state": _every["state"].fillna(_every.get("reg_state")),
+            "proposal": _every["proposal"],
+            "reason": _every["reason"],
+            "agreed": _every["agreed"].astype(bool),
+            "hifld_status": _every["status"],
+            "hifld_type": _every["facility_type"],
+            "hifld_source_date": _every["source_date"],
+            "registry_name": _every["reg_name"],
+            "registry_status": _every["reg_status"],
+            "registry_status_detail": _every["reg_status_detail"],
+            "registry_type": _every["reg_type"].fillna(_every.get("iqies_type")),
+            "registry_date": _every["reg_date"],
+            "registry_location": _every["reg_location"],
+            "registry_distance_m": _every["reg_distance_m"],
+            "link": _every["link"],
+            "link_name_score": _every["link_score"],
+            "iqies_id": _every["iqies_id"],
+            "iqies_type": _every["iqies_type"],
+            "osm_id": _every["osm_id"],
+            "osm_tag": _every["osm_tag"],
+            "osm_name": _every["osm_name"],
+            "osm_distance_m": _every["osm_distance_m"],
+            "osm_closed_id": _every["osm_closed_id"],
+            "overture_gers_id": _every["ov_id"],
+            "overture_name": _every["ov_name"],
+            "overture_category": _every["ov_category"],
+            "overture_status": _every["ov_operating_status"],
+            "overture_distance_m": _every["ov_distance_m"],
+            "overture_any_gers_id": _every["ov_any_id"],
+            "overture_any_name": _every["ov_any_name"],
+            "overture_any_category": _every["ov_any_category"],
+            "overture_any_status": _every["ov_any_operating_status"],
+            "overture_any_distance_m": _every["ov_any_distance_m"],
+            "lon": _lon.round(6),
+            "lat": _lat.round(6),
+            "osm_link": np.where(
+                _every["osm_id"].notna(),
+                "https://www.openstreetmap.org/" + _every["osm_id"].astype(str),
+                "https://www.openstreetmap.org/#map=18/" + _lat.astype(str) + "/" + _lon.astype(str),
+            ),
+            "registry_link": _every["reg_link"],
+            "naip_link": "https://planetarycomputer.microsoft.com/explore?c="
+            + _lon.round(6).astype(str)
+            + ","
+            + _lat.round(6).astype(str)
+            + "&z=18&v=2&d=naip&s=false::100::true",
+            "wayback_link": "https://livingatlas.arcgis.com/wayback/#mapCenter="
+            + _lon.round(6).astype(str)
+            + "%2C"
+            + _lat.round(6).astype(str)
+            + "%2C18",
+        }
+    )
+    assert queue_rows.loc[~queue_rows["agreed"], "priority"].notna().all(), "a review reason is missing a priority"
+    queue_rows.groupby("layer")["agreed"].agg(["size", "sum"])
+    return (queue_rows,)
+
+
+@app.cell
+def _(queue_rows):
+    _decisions = []
+    for _slug in queue_rows["slug"].unique():
+        _path = REVIEW / f"review_queue_{_slug}.csv"
+        if _path.exists():
+            _filled = pd.read_csv(_path, dtype=str)
+            _decisions.append(_filled[_filled["reviewer_decision"].fillna("").str.strip() != ""])
+    _key = ["layer", "record", "hifld_id", "registry_id", "proposal"]
+    decided = queue_rows.copy()
+    decided["reviewer_decision"] = ""
+    decided["reviewer_note"] = ""
+    if _decisions:
+        _d = pd.concat(_decisions)[[*_key, "reviewer_decision", "reviewer_note"]].fillna("")
+        decided = decided.drop(columns=["reviewer_decision", "reviewer_note"])
+        decided = decided.merge(_d.drop_duplicates(_key), on=_key, how="left")
+        decided[["reviewer_decision", "reviewer_note"]] = decided[["reviewer_decision", "reviewer_note"]].fillna("")
+    _choice = decided["reviewer_decision"].str.strip().str.lower()
+    _allowed = {"", "accept", "reject", "keep", "remove", "retype", "move", "add"}
+    assert set(_choice) <= _allowed, f"unknown reviewer decisions: {set(_choice) - _allowed}"
+    decided["final_action"] = np.select(
+        [_choice == "accept", _choice == "reject", _choice != ""],
+        [decided["proposal"], np.where(decided["record"] == "HIFLD", "keep", "no change"), _choice],
+        decided["proposal"],
+    )
+    decided["decided_by"] = np.select(
+        [_choice != "", decided["agreed"]], ["reviewer", "sources agree"], "waiting for review"
+    )
+    _queue_columns = [c for c in decided.columns if c not in ("slug", "agreed", "final_action", "decided_by")]
+    queue_sizes = {}
+    for _slug, _q in decided[decided["decided_by"] == "waiting for review"].groupby("slug"):
+        _q = _q.sort_values(
+            ["priority", "registry_distance_m", "hifld_id", "registry_id"], ascending=[True, False, True, True]
+        )
+        _q[_queue_columns].to_csv(OUT / f"review_queue_{_slug}.csv", index=False)
+        queue_sizes[_slug] = len(_q)
+    mo.md(
+        "Records waiting for a person, per layer: "
+        + ", ".join(f"{k} {v:,}" for k, v in queue_sizes.items())
+        + f". Decisions read back from `review/`: {int((decided['decided_by'] == 'reviewer').sum())}."
+    )
+    return (decided,)
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ## Results
+
+    **Proposals per layer**, split into those the sources agree on and those sent to review.
+    """)
+    return
+
+
+@app.cell
+def _(decided):
+    _status = decided["decided_by"].map(
+        {"sources agree": "agreed", "reviewer": "reviewed", "waiting for review": "review"}
+    )
+    registry_summary = (
+        pd.crosstab(decided["layer"], [decided["proposal"], _status]).reindex(LAYERS.index).fillna(0).astype(int)
+    )
+    registry_summary.columns = [f"{a} {b}" for a, b in registry_summary.columns]
+    registry_summary.to_csv(OUT / "registry_summary.csv")
+    review_reasons = (
+        decided[decided["decided_by"] == "waiting for review"]
+        .groupby(["layer", "reason"])
+        .size()
+        .rename("records sent to a person")
+        .reset_index()
+        .sort_values(["layer", "records sent to a person"], ascending=[True, False])
+    )
+    review_reasons.to_csv(OUT / "review_reasons.csv", index=False)
+    mo.vstack([mo.ui.table(registry_summary, selection=None), mo.ui.table(review_reasons, selection=None)])
+    return (registry_summary,)
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    **Changes ready for a founder to approve.** The final additions and removals (sources agree, or a reviewer
+    decided), one file per layer, `output/proposed_changes_<layer>.csv`, each with the registry ID, the reason and
+    the source. This is a list to approve, not an upload to HIFLD Next or OSM; OSM's
+    [import guidelines](https://wiki.openstreetmap.org/wiki/Import/Guidelines) still apply.
+    """)
+    return
+
+
+@app.cell
+def _(decided):
+    _sources = {
+        "Hospitals": "CMS Provider of Services 2026 Q3",
+        "Public schools": "NCES CCD 2025-26 (preliminary), EDGE 2024-25",
+        "Power plants": "EIA-860 2025",
+        "Fire and EMS stations": "OSM 2026-09-21 and Overture 2026-09-23.0",
+        "Local law enforcement": "OSM 2026-09-21 and Overture 2026-09-23.0",
+    }
+    _final = decided[decided["final_action"].isin(["add", "remove"]) & (decided["decided_by"] != "waiting for review")]
+    _cols = [
+        "final_action",
+        "hifld_id",
+        "registry_id",
+        "name",
+        "state",
+        "lon",
+        "lat",
+        "reason",
+        "registry_status",
+        "registry_status_detail",
+        "registry_date",
+        "decided_by",
+        "registry_link",
+        "osm_link",
+    ]
+    for _layer, _x in _final.groupby("layer"):
+        _x = _x.assign(source=_sources[_layer]).sort_values(["final_action", "state", "name"])
+        _x[[*_cols, "source"]].to_csv(OUT / f"proposed_changes_{_x['slug'].iloc[0]}.csv", index=False)
+    pd.crosstab(_final["layer"], _final["final_action"])
+    return
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    **How stale is each layer?** HIFLD's own source dates against the registry release we compared with.
+    """)
+    return
+
+
+@app.cell
+def _(hifld):
+    _registry_dates = {
+        "Hospitals": ("CMS POS 2026 Q3", "2026-07-01"),
+        "Public schools": ("NCES CCD 2025-26 preliminary", "2025-10-01"),
+        "Power plants": ("EIA-860 2025", "2025-12-31"),
+        "Fire and EMS stations": ("OSM planet", "2026-09-21"),
+        "Local law enforcement": ("OSM planet", "2026-09-21"),
+    }
+    _d = pd.to_datetime(hifld["source_date"], errors="coerce")
+    _rows = []
+    for _layer in LAYERS.index:
+        _x = _d[hifld["layer"] == _layer]
+        _name, _date = _registry_dates[_layer]
+        _rows.append(
+            {
+                "layer": _layer,
+                "HIFLD source date, earliest": _x.min().date(),
+                "median": _x.median().date(),
+                "latest": _x.max().date(),
+                "registry": _name,
+                "registry as of": _date,
+                "years between median and registry": round((pd.Timestamp(_date) - _x.median()).days / 365.25, 1),
+            }
+        )
+    data_dates = pd.DataFrame(_rows).set_index("layer")
+    data_dates.to_csv(OUT / "data_dates.csv")
+    mo.ui.table(data_dates, selection=None)
+    return
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ## Hand check on dated imagery
+
+    A seeded sample per layer: 50 removals, 50 additions and 25 keeps (records the registry and the maps both
+    match, which `crosswalk.py` never checked). `registry_chips.py` draws each on the latest
+    [NAIP](https://planetarycomputer.microsoft.com/dataset/naip) image (USDA, public domain, 0.3–0.6 m, with its
+    capture date) and on the earliest NAIP image after 2014, for a dated before/after pair. Each record is labelled
+    in `hand_check_registry.csv`, against the proposal:
+
+    - **confirmed:** the imagery supports it (for a removal: no such facility, demolished or plainly something
+      else; for an add or a keep: the facility is there);
+    - **contradicted:** the imagery shows the opposite;
+    - **unclear:** imagery can't tell (a closed hospital whose building still stands, an office in a larger
+      building).
+
+    The share confirmed comes with a 95% Wilson interval. The same sample gives the share confirmed for each reason
+    code, that is, how often each kind of flag is a real error.
+    """)
+    return
+
+
+@app.cell
+def _(decided):
+    _sample = []
+    for _i, _layer in enumerate(LAYERS.index):
+        for _list, _n in [("remove", 50), ("add", 50), ("keep", 25), ("move", 25)]:
+            _pool = decided[(decided["layer"] == _layer) & (decided["proposal"] == _list)]
+            _sample.append(_pool.sample(n=min(_n, len(_pool)), random_state=100 + _i).assign(list=_list))
+    hand_sample = pd.concat(_sample, ignore_index=True)
+    hand_sample[
+        [
+            "layer",
+            "list",
+            "record",
+            "hifld_id",
+            "registry_id",
+            "name",
+            "state",
+            "lon",
+            "lat",
+            "proposal",
+            "reason",
+            "agreed",
+            "registry_status",
+            "registry_type",
+            "hifld_type",
+        ]
+    ].to_csv(OUT / "registry_hand_check_sample.csv", index=False)
+    hand_sample.groupby(["layer", "list"]).size().unstack()
+    return (hand_sample,)
+
+
+@app.cell
+def _(hand_sample):
+    def wilson(k: int, n: int) -> str:
+        if n == 0:
+            return ""
+        p, z = k / n, 1.96
+        centre = (p + z**2 / (2 * n)) / (1 + z**2 / n)
+        half = z * np.sqrt(p * (1 - p) / n + z**2 / (4 * n**2)) / (1 + z**2 / n)
+        return f"{100 * (centre - half):.0f}–{100 * (centre + half):.0f}%"
+
+    _path = HERE / "hand_check_registry.csv"
+    _labels = (
+        pd.read_csv(_path, dtype=str)
+        if _path.exists()
+        else pd.DataFrame(columns=["layer", "list", "hifld_id", "registry_id", "label"])
+    )
+    _key = ["layer", "list", "hifld_id", "registry_id"]
+    _checked = hand_sample.merge(_labels[[*_key, "label"]].fillna(""), on=_key, how="inner")
+
+    def confirmed_table(groups: list[str]) -> pd.DataFrame:
+        rows = []
+        for key, g in _checked.groupby(groups):
+            k, n = int((g["label"] == "confirmed").sum()), len(g)
+            rows.append(
+                {
+                    **dict(zip(groups, key if isinstance(key, tuple) else (key,), strict=True)),
+                    "checked": n,
+                    "confirmed": k,
+                    "contradicted": int((g["label"] == "contradicted").sum()),
+                    "unclear": int((g["label"] == "unclear").sum()),
+                    "confirmed %": round(100 * k / n),
+                    "95% interval": wilson(k, n),
+                }
+            )
+        return pd.DataFrame(rows)
+
+    hand_by_list = confirmed_table(["layer", "list", "agreed"]) if len(_checked) else pd.DataFrame()
+    hand_by_reason = confirmed_table(["reason"]) if len(_checked) else pd.DataFrame()
+    hand_by_list.to_csv(OUT / "registry_hand_check.csv", index=False)
+    hand_by_reason.to_csv(OUT / "registry_hand_check_by_reason.csv", index=False)
+    mo.vstack([mo.ui.table(hand_by_list, selection=None), mo.ui.table(hand_by_reason, selection=None)])
+    return
+
+
+@app.cell
+def _():
+    print(f"run time: {time.perf_counter() - RUN_STARTED:.0f} s")
+    return
 
 
 if __name__ == "__main__":

@@ -173,9 +173,18 @@ def qlever_tsv(key: str, value: str, path: Path) -> pd.DataFrame:
               BIND(geof:minX(?wkt) AS ?xmin) BIND(geof:minY(?wkt) AS ?ymin)
               BIND(geof:maxX(?wkt) AS ?xmax) BIND(geof:maxY(?wkt) AS ?ymax)
               OPTIONAL {{ ?osm osmkey:name ?name }}
-            }}"""
-        body = urllib.parse.urlencode({"query": query}).encode()
-        path.write_bytes(_get(QLEVER, 900, data=body, accept="text/tab-separated-values"))
+            }} ORDER BY ?osm"""
+        # QLever's public endpoint closes a response after about 5 MB, so we read it in pages of 20,000 rows.
+        pages = []
+        for page in range(50):
+            body = urllib.parse.urlencode({"query": f"{query} LIMIT 20000 OFFSET {page * 20000}"}).encode()
+            lines = _get(QLEVER, 900, data=body, accept="text/tab-separated-values").decode().splitlines()
+            pages.append(lines if page == 0 else lines[1:])
+            if len(lines) - 1 < 20000:
+                break
+        else:
+            raise RuntimeError(f"OSM {key}={value}: more than 50 pages")
+        path.write_text("\n".join(line for lines in pages for line in lines) + "\n")
     tsv = pd.read_csv(path, sep="\t", quoting=3, dtype=str)
     xy = tsv["?centroid"].str.extract(r"POINT\(([-\d.]+) ([-\d.]+)\)").astype(float)
     return pd.DataFrame(
