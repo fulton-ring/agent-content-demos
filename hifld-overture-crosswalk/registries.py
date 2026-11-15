@@ -99,7 +99,7 @@ def _():
 def _():
     _files = hifld_files()
     _, hifld = read_hifld(_files)
-    hifld.groupby("layer").size().rename("records in 50 states + DC")
+    hifld["layer"].value_counts().to_frame("records in 50 states + DC")
     return (hifld,)
 
 
@@ -731,7 +731,7 @@ def _(best_within, ccd, eia, hifld, iqies, pos, to_metric):
             .merge(_reg, on="registry_id", how="left")
             .set_index(_x.index)
         )
-        _joined["link"] = np.where(_joined["reg_name"].notna(), "id", None)
+        _joined["link"] = _joined["reg_name"].notna().map({True: "id", False: None})
         _names = {n: normalise(n) for n in pd.concat([_x["name"], _joined["reg_name"].fillna("")]).unique()}
         _joined["link_score"] = [
             name_score(_names[a], _names[b]) if isinstance(b, str) else np.nan
@@ -1091,6 +1091,8 @@ def _(adds, proposals):
             "overture_any_distance_m": _every["ov_any_distance_m"],
             "lon": _lon.round(6),
             "lat": _lat.round(6),
+            "registry_lon": _every["reg_lon"].round(6),
+            "registry_lat": _every["reg_lat"].round(6),
             "osm_link": np.where(
                 _every["osm_id"].notna(),
                 "https://www.openstreetmap.org/" + _every["osm_id"].astype(str),
@@ -1279,20 +1281,22 @@ def _():
     mo.md(r"""
     ## Hand check on dated imagery
 
-    A seeded sample per layer: 50 removals, 50 additions and 25 keeps (records the registry and the maps both
-    match, which `crosswalk.py` never checked). `registry_chips.py` draws each on the latest
-    [NAIP](https://planetarycomputer.microsoft.com/dataset/naip) image (USDA, public domain, 0.3–0.6 m, with its
-    capture date) and on the earliest NAIP image after 2014, for a dated before/after pair. Each record is labelled
-    in `hand_check_registry.csv`, against the proposal:
+    A seeded sample per layer: 50 removals, 50 additions, 25 keeps (records the registry and the maps both
+    match, which `crosswalk.py` never checked) and 25 moves (shown at the registry's point). `registry_chips.py`
+    draws each on the latest [NAIP](https://planetarycomputer.microsoft.com/dataset/naip) image (USDA, public
+    domain, 0.3–0.6 m, with its capture date) and on the earliest NAIP image from 2014 on, for a dated
+    before/after pair.
 
-    - **confirmed:** the imagery supports it (for a removal: no such facility, demolished or plainly something
-      else; for an add or a keep: the facility is there);
-    - **contradicted:** the imagery shows the opposite;
-    - **unclear:** imagery can't tell (a closed hospital whose building still stands, an office in a larger
-      building).
+    The labeller sees only the chip, the facility's name and its kind, not the proposal or the list it came from,
+    and says what the latest image shows at the cross: **present**, **looks disused** (the site is there but out of
+    use), **absent**, or **unclear**. The labels are in `hand_check_registry.csv`. Against the proposal:
 
-    The share confirmed comes with a 95% Wilson interval. The same sample gives the share confirmed for each reason
-    code, that is, how often each kind of flag is a real error.
+    - a **removal** is confirmed by *absent* or *looks disused*, contradicted by *present*;
+    - an **add**, **keep** or **move** is confirmed by *present*, contradicted by *absent* or *looks disused*;
+    - *unclear* is neither (a closed hospital whose building still stands often looks *present*).
+
+    The share confirmed, out of all checked records, comes with a 95% Wilson interval; the same sample gives the
+    share confirmed for each reason code, that is, how often each kind of flag is right.
     """)
     return
 
@@ -1305,6 +1309,10 @@ def _(decided):
             _pool = decided[(decided["layer"] == _layer) & (decided["proposal"] == _list)]
             _sample.append(_pool.sample(n=min(_n, len(_pool)), random_state=100 + _i).assign(list=_list))
     hand_sample = pd.concat(_sample, ignore_index=True)
+    # A move is checked where the registry puts the facility: is it there?
+    _moves = hand_sample["list"] == "move"
+    hand_sample.loc[_moves, "lon"] = hand_sample.loc[_moves, "registry_lon"]
+    hand_sample.loc[_moves, "lat"] = hand_sample.loc[_moves, "registry_lat"]
     hand_sample[
         [
             "layer",
@@ -1336,7 +1344,7 @@ def _(hand_sample):
         p, z = k / n, 1.96
         centre = (p + z**2 / (2 * n)) / (1 + z**2 / n)
         half = z * np.sqrt(p * (1 - p) / n + z**2 / (4 * n**2)) / (1 + z**2 / n)
-        return f"{100 * (centre - half):.0f}–{100 * (centre + half):.0f}%"
+        return f"{max(0.0, 100 * (centre - half)):.0f}–{min(100.0, 100 * (centre + half)):.0f}%"
 
     _path = HERE / "hand_check_registry.csv"
     _labels = (
@@ -1346,6 +1354,14 @@ def _(hand_sample):
     )
     _key = ["layer", "list", "hifld_id", "registry_id"]
     _checked = hand_sample.merge(_labels[[*_key, "label"]].fillna(""), on=_key, how="inner")
+    _gone = _checked["label"].isin(["absent", "looks_disused"])
+    _there = _checked["label"] == "present"
+    _removal = _checked["list"] == "remove"
+    _checked["label"] = np.select(
+        [(_removal & _gone) | (~_removal & _there), (_removal & _there) | (~_removal & _gone)],
+        ["confirmed", "contradicted"],
+        "unclear",
+    )
 
     def confirmed_table(groups: list[str]) -> pd.DataFrame:
         rows = []

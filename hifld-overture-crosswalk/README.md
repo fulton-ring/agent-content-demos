@@ -1,149 +1,140 @@
-# Can HIFLD Next facilities be matched to OpenStreetMap and Overture, so each gets a GERS ID?
+# HIFLD Next against OpenStreetMap, Overture and the official registries
 
-[HIFLD Next](https://hifld.publicenvirodata.org) preserves the federal HIFLD layers, but its point layers have no
-link to OpenStreetMap or [Overture Maps](https://overturemaps.org). This spike matches five of them to Overture
-places and buildings (which carry [GERS IDs](https://docs.overturemaps.org/gers/)) and to OSM, then uses the match
-to find HIFLD records that are wrong and facilities the open maps are missing. Issue
-[#91](https://github.com/fulton-ring/agent-content-demos/issues/91).
+Two marimo notebooks on five [HIFLD Next](https://hifld.publicenvirodata.org) point layers (hospitals, fire/EMS,
+law enforcement, public schools, power plants; 201,013 records in the 50 states and DC):
 
-Everything is in one marimo notebook, [`crosswalk.py`](crosswalk.py). `hand_check_chips.py` draws the imagery
-behind the hand check.
+- [`crosswalk.py`](crosswalk.py), issue [#91](https://github.com/fulton-ring/agent-content-demos/issues/91): can each
+  record be matched to OSM and Overture, so it gets a GERS ID? (Yes for 75%; details below.)
+- [`registries.py`](registries.py), issue [#100](https://github.com/fulton-ring/agent-content-demos/issues/100):
+  which records should be **added, removed, retyped or moved**, judged against the official registries (CMS, NCES,
+  EIA), with every disagreement sent to a person in a review queue instead of decided automatically.
+
+`shared.py` holds what both use (downloads, HIFLD loading, OSM via QLever, Overture via DuckDB, name matching).
 
 ## How to run it
 
 ```bash
-./run.sh            # needs uv; first run ~30 min (mostly reading Overture buildings from S3), later runs ~1 min
-./run.sh --chips    # also draws the 250 aerial-imagery chips behind hand_check.csv (data/chips/, not committed)
+./run.sh               # needs uv; both notebooks. First run ~45 min (Overture buildings and places from S3), then ~3 min
+./run.sh --registries  # registries.py only (~15 min first run, 90 s after)
+./run.sh --chips       # also draws the aerial-imagery chips behind both hand checks (data/, not committed)
 ```
 
-To read it as a notebook: `uv run marimo edit crosswalk.py`. It needs about 12 GB of free memory for the buildings
-pass. Downloads go to `data/` (not committed); results to `output/`.
+Read either as a notebook with `uv run marimo edit registries.py`. Downloads go to `data/`, results to `output/`.
+`crosswalk.py` needs about 12 GB of free memory; `registries.py` about 3 GB. Run them one at a time.
 
-## The data
+## The data (all public, fetched at run time)
 
-All public, fetched at run time.
+| Source | What | Version | Licence |
+|---|---|---|---|
+| HIFLD Next | the five layers, via its STAC API | release `1704edb3` | public domain (US government) |
+| [CMS Provider of Services](https://data.cms.gov/provider-characteristics/hospitals-and-other-facilities/provider-of-services-file-hospital-non-hospital-facilities) | hospitals (13,598, 7,033 active) and the iQIES file of other providers | 2026 Q3 | public domain (US government) |
+| [NCES CCD](https://nces.ed.gov/ccd/files.asp) + [EDGE](https://nces.ed.gov/programs/edge/Geographic/SchoolLocations) | school directory and status; school coordinates | 2025-26 preliminary; EDGE 2024-25 | public domain (US government) |
+| [EIA-860](https://www.eia.gov/electricity/data/eia860/) | plants with coordinates; generator status | 2025 (Sept 2026) | public domain (US government) |
+| [USFA fire department registry](https://apps.usfa.fema.gov/registry/download) | station list (coverage count only) | live | US government |
+| [Census batch geocoder](https://geocoding.geo.census.gov/geocoder/) | coordinates for CMS hospital addresses | Public_AR_Current | free public service |
+| OpenStreetMap via [QLever](https://qlever.dev) | same-kind features, plus `disused:`/`abandoned:` ones | planet 2026-09-21 | ODbL 1.0 |
+| [Overture Maps](https://docs.overturemaps.org/) | places (all categories), infrastructure, buildings | 2026-09-23.0 | places CDLA-Permissive 2.0; buildings ODbL |
+| [NAIP](https://planetarycomputer.microsoft.com/dataset/naip) via Planetary Computer | dated aerial imagery for the hand check | 2014–2025 | public domain (USDA) |
 
-| Source | What we use | Version |
-|---|---|---|
-| [HIFLD Next](https://hifld.publicenvirodata.org/api) | Hospitals v1.1.0; Fire and EMS Stations, Local Law Enforcement Locations, Public Schools, Power Plants v1.0.0. GeoParquet URLs found through its API (dataset → STAC versions → collection assets) | release `1704edb3` |
-| [Overture Maps](https://docs.overturemaps.org/) | `places` by category, `base/infrastructure` power plants, `buildings` (ID, bounding box, source) | 2026-09-23.0 |
-| OpenStreetMap | `amenity=hospital`, `amenity=fire_station` + `emergency=ambulance_station`, `amenity=police`, `amenity=school`, `power=plant`, through the [QLever](https://qlever.dev) SPARQL endpoint | planet of 2026-09-21 |
+**Fire/EMS and police have no official registry with locations.** The USFA registry is voluntary and lists 8,092
+stations from 2,891 departments, with addresses and no coordinates (HIFLD has 51,930 stations). BJS's 2018 law
+enforcement census is agency-level and sits behind an ICPSR sign-in. For those two layers OSM and Overture are
+the reference, as in #91.
 
-We keep the 50 states and DC (201,013 records). Overture places has no real power-plant category, so for power
-plants the Overture side is `base/infrastructure` `class = plant`, which Overture takes from OSM.
+## registries.py: method
 
-## Method, briefly
+- **Link** each record to its registry entry: by ID for schools (`NCESID`) and plants (`PLANT_CODE`); by name and
+  street address for hospitals (no CMS ID in HIFLD), preferring an active CCN over a terminated one.
+- **Propose** from the registry: no entry or closed/terminated/retired/cancelled → *remove*; another provider
+  type (iQIES nursing home, surgery centre, clinic; a vet by name; another NCES school type) → *retype*; active but
+  more than 250 m away → *move*; else *keep*. Active registry facilities with no HIFLD record → *add*.
+- **Agree or review.** The open maps vote: a same-name OSM or Overture feature within 250 m (same kind or, as the
+  issue asks, an Overture place of any category), or a same-kind one within 50 m. A proposal the maps agree with is
+  final; every disagreement goes to `output/review_queue_<layer>.csv` with a reason code, what each source says,
+  distances, links (OSM, registry, NAIP and Esri Wayback) and empty `reviewer_decision`/`reviewer_note` columns.
+  Filled copies placed in `review/` are read back on the next run and leave the queue.
+- **Hand check**: a seeded sample of 50 removals, 50 adds, 25 keeps and 25 moves per layer, drawn on the latest
+  and earliest NAIP images (dates stamped on each chip), labelled by subagents who saw only the chip, the name and
+  the kind, not the proposal: present / looks disused / absent / unclear (`hand_check_registry.csv`).
 
-- **Same kind, near, same name.** For each HIFLD record we take every same-kind Overture place and OSM feature
-  within 2 km. OSM areas (campuses, school grounds, plant fences) are measured to their bounding box, so a point
-  inside is 0 m away. Names are normalised (abbreviations expanded, generic words like "school" or "fire station"
-  dropped, different numbers never match) and scored with rapidfuzz; 85+ is a name match.
-- **Buildings.** The Overture building whose bounding box contains the point, or the nearest within 50 m. On
-  Connecticut, where we read the real footprints, 1,863 of 1,899 points inside a box (98%) are inside the
-  footprint and 1,885 (99%) within 10 m of it.
-- **Hand check.** A seeded random sample of 50 *HIFLD-only* records per layer (no same-kind feature within 250 m on
-  either side), each viewed on Esri imagery at two zooms and labelled in [`hand_check.csv`](hand_check.csv).
+## registries.py: results (from one `./run.sh --registries`)
 
-## Results (from one clean `./run.sh`)
+**Proposals** (`output/registry_summary.csv`): agreed by the sources / sent to review.
 
-**Match rates** (`output/match_rates.csv`, chart in `output/match_rates.png`), % of HIFLD records:
+| Layer | Keep | Remove | Retype | Move | Add | In the review queue |
+|---|---|---|---|---|---|---:|
+| Hospitals (8,254) | 4,664 / 548 | 172 / 1,580 | 62 / 141 | 0 / 1,087 | 333 / 806 | 4,162 |
+| Fire and EMS (51,930) | 44,441 / 0 | 0 / 7,489 | – | – | 1,478 / 0 | 7,489 |
+| Law enforcement (23,299) | 21,102 / 0 | 0 / 2,197 | – | – | 1,033 / 0 | 2,197 |
+| Public schools (101,279) | 86,137 / 1,777 | 499 / 4,082 | 139 / 16 | 1,355 / 7,274 | 2,250 / 681 | 13,830 |
+| Power plants (16,251) | 8,368 / 2,107 | 1,761 / 1,033 | – | 75 / 2,907 | 480 / 806 | 6,853 |
 
-| Layer | Records | Overture ≤50 m | ≤250 m | name ≤250 m | OSM ≤50 m | ≤250 m | name ≤250 m | Building ≤50 m | HIFLD-only |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| Hospitals | 8,254 | 68.3 | 86.3 | 68.3 | 84.3 | 87.4 | 69.9 | 96.4 | 405 |
-| Fire and EMS stations | 51,930 | 55.6 | 59.2 | 52.9 | 53.9 | 56.2 | 42.6 | 98.7 | 12,264 |
-| Local law enforcement | 23,299 | 52.6 | 63.8 | 55.2 | 37.8 | 44.8 | 36.6 | 99.2 | 6,479 |
-| Public schools | 101,279 | 67.8 | 93.4 | 78.5 | 80.6 | 86.7 | 64.0 | 98.1 | 3,407 |
-| Power plants | 16,251 | 54.1 | 57.2 | 49.1 | 62.5 | 65.7 | 56.0 | 47.8 | 5,558 |
+About 34,500 records would need a person; `output/review_reasons.csv` counts them by reason. The biggest piles:
+schools whose NCES point is more than 250 m from HIFLD's (8,189; median 1.3 km), fire stations on neither map
+(7,339), plants whose EIA point differs (2,915, mostly solar and wind farms, coded separately), and records the
+registry calls closed that the maps still show (1,328 schools, 675 hospitals, 199 plants). 605 hospital records
+share a CCN with another record within 250 m: HIFLD v1.1 lists psychiatric and rehab units as separate hospitals.
 
-**The crosswalk.** 151,339 of 201,013 records (75%) get a *high*-confidence match (a name match within 250 m on
-at least one side), and 96–99% of the four building-type layers get an Overture building GERS ID (power plants 48%:
-solar and wind farms aren't buildings). `output/crosswalk_hospitals.csv` is committed; the full
-`output/crosswalk.csv.gz` (~20 MB) is written by the run.
+**Ready to approve** (`output/proposed_changes_<layer>.csv`, agreed adds and removals with registry ID, reason and
+source): hospitals 333 adds and 172 removals, schools 2,250 and 499, plants 480 and 1,761, fire/EMS 1,478 adds
+and police 1,033 adds (on both OSM and Overture, no HIFLD record within 250 m).
 
-**Hand check of HIFLD-only records** (`hand_check.csv`):
+**Hand check** (`output/registry_hand_check.csv`; by reason in `registry_hand_check_by_reason.csv`), all layers:
 
-| Layer | Exists, unmatched | Misplaced | Closed | Not built | Unclear |
-|---|---:|---:|---:|---:|---:|
-| Hospitals | 23 | 3 | 15 | – | 9 |
-| Fire and EMS stations | 28 | 3 | 0 | – | 19 |
-| Local law enforcement | 15 | 2 | 2 | – | 31 |
-| Public schools | 10 | 4 | 3 | – | 33 |
-| Power plants | 16 | 3 | 11 | 9 | 11 |
+| List | Checked | Confirmed | Contradicted | Unclear |
+|---|---:|---:|---:|---:|
+| keep | 124 | 80 (65%) | 6 | 38 |
+| move, at the registry point | 74 | 37 (50%) | 20 | 17 |
+| add | 213 | 91 (43%) | 38 | 84 |
+| remove | 244 | 26 (11%) | 118 | 100 |
 
-**Estimates** (`output/stale_estimate.csv`): the hand-checked shares applied to each layer's HIFLD-only pool.
+Keeps hold up: hospitals 23/25 and schools 22/24 confirmed, none contradicted. School moves are right: 24/25
+NCES points sit on the school. Adds: schools 28/47 confirmed, police 24/50 and fire 17/50 (no contradiction,
+the rest unclear), power plants only 17/50 (28 show nothing at EIA's point). **Removals mostly can't be confirmed
+from above**: 38 of 50 hospital and 37 of 50 school removals show the building standing, and
+`registry_closed_but_on_maps` is contradicted 36 times in 44. A closed hospital or school keeps its building, so
+imagery tests whether a site exists, not whether it is open. Agreed plant removals (EIA retired or cancelled, on
+neither map) are confirmed 9 of 24, contradicted 7.
 
-| Layer | Stale or misplaced HIFLD records (95% range) | Real facilities missing from both OSM and Overture |
-|---|---|---:|
-| Hospitals | 146 (98–202) | ~186 |
-| Fire and EMS stations | 736 (253–1,989) | ~6,900 |
-| Local law enforcement | 518 (204–1,221) | ~1,900 |
-| Public schools | 477 (237–892) | ~680 |
-| Power plants | 2,557 (1,832–3,313) | ~1,800 |
+**How stale** (`output/data_dates.csv`): median HIFLD source date against the registry: schools 1.7 years
+(CCD 2022-23 vs 2025-26), hospitals 2.2, plants 5.6, fire/EMS 6.0 (against OSM), law enforcement 18.2 (CSLLEA 2008).
 
-HIFLD's own status flags 946 power plants retired or cancelled and 404 hospitals closed (or closed in Overture),
-all still in the layers (`output/trouble_flags.csv`). 1,162 schools, 1,466 police and 1,378 fire records have no
-same-kind feature within 250 m but a name match 250 m–2 km away, a sign one side has the point in the wrong place.
-`output/duplicate_pairs.csv` lists same-name records within 50 m of each other (112 hospital pairs, 358 school pairs).
+## crosswalk.py (#91) in brief
 
-**By facility type** (`output/match_by_type.csv`, `facility_type` in the crosswalk): not everything in a HIFLD
-layer is what OSM or Overture calls that kind of facility. General acute care hospitals get a high-confidence
-match 88% of the time and are HIFLD-only 3% of the time; military records 62% and 19% (many are base outpatient
-clinics, "Medical Groups"), psychiatric 72% and 9%. Special-jurisdiction police (campus, transit, parks) are
-HIFLD-only 63% of the time, against 25% for local police departments.
-
-**The other direction** (`output/other_only.csv`): OSM has 4,572 fire stations, 2,739 police and 1,072 hospitals
-with no HIFLD record nearby. Overture's counts are much larger (36,927 "hospitals") because its business listings
-call clinics hospitals; see the notebook before using them.
-
-**Run time:** see the last cell's output; a cold run from a clean checkout took 28 minutes, a cached one about a minute.
-
-## What the spike shows
-
-All three expectations hold. **Match rates differ sharply by layer**: hospitals and schools match 95–97% within
-250 m, fire, police and power plants 66–76%. **The match finds stale HIFLD records**, most in power plants (about
-2,600 records retired, cancelled, never built or misplaced) and hospitals (about 150, a third of the unmatched),
-fewer elsewhere. **It finds facilities to contribute**: about 6,900 fire and EMS stations, 1,900 police
-stations and 1,800 power plants exist on the ground but are in neither OSM nor Overture. Most unmatched fire and
-police records are real stations the open maps lack, not HIFLD errors.
+Match rates within 250 m on either side: hospitals 95%, schools 97%, fire/EMS 76%, police 72%, power plants 66%.
+151,339 records (75%) get a high-confidence match and 96–99% of the building layers an Overture building GERS ID.
+A hand check of 250 unmatched records estimates about 2,600 stale or misplaced power plant records and about 6,900
+fire/EMS stations missing from both maps. Outputs: `match_rates.csv`, `stale_estimate.csv`, `hand_check.csv`,
+`crosswalk_hospitals.csv` and the rest of `output/`; method notes are in the notebook.
 
 ## What didn't work, and what this doesn't show
 
-- **Overpass reset** again; QLever's SPARQL endpoint returned all of US OSM in under a minute per tag.
-- **QLever is live, not pinned.** These numbers come from its 2026-09-21 OSM planet. When QLever moves to a newer
-  planet, the HIFLD-only pools and the seeded hand-check sample will drift, and the estimates will still apply the
-  labels in `hand_check.csv`. Re-label before trusting a rerun on a newer planet.
-- **Reading Overture buildings is the cost.** The lower 48 is 180 million buildings, 24 GB. With 4 DuckDB threads
-  it ran at 3 MB/s; with more threads than cores it ran at ~30 MB/s, but the first try ran out of memory, so it now
-  goes in eight longitude strips. We read bounding boxes, not footprints (checked on CT above).
-- **Centroids undercounted OSM.** Our first pass measured to OSM centroids: OSM ≤50 m was 51% for hospitals and 30%
-  for power plants. Measuring to the area's bounding box raised them to 84% and 63%.
-- **Unclear labels are high** for police (31/50) and schools (33/50): offices in larger buildings, online and
-  alternative programs. The estimates count only clear labels, so they're floors. The labels were made by Claude
-  subagents viewing every image; we spot-checked some. 14 of the 15 "closed" hospitals rest on HIFLD's own
-  `CLOSED` status with the building still standing.
-- **Wrong kind of facility.** HIFLD's `TYPE` is HIFLD's own label, so a nursing home or surgery centre filed as a
-  hospital still says "hospital". Names flag a few (13 surgery centres); catching the rest needs an outside list
-  such as CMS's Provider of Services file, which this spike doesn't use.
-- **Matched isn't verified.** A record within 250 m can still be on the wrong building; we didn't sample matches.
-- **Overture places categories are noisy** (clinics as hospitals, private schools as schools), so Overture-only
-  counts are ceilings. OSM-only schools (52,418) include private schools, which HIFLD's layer leaves out.
-- **We propose, we don't upload.** OSM's [import guidelines](https://wiki.openstreetmap.org/wiki/Import/Guidelines)
-  need community discussion and a documented plan before any bulk edit.
+- **QLever cuts responses at about 5 MB**, so OSM is now read in pages of 20,000 rows; downloads retry four times.
+  A rerun of `crosswalk.py` after moving its helpers to `shared.py` reproduced every committed output byte for byte.
+- **16 million Overture places** near our points ran out of memory as one GeoDataFrame. The any-category check
+  now pairs points and places in DuckDB on a shared name word and grid cell before scoring names.
+- **Census geocoder**: a hand-built multipart upload hung; `requests` with batches of 1,000 works. 677 active CMS
+  hospitals didn't geocode and can only be reviewed, so the hospital add sample has 16 records, not 50.
+- **Name scoring**: `token_set_ratio` scores 100 when one name is a subset of the other ("Longview" vs "Longview
+  Regional Medical Center"), which linked rehab hospitals to their neighbours. Hospital links now average it with
+  `token_sort_ratio`.
+- **Imagery can't see closure**, and many police and fire checks are unclear (an office in a larger building).
+  The labels are AI subagents' calls, blind to the proposal but not spot-checked by a person yet.
+- **QLever is live**: a rerun after it moves past the 2026-09-21 planet will drift; the pinned registry URLs won't.
+- **Budget**: `registries.py` is about 1,400 lines, over the ~1,000-line target; most is the proposal rules and the
+  queue's 45 columns.
+- **We propose, we don't upload.** Nothing here edits HIFLD Next or OSM; OSM's
+  [import guidelines](https://wiki.openstreetmap.org/wiki/Import/Guidelines) apply to any of it.
 
-## Licences
+## Licences of the outputs
 
-HIFLD Next republishes US government data (public domain). Overture places are
-[CDLA-Permissive 2.0](https://cdla.dev/permissive-2-0/); Overture buildings and infrastructure, and OSM, are
-[ODbL 1.0](https://opendatacommons.org/licenses/odbl/). A crosswalk that includes OSM IDs, Overture building or
-plant IDs, or distances measured to OSM shapes is, as in `us-substations-verified/`, a Derivative Database under
-OSMF's guidelines, so the full `crosswalk.csv.gz` would be published as ODbL with "© OpenStreetMap contributors"
-and Overture attribution. The committed slice `output/crosswalk_hospitals.csv` is such a file: it is ODbL 1.0,
-© OpenStreetMap contributors and © Overture Maps Foundation, and anything built from it stays ODbL. The OSM names
-and distances in `hand_check.csv` and `output/hand_check_sample.csv` come from the same sources. A file with only HIFLD ID → Overture *place* GERS ID, distance and name score could go
-out under CDLA-Permissive 2.0 with attribution, no share-alike.
+Registry and HIFLD fields are public domain. The review queues, `proposed_changes_*.csv` and the committed
+`crosswalk_hospitals.csv` contain OSM IDs, names and distances, so they are Derivative Databases under ODbL 1.0:
+© OpenStreetMap contributors, © Overture Maps Foundation, and anything built from them stays ODbL. A file with only
+HIFLD ID → registry ID → Overture place GERS ID could go out under CDLA-Permissive 2.0 with attribution.
 
 ## What we looked at first
 
-DuckDB's httpfs and spatial extensions for Overture (as in `hifld-grid-gaps/`), Overpass and then QLever for OSM,
-GeoPandas' `dwithin` join, rapidfuzz for names and marimo for the notebook. We wrote no matcher beyond those.
+DuckDB httpfs/spatial for Overture, Overpass then QLever for OSM, GeoPandas `dwithin`, rapidfuzz, the Census
+geocoder, the Planetary Computer STAC and data API for NAIP (no raster library needed), marimo. Google Maps is out:
+its terms bar extracting content, and OSM forbids deriving from it.
