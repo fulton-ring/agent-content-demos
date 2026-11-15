@@ -851,9 +851,10 @@ def _(mo):
     - **Census details.** The per-county TIGER/Line PL block file has no population or housing counts (the
       state-wide 2020 block file does), and OGR's `COUNTYFP20 = '073'` filter on that file silently returns nothing,
       so blocks are picked by GEOID prefix.
-    - **The station lists disagree on position more than on existence.** Most HIFLD stations without an OSM
-      station within 300 m have one 0.4 to 5 km away with a similar name, or are on Camp Pendleton; see
-      `outputs/station_differences.csv`.
+    - **Neither station list is complete.** A quarter of HIFLD's stations have no OSM station within 300 m, and
+      for most of them the nearest OSM station is a different station, so OSM is missing them; only a few are the
+      same station plotted in a different spot. OSM in turn has federal (Navy) stations, hotshot crews, academies and
+      airport crash crews that HIFLD lacks. See `outputs/station_differences.csv`.
     - **Road reach is not response.** No turnout time, traffic, staffing, engine type, aircraft, staging or travel
       off the road network. Stations across the Mexican border aren't in HIFLD and aren't counted.
     """)
