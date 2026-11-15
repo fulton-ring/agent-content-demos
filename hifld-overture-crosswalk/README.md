@@ -15,7 +15,7 @@ law enforcement, public schools, power plants; 201,013 records in the 50 states 
 
 ```bash
 ./run.sh               # needs uv; both notebooks. First run ~45 min (Overture buildings and places from S3), then ~3 min
-./run.sh --registries  # registries.py only (~15 min first run, 90 s after)
+./run.sh --registries  # registries.py only (~7 min first run, 90 s after)
 ./run.sh --chips       # also draws the aerial-imagery chips behind both hand checks (data/, not committed)
 ```
 
