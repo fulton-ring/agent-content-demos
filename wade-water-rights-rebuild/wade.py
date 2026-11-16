@@ -99,12 +99,36 @@ def wade_answer_key(state: str, listing: dict[str, str]) -> tuple[pd.DataFrame, 
         listing["ProcessedInputData/waterallocations.csv"],
         DATA_DIR / state / "wade_waterallocations.csv",
     )
-    sites = drive_file(
-        listing["ProcessedInputData/sites.csv"], DATA_DIR / state / "wade_sites.csv"
-    )
+    sites = drive_file(listing["ProcessedInputData/sites.csv"], DATA_DIR / state / "wade_sites.csv")
     a = pd.read_csv(alloc, dtype=str, keep_default_na=False)
     s = pd.read_csv(sites, dtype=str, keep_default_na=False)
     return a, s
+
+
+def wade_dropped(state: str, listing: dict[str, str]) -> pd.Series:
+    """Rights WSWC's own error checks removed before loading WaDE, with the reason given.
+
+    WSWC wrote these to ProcessedInputData/waterallocations_missing.csv.
+    """
+    path = drive_file(
+        listing["ProcessedInputData/waterallocations_missing.csv"],
+        DATA_DIR / state / "wade_waterallocations_missing.csv",
+    )
+    df = pd.read_csv(path, dtype=str, keep_default_na=False)
+    return df.drop_duplicates("AllocationNativeID").set_index("AllocationNativeID")["ReasonRemoved"]
+
+
+def extra_rights(rebuilt: pd.DataFrame, wade: pd.DataFrame, dropped: pd.Series) -> dict:
+    """Split the rebuild's rights that WaDE didn't have into ones WSWC's checks dropped and new."""
+    extra = rebuilt.index.difference(wade.index)
+    was_dropped = extra.isin(dropped.index)
+    reasons = dropped.reindex(extra[was_dropped]).str.split(",").str[0].value_counts()
+    return {
+        "not_in_wade": int(len(extra)),
+        "dropped_by_wade_checks": int(was_dropped.sum()),
+        "top_drop_reasons": {k: int(v) for k, v in reasons.head(3).items()},
+        "new_or_unexplained": int((~was_dropped).sum()),
+    }
 
 
 def wade_first_site_coords(alloc: pd.DataFrame, sites: pd.DataFrame) -> pd.DataFrame:
@@ -126,7 +150,7 @@ def _norm_text(s: pd.Series) -> pd.Series:
 
 def _norm_set(s: pd.Series) -> pd.Series:
     return s.astype(str).map(
-        lambda v: ",".join(sorted({t.strip().lower() for t in v.split(",") if t.strip()}))
+        lambda v: ",".join(sorted({t.strip().lower() for t in str(v).split(",") if t.strip()}))
     )
 
 
@@ -157,25 +181,28 @@ def compare_fields(wade: pd.DataFrame, rebuilt: pd.DataFrame) -> pd.DataFrame:
         has = ~is_blank(w[field]) if field in w else pd.Series(False, index=both)
         n = int(has.sum())
         if n == 0:
-            rows.append({"field": field, "wade_filled": 0, "same_value": None, "status": "blank in WaDE"})
+            rows.append(
+                {"field": field, "wade_filled": 0, "same_value": None, "status": "blank in WaDE"}
+            )
             continue
         if field not in r or is_blank(r[field])[has].all():
-            rows.append({"field": field, "wade_filled": n, "same_value": 0.0, "status": "no source column"})
+            rows.append(
+                {"field": field, "wade_filled": n, "same_value": 0.0, "status": "no source column"}
+            )
             continue
         same = float(_agree(field, w.loc[has, field], r.loc[has, field]).mean())
         status = "comes back" if same >= 0.95 else "partly" if same >= 0.5 else "differs"
-        rows.append({"field": field, "wade_filled": n, "same_value": round(same, 3), "status": status})
+        rows.append(
+            {"field": field, "wade_filled": n, "same_value": round(same, 3), "status": status}
+        )
     return pd.DataFrame(rows)
 
 
 def location_agreement(wade_xy: pd.DataFrame, rebuilt: gpd.GeoDataFrame, metres: float) -> float:
     """Share of matched rights whose rebuilt point is within `metres` of WaDE's first site."""
     both = wade_xy.dropna().index.intersection(rebuilt.index)
-    w = gpd.GeoSeries(
-        gpd.points_from_xy(wade_xy.loc[both, "Longitude"], wade_xy.loc[both, "Latitude"]),
-        index=both,
-        crs=4326,
-    ).to_crs(5070)
+    xy = wade_xy.loc[both]
+    w = gpd.GeoSeries.from_xy(xy["Longitude"], xy["Latitude"], index=both, crs=4326).to_crs(5070)
     r = rebuilt.loc[both].geometry.to_crs(5070)
     return round(float((w.distance(r) <= metres).mean()), 3)
 

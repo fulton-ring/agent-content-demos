@@ -153,7 +153,9 @@ def _(pd, raw):
     absolute = raw["Net Absolute"].fillna(0)
     conditional = raw["Net Conditional"].fillna(0)
     units = raw["Decreed Units"].astype(str).str.strip()
-    amount = absolute.where(absolute != 0, conditional).where(~((absolute != 0) & (conditional != 0)), 0)
+    amount = absolute.where(absolute != 0, conditional).where(
+        ~((absolute != 0) & (conditional != 0)), 0
+    )
     flow_cfs = amount.where(units == "C", 0)
     volume_af = amount.where(units == "A", 0)
     legal_status = pd.Series("Absolute", index=raw.index)
@@ -226,24 +228,28 @@ def _(mo):
 
 
 @app.cell
-def _(rebuilt_co, wade, wade_alloc, wade_sites):
+def _(co_listing, rebuilt_co, wade, wade_alloc, wade_sites):
     co_matched = wade_alloc.index.isin(rebuilt_co.index)
     co_match_rate = round(float(co_matched.mean()), 4)
     co_fields = wade.compare_fields(wade_alloc, rebuilt_co)
     co_location = wade.location_agreement(
         wade.wade_first_site_coords(wade_alloc.reset_index(), wade_sites), rebuilt_co, 100
     )
+    co_extra = wade.extra_rights(rebuilt_co, wade_alloc, wade.wade_dropped("CO", co_listing))
     co_fields
-    return co_fields, co_location, co_match_rate
+    return co_extra, co_fields, co_location, co_match_rate
 
 
 @app.cell
-def _(co_fields, co_location, co_match_rate, mo, rebuilt_co, wade_alloc):
+def _(co_extra, co_fields, co_location, co_match_rate, mo, rebuilt_co, wade_alloc):
     _lost = wade_alloc.index[~wade_alloc.index.isin(rebuilt_co.index)]
     mo.md(f"""
     **{co_match_rate:.1%}** of WaDE's {len(wade_alloc):,} Colorado rights are in today's
     rebuild of {len(rebuilt_co):,}. {len(_lost):,} WaDE IDs are gone, most likely rights the
     water court has since changed (a new admin number or decree makes a new ID).
+    Of the {co_extra["not_in_wade"]:,} rebuilt rights WaDE didn't have,
+    {co_extra["dropped_by_wade_checks"]:,} were dropped by WSWC's own error checks and
+    {co_extra["new_or_unexplained"]:,} are new decrees since WaDE's last load.
     Location agrees for **{co_location:.1%}** of matched rights.
 
     Fields that come back at 95% or better:
@@ -266,15 +272,14 @@ def _(mo):
 @app.cell
 def _(rebuilt_co, use_terms, wade):
     co_unknown = wade.unknown_use_terms(rebuilt_co["BeneficialUseCategory"], use_terms)
-    co_primary_filled = round(
-        float((rebuilt_co["PrimaryBeneficialUseCategory"] != "").mean()), 4
-    )
+    co_primary_filled = round(float((rebuilt_co["PrimaryBeneficialUseCategory"] != "").mean()), 4)
     co_unknown.head(15)
     return co_primary_filled, co_unknown
 
 
 @app.cell
 def _(
+    co_extra,
     co_fields,
     co_location,
     co_match_rate,
@@ -291,9 +296,7 @@ def _(
     wade_alloc,
     wade_date,
 ):
-    co_parquet = wade.write_geoparquet(
-        rebuilt_co.drop(columns=["Latitude", "Longitude"]), "CO"
-    )
+    co_parquet = wade.write_geoparquet(rebuilt_co.drop(columns=["Latitude", "Longitude"]), "CO")
     co_summary = {
         "state": "Colorado",
         "source": "DWR Water Right - Net Amounts (data.colorado.gov acsg-f33s)",
@@ -301,6 +304,7 @@ def _(
         "wade_count": len(wade_alloc),
         "wade_published": wade_date,
         "rebuilt_count": len(rebuilt_co),
+        "extra_rights": co_extra,
         "match_rate": co_match_rate,
         "location_within_100m": co_location,
         "newest_record": str(rebuilt_co["SourceModified"].max().date()),
