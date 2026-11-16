@@ -91,7 +91,7 @@ def _(field_table, mo, summaries, table, wade):
     )
     _md = (
         "## Per state\n\n"
-        + table.T.to_markdown(header=False)
+        + table.set_index("State").T.to_markdown()
         + "\n\n## Field agreement on matched rights\n\n"
         + field_table.to_markdown()
         + f"\n\nCalifornia crosswalk learned from WaDE's last table: {_crosswalk}.\n"
