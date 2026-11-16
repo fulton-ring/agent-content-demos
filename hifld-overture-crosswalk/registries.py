@@ -256,10 +256,11 @@ def _():
                         headers={"User-Agent": USER_AGENT},
                         timeout=600,
                     )
-                    if response.status_code == 200:
+                    if response.status_code == 200 and "Request Rejected" not in response.text:
                         break
                     time.sleep(10 * 2**attempt)
                 response.raise_for_status()
+                assert "Request Rejected" not in response.text, "the Census geocoder rejected a batch; rerun later"
                 answers.append(response.text if response.text.endswith("\n") else response.text + "\n")
             path.write_text("".join(answers))
         out = pd.read_csv(path, header=None, dtype=str, names=list(range(8)))
@@ -1354,6 +1355,7 @@ def _(hand_sample):
     )
     _key = ["layer", "list", "hifld_id", "registry_id"]
     _checked = hand_sample.merge(_labels[[*_key, "label"]].fillna(""), on=_key, how="inner")
+    assert len(_checked) == len(_labels), f"{len(_labels) - len(_checked)} hand-check labels no longer match the sample"
     _gone = _checked["label"].isin(["absent", "looks_disused"])
     _there = _checked["label"] == "present"
     _removal = _checked["list"] == "remove"

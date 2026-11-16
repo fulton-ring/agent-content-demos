@@ -70,10 +70,12 @@ the reference, as in #91.
 | Power plants (16,251) | 8,368 / 2,107 | 1,761 / 1,033 | – | 75 / 2,907 | 480 / 806 | 6,853 |
 
 About 34,500 records would need a person; `output/review_reasons.csv` counts them by reason. The biggest piles:
-schools whose NCES point is more than 250 m from HIFLD's (8,189; median 1.3 km), fire stations on neither map
-(7,339), plants whose EIA point differs (2,915, mostly solar and wind farms, coded separately), and records the
+schools whose NCES point is more than 250 m from HIFLD's (6,841 in review; median 1.3 km), fire stations on neither map
+(7,339), plants whose EIA point differs (2,840, mostly solar and wind farms, coded separately), and records the
 registry calls closed that the maps still show (1,328 schools, 675 hospitals, 199 plants). 605 hospital records
 share a CCN with another record within 250 m: HIFLD v1.1 lists psychiatric and rehab units as separate hospitals.
+Hospital addresses go through the live Census geocoder, so hospital counts can move by a few records between runs
+(a review rerun got 331 agreed adds against 333).
 
 **Ready to approve** (`output/proposed_changes_<layer>.csv`, agreed adds and removals with registry ID, reason and
 source): hospitals 333 adds and 172 removals, schools 2,250 and 499, plants 480 and 1,761, fire/EMS 1,478 adds
