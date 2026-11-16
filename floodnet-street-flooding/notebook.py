@@ -550,11 +550,13 @@ def _(mo):
 
 
 @app.cell
-def _(ThreadPoolExecutor, cache, get, json, sensors):
+def _(ThreadPoolExecutor, cache, get, json, sensors, time):
     def nfhl_zone(lon: float, lat: float) -> str:
         """FEMA flood zone at a point: 'SFHA', '0.2%', 'outside' or 'unmapped', cached."""
         _path = cache / "nfhl" / f"{lon:.6f}_{lat:.6f}.json"
-        if not _path.exists():
+        for _attempt in range(5):  # NFHL sometimes answers 200 with an error body
+            if _path.exists():
+                break
             _payload = get(
                 "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/identify",
                 {
@@ -569,8 +571,11 @@ def _(ThreadPoolExecutor, cache, get, json, sensors):
                     "f": "json",
                 },
             ).json()
-            assert "results" in _payload, f"NFHL error at {lon},{lat}: {_payload}"
-            _path.write_text(json.dumps([r["attributes"] for r in _payload["results"]]))
+            if "results" in _payload:
+                _path.write_text(json.dumps([r["attributes"] for r in _payload["results"]]))
+            else:
+                time.sleep(10 * (_attempt + 1))
+        assert _path.exists(), f"NFHL failed 5 times at {lon},{lat}"
         _zones = json.loads(_path.read_text())
         if not _zones:
             return "unmapped"
@@ -580,7 +585,7 @@ def _(ThreadPoolExecutor, cache, get, json, sensors):
             return "0.2%"
         return "outside"
 
-    with ThreadPoolExecutor(8) as _pool:
+    with ThreadPoolExecutor(4) as _pool:
         sensors["fema"] = list(
             _pool.map(nfhl_zone, sensors.longitude.round(6), sensors.latitude.round(6))
         )

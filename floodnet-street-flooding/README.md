@@ -10,7 +10,8 @@ it is in one marimo notebook. Issue
 
 **Short answer: the feed has grown about fivefold since the 2024 paper. Most of what it records
 is tidal flooding at a few coastal sites. The two official flood maps each cover one kind of
-flooding, and you need both.** Numbers from the run on 2026-11-15, with data through
+flooding, and you need both** (true of the moderate stormwater map; the Extreme 2080 map covers
+all but 1.0% of flooding sensors, so it barely tells them apart). Numbers from the run on 2026-11-15, with data through
 2026-11-09:
 
 - **The network: 496 sensors ever deployed, 452 active, 3,611 events at 322 sensors.** 1,602
@@ -41,7 +42,7 @@ flooding, and you need both.** Numbers from the run on 2026-11-15, with data thr
   September 1, 2021, with up to 35.6 inches at Carroll St/4th Av.
 - **Run time: 9 min 44 s from a clean checkout with an empty cache.** Most of that is six years
   of 6-minute tide data, with retries when NOAA and the Iowa Mesonet throttle requests. A rerun
-  with the cache took 4 min 38 s. Cost: $0.
+  with the cache took 4 min 38 s (the committed `summary.json` is from a warm rerun). Cost: $0.
 
 ## Run it
 
@@ -52,7 +53,9 @@ flooding, and you need both.** Numbers from the run on 2026-11-15, with data thr
 You need [uv](https://docs.astral.sh/uv/). `run.sh` runs `notebook.py` as a script and writes
 `results/`. Downloads are cached in `~/.cache/floodnet-street-flooding` (or set
 `FLOODNET_CACHE`). Recent months of tide and rain data are fetched again on every run, and so
-are the FloodNet tables. To read the notebook with its outputs, run
+are the FloodNet tables. FEMA's NFHL service is sometimes slow or answers with an error; the
+notebook retries each lookup five times, and if a run still fails there, rerun: finished lookups are
+cached. To read the notebook with its outputs, run
 `uv run marimo edit notebook.py`.
 
 ## Data (all public, downloaded at run time)
