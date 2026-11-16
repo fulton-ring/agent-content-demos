@@ -34,7 +34,7 @@ All numbers come from `outputs/summary.json` and the CSVs beside it, written by 
 
 **The county.** The rule walks counties by risk-to-homes rank, ties broken by burn-probability rank, and takes the first with at least 25 HIFLD stations. San Diego and Broward County, FL tie at a risk-to-homes rank of 1.000; San Diego's burn-probability rank is higher (0.999 against 0.998), and it has 221 stations. `outputs/county_choice.csv` has the top ten with their station counts.
 
-**Stations: HIFLD Next against OpenStreetMap.** HIFLD has 221 stations in the county and OpenStreetMap 198 (after merging features mapped twice). 166 HIFLD stations have an OSM station within 300 m (median offset 14 m), and 168 within 1 km. Neither list is complete. For most of the 55 HIFLD stations without an OSM match, the nearest OSM station is a different station, so OSM is missing them; only a few are the same station plotted in another spot (Lake Morena Station 42 is 420 m off). The 34 OSM stations without a HIFLD match include federal (Navy) stations, hotshot crews, a training academy and airport crash crews. `outputs/station_differences.csv` lists both sides.
+**Stations: HIFLD Next against OpenStreetMap.** HIFLD has 221 stations in the county and OpenStreetMap 198 (after merging features mapped twice). 166 HIFLD stations have an OSM station within 300 m (median offset 14 m), and 168 within 1 km. Neither list is complete. Of the 55 HIFLD stations without an OSM match, about nine are the same station plotted 0.4 to 5 km apart (Lake Morena 42 at 420 m, Valley Center at 1.4 km, Otay 38 at 2.7 km, Palomar 79 at 5.3 km); for the rest OSM is missing them. Only HIFLD stations are routed, so a misplaced or missing backcountry station makes the beyond-30-minute share lean high. The 34 OSM stations without a HIFLD match include federal (Navy) stations, hotshot crews, a training academy, airport crash crews and several backcountry county and CAL FIRE stations HIFLD lacks. `outputs/station_differences.csv` lists both sides.
 
 **Reach bands** (share of the county's total in each band; a block counts by its internal point, land by 270 m cell):
 
@@ -46,7 +46,7 @@ All numbers come from `outputs/summary.json` and the CSVs beside it, written by 
 | Beyond 30 min | 0.4% | 0.4% | 48.4% | 46.3% |
 | Total | 1,228,505 | 3,298,634 | 5,433 km² | 11,027 km² |
 
-Dropping the 64 stations within 25 km outside the county changes the high-hazard shares by less than half a point, so the result doesn't hinge on mutual aid across the county line.
+Dropping the 64 stations within 25 km outside the county changes the high-hazard shares by at most 0.05 points, so the result doesn't hinge on mutual aid across the county line.
 
 **High-hazard land beyond 30 minutes, by distance to the nearest land within 30 minutes:**
 
@@ -62,7 +62,7 @@ Valhalla's isochrones are strips along the roads it reaches, often narrower than
 
 **Homes in high-hazard cells.** 57,063 housing units (4.6% of the county's) and 157,134 people are in blocks whose internal point falls in a High or Very High cell. Of those, 4,204 homes and 10,776 people are beyond 30 minutes. So 93% of homes in high hazard are within 30 minutes; the high-hazard land beyond reach is mostly land without homes.
 
-**Run time.** A run from a clean checkout on 4 CPUs took 10.4 minutes (615 s in the notebook): 83 s counting stations for the ten candidate counties over MCP, 8 s pulling 285 stations over MCP, 67 s cutting the OSM extract and building tiles, 245 s for 285 isochrones (0.9 s each), and the rest downloading 2.3 GB. A rerun reuses the downloads and tiles and takes about 6 minutes. Every station got an isochrone.
+**Run time.** A run from a clean checkout on 4 CPUs took 9.5 to 10.4 minutes across two runs (563 to 615 s in the notebook): 83 s counting stations for the ten candidate counties over MCP, 8 s pulling 285 stations over MCP, 67 s cutting the OSM extract and building tiles, 245 s for 285 isochrones (0.9 s each), and the rest downloading 2.3 GB. A rerun reuses the downloads and tiles and takes about 6 minutes. Every station got an isochrone.
 
 ## What we checked about XPRIZE
 
