@@ -4,15 +4,9 @@ __generated_with = "0.25.1"
 app = marimo.App(width="medium")
 
 with app.setup:
-    import json
-    import os
-    import re
     import time
-    import urllib.parse
-    import urllib.request
     from pathlib import Path
 
-    import duckdb
     import geopandas as gpd
     import marimo as mo
     import matplotlib
@@ -24,23 +18,28 @@ with app.setup:
     import shapely
     from rapidfuzz import fuzz
 
-    HERE = Path(__file__).parent
-    DATA = Path(os.environ.get("CROSSWALK_DATA_DIR", HERE / "data"))
-    OUT = Path(os.environ.get("CROSSWALK_OUTPUT_DIR", HERE / "output"))
+    from shared import (
+        DATA,
+        HERE,
+        LAYERS,
+        METRIC,
+        OUT,
+        OVERTURE,
+        OVERTURE_RELEASE,
+        QLEVER,
+        US_BOXES,
+        box_filter,
+        fetch_json,
+        hifld_files,
+        name_score,
+        normalise,
+        overture_connection,
+        qlever_tsv,
+        read_hifld,
+    )
+
     DATA.mkdir(parents=True, exist_ok=True)
     OUT.mkdir(parents=True, exist_ok=True)
-    HIFLD_API = "https://hifld.publicenvirodata.org/api/collections/hifld/datasets"
-    OVERTURE_RELEASE = "2026-09-23.0"
-    OVERTURE = f"s3://overturemaps-us-west-2/release/{OVERTURE_RELEASE}"
-    QLEVER = "https://qlever.dev/api/osm-planet"
-    # US National Atlas Equal Area: one metric projection for all 50 states, so distances are in metres everywhere.
-    METRIC = "EPSG:9311"
-    STATES = [
-        *"AL AK AZ AR CA CO CT DE DC FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY".split(),
-        *"NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY".split(),
-    ]
-    # Boxes for the lower 48, Alaska (west of the antimeridian is skipped) and Hawaii.
-    US_BOXES = [(-125.0, 24.4, -66.8, 49.5), (-180.0, 51.0, -129.0, 71.6), (-161.0, 18.8, -154.7, 22.4)]
     RUN_STARTED = time.perf_counter()
 
 
@@ -90,70 +89,9 @@ def _():
 
 @app.cell
 def _():
-    layers = pd.DataFrame(
-        [
-            (
-                "Hospitals",
-                "hospitals-3",
-                "v1.1.0",
-                "source_ID",
-                ["hospital", "emergency_department"],
-                [("amenity", "hospital")],
-            ),
-            (
-                "Fire and EMS stations",
-                "fire-and-emergency-medical-service-ems-stations",
-                "v1.0.0",
-                "PERMANENT_",
-                ["fire_station", "ambulance_or_ems_service"],
-                [("amenity", "fire_station"), ("emergency", "ambulance_station")],
-            ),
-            (
-                "Local law enforcement",
-                "local-law-enforcement-locations",
-                "v1.0.0",
-                "source_ID",
-                ["police_station"],
-                [("amenity", "police")],
-            ),
-            (
-                "Public schools",
-                "public-schools",
-                "v1.0.0",
-                "NCESID",
-                ["elementary_school", "middle_school", "high_school", "school", "public_school"],
-                [("amenity", "school")],
-            ),
-            ("Power plants", "power-plants-1", "v1.0.0", "PLANT_CODE", ["infrastructure:plant"], [("power", "plant")]),
-        ],
-        columns=["layer", "slug", "version", "id_column", "overture_categories", "osm_tags"],
-    ).set_index("layer")
+    layers = LAYERS
     layers[["slug", "version", "id_column", "overture_categories", "osm_tags"]]
     return (layers,)
-
-
-@app.cell
-def _():
-    def fetch_json(url: str) -> dict:
-        request = urllib.request.Request(url, headers={"User-Agent": "hifld-overture-crosswalk spike"})
-        with urllib.request.urlopen(request, timeout=120) as response:
-            if response.status != 200:
-                raise RuntimeError(f"{url} returned HTTP {response.status}")
-            return json.load(response)
-
-    def fetch(url: str, name: str) -> Path:
-        """Download url into DATA/name once; later runs reuse the copy."""
-        path = DATA / name
-        if path.exists():
-            return path
-        request = urllib.request.Request(url, headers={"User-Agent": "hifld-overture-crosswalk spike"})
-        with urllib.request.urlopen(request, timeout=900) as response:
-            if response.status != 200:
-                raise RuntimeError(f"{url} returned HTTP {response.status}")
-            path.write_bytes(response.read())
-        return path
-
-    return fetch, fetch_json
 
 
 @app.cell(hide_code=True)
@@ -161,29 +99,16 @@ def _():
     mo.md(r"""
     **HIFLD Next through its API.** The API returns each dataset as a STAC catalog; its child is a catalog of
     versions, and each version's collection lists the files. We follow those links to the GeoParquet file, so the
-    URL comes from the API rather than being typed in.
+    URL comes from the API rather than being typed in. The code is `hifld_files()` in `shared.py`.
     """)
     return
 
 
 @app.cell
-def _(fetch, fetch_json, layers):
-    _rows = []
-    for _layer, _spec in layers.iterrows():
-        _dataset = fetch_json(f"{HIFLD_API}/{_spec['slug']}")
-        _versions = fetch_json(next(link["href"] for link in _dataset["links"] if link["rel"] == "child"))
-        _collection_url = next(
-            link["href"]
-            for link in _versions["links"]
-            if link["rel"] == "child" and f"/{_spec['version']}/" in link["href"]
-        )
-        _collection = fetch_json(_collection_url)
-        _url = next(a["href"] for k, a in _collection["assets"].items() if k.startswith("geoparquet"))
-        _release = re.search(r"releases/([0-9a-f]{8})", _collection_url)
-        _rows.append((_layer, _url, _release.group(1) if _release else "", fetch(_url, f"{_spec['slug']}.parquet")))
-    hifld_files = pd.DataFrame(_rows, columns=["layer", "url", "release", "path"]).set_index("layer")
-    hifld_files[["release", "url"]]
-    return (hifld_files,)
+def _():
+    files = hifld_files()
+    files[["release", "url"]]
+    return (files,)
 
 
 @app.cell(hide_code=True)
@@ -196,36 +121,8 @@ def _():
 
 
 @app.cell
-def _(hifld_files, layers):
-    _frames = []
-    for _layer, _spec in layers.iterrows():
-        _raw = gpd.read_parquet(hifld_files.loc[_layer, "path"])
-        _frame = gpd.GeoDataFrame(
-            {
-                "layer": _layer,
-                "hifld_id": _raw[_spec["id_column"]].astype(str),
-                "name": _raw["NAME"].astype(str),
-                "address": _raw["ADDRESS"].astype(str),
-                "city": _raw["CITY"].astype(str),
-                "state": _raw["STATE"],
-                "status": _raw["STATUS"].astype(str) if "STATUS" in _raw else "",
-                "facility_type": _raw["TYPE"].astype(str) if "TYPE" in _raw else "",
-                "source_date": _raw.get("SOURCEDATE", _raw.get("SOURCE_DATE", _raw.get("LOADDATE")))
-                .astype(str)
-                .str[:10],
-            },
-            geometry=_raw.geometry,
-            crs=_raw.crs,
-        ).to_crs(4326)
-        _frames.append(_frame)
-    _all = pd.concat(_frames, ignore_index=True)
-    hifld = _all[_all["state"].isin(STATES)].reset_index(drop=True)
-    # Public Schools' TYPE is the NCES school-type code.
-    _school_types = {"1": "REGULAR", "2": "SPECIAL EDUCATION", "3": "CAREER AND TECHNICAL", "4": "ALTERNATIVE"}
-    _schools = hifld["layer"] == "Public schools"
-    hifld.loc[_schools, "facility_type"] = hifld.loc[_schools, "facility_type"].map(_school_types)
-    hifld["lon"] = hifld.geometry.x
-    hifld["lat"] = hifld.geometry.y
+def _(files, layers):
+    _all, hifld = read_hifld(files)
     hifld_counts = pd.DataFrame(
         {"records": _all.groupby("layer").size(), "in 50 states + DC": hifld.groupby("layer").size()}
     ).loc[layers.index]
@@ -245,27 +142,7 @@ def _():
 
 
 @app.cell
-def _():
-    def overture_connection() -> duckdb.DuckDBPyConnection:
-        con = duckdb.connect()
-        con.sql("INSTALL httpfs; LOAD httpfs; INSTALL spatial; LOAD spatial;")
-        # An empty key makes DuckDB read the public bucket anonymously instead of using any AWS credentials around.
-        con.sql("CREATE SECRET overture (TYPE s3, KEY_ID '', SECRET '', REGION 'us-west-2')")
-        # Reading S3 is bound by request latency, not CPU, so more threads than cores means more reads in flight.
-        con.sql("SET threads = 10")
-        con.sql("SET memory_limit = '4GB'")
-        con.sql("SET preserve_insertion_order = false")
-        return con
-
-    def box_filter(box: tuple[float, float, float, float]) -> str:
-        xmin, ymin, xmax, ymax = box
-        return f"bbox.xmin > {xmin} AND bbox.xmax < {xmax} AND bbox.ymin > {ymin} AND bbox.ymax < {ymax}"
-
-    return box_filter, overture_connection
-
-
-@app.cell
-def _(box_filter, layers, overture_connection):
+def _(layers):
     places_path = DATA / f"overture-places-{OVERTURE_RELEASE}.parquet"
     _categories = sorted({c for cs in layers["overture_categories"] for c in cs if not c.startswith("infrastructure")})
     _in = ", ".join(f"'{c}'" for c in _categories)
@@ -286,7 +163,7 @@ def _(box_filter, layers, overture_connection):
 
 
 @app.cell
-def _(box_filter, overture_connection):
+def _():
     plants_path = DATA / f"overture-infrastructure-plants-{OVERTURE_RELEASE}.parquet"
     if not plants_path.exists():
         _con = overture_connection()
@@ -321,7 +198,7 @@ def _():
 
 
 @app.cell
-def _(box_filter, hifld, overture_connection):
+def _(hifld):
     # The lower 48 is read in eight strips of longitude, so each query fits in memory and a failed run resumes.
     _edges = np.linspace(US_BOXES[0][0], US_BOXES[0][2], 9)
     _strips = [(a, US_BOXES[0][1], b, US_BOXES[0][3]) for a, b in zip(_edges[:-1], _edges[1:], strict=True)]
@@ -381,50 +258,14 @@ def _():
 
 
 @app.cell
-def _(fetch_json, layers):
+def _(layers):
     osm_build = fetch_json(f"{QLEVER}?cmd=stats")["name-index"]
-    _frames = []
-    for _layer, _spec in layers.iterrows():
-        for _key, _value in _spec["osm_tags"]:
-            _path = DATA / f"osm-{_key}-{_value}.tsv"
-            if not _path.exists():
-                _query = f"""
-                    PREFIX osmkey: <https://www.openstreetmap.org/wiki/Key:>
-                    PREFIX ogc: <http://www.opengis.net/rdf#>
-                    PREFIX osmrel: <https://www.openstreetmap.org/relation/>
-                    PREFIX geo: <http://www.opengis.net/ont/geosparql#>
-                    PREFIX geof: <http://www.opengis.net/def/function/geosparql/>
-                    SELECT ?osm ?name ?centroid ?xmin ?ymin ?xmax ?ymax WHERE {{
-                      osmrel:148838 ogc:sfContains ?osm . ?osm osmkey:{_key} "{_value}" .
-                      ?osm geo:hasGeometry/geo:asWKT ?wkt . BIND(geof:centroid(?wkt) AS ?centroid)
-                      BIND(geof:minX(?wkt) AS ?xmin) BIND(geof:minY(?wkt) AS ?ymin)
-                      BIND(geof:maxX(?wkt) AS ?xmax) BIND(geof:maxY(?wkt) AS ?ymax)
-                      OPTIONAL {{ ?osm osmkey:name ?name }}
-                    }}"""
-                _request = urllib.request.Request(
-                    QLEVER,
-                    data=urllib.parse.urlencode({"query": _query}).encode(),
-                    headers={"Accept": "text/tab-separated-values", "User-Agent": "hifld-overture-crosswalk spike"},
-                )
-                with urllib.request.urlopen(_request, timeout=900) as _response:
-                    if _response.status != 200:
-                        raise RuntimeError(f"QLever returned HTTP {_response.status}")
-                    _path.write_bytes(_response.read())
-            _tsv = pd.read_csv(_path, sep="\t", quoting=3, dtype=str)
-            _xy = _tsv["?centroid"].str.extract(r"POINT\(([-\d.]+) ([-\d.]+)\)").astype(float)
-            _frames.append(
-                pd.DataFrame(
-                    {
-                        "layer": _layer,
-                        "osm_id": _tsv["?osm"].str.extract(r"org/(\w+/\d+)>")[0],
-                        "name": _tsv["?name"].str.strip('"').str.replace(r'"\^\^.*$', "", regex=True),
-                        "lon": _xy[0],
-                        "lat": _xy[1],
-                        **{c: pd.to_numeric(_tsv[f"?{c}"]) for c in ["xmin", "ymin", "xmax", "ymax"]},
-                    }
-                )
-            )
-    osm = pd.concat(_frames, ignore_index=True).dropna(subset=["lon"])
+    _frames = [
+        qlever_tsv(_key, _value, DATA / f"osm-{_key}-{_value}.tsv").assign(layer=_layer)
+        for _layer, _spec in layers.iterrows()
+        for _key, _value in _spec["osm_tags"]
+    ]
+    osm = pd.concat(_frames, ignore_index=True)
     mo.md(f"OSM source: {osm_build}")
     return osm, osm_build
 
@@ -449,63 +290,6 @@ def _():
     A name match between 250 m and 2 km away is a sign that one side has the point in the wrong place.
     """)
     return
-
-
-@app.cell
-def _():
-    _abbreviations = {
-        "elem": "elementary",
-        "el": "elementary",
-        "sch": "school",
-        "schl": "school",
-        "hs": "high school",
-        "ms": "middle school",
-        "es": "elementary school",
-        "jr": "junior",
-        "sr": "senior",
-        "ctr": "center",
-        "cntr": "center",
-        "hosp": "hospital",
-        "med": "medical",
-        "reg": "regional",
-        "mem": "memorial",
-        "dept": "department",
-        "pd": "police department",
-        "fd": "fire department",
-        "vfd": "volunteer fire department",
-        "co": "county",
-        "twp": "township",
-        "mt": "mount",
-        "ft": "fort",
-        "intl": "international",
-        "acad": "academy",
-    }
-    _generic = set(
-        "the of and at school schools academy public "
-        "hospital hospitals medical center centre health healthcare clinic regional general memorial community "
-        "fire station stations department dept volunteer rescue ems emergency services service company district "
-        "police sheriff sheriffs office county city town township village borough state law enforcement agency "
-        "power plant generating station energy solar farm wind project facility llc inc".split()
-    )
-
-    def normalise(name: str) -> tuple[str, str, frozenset[str]]:
-        """Return (full normalised name, its distinctive words, the numbers in it)."""
-        text = re.sub(r"[^a-z0-9 ]+", " ", str(name).lower().replace("&", " and "))
-        words = re.sub(r"\b([hm]) s\b", r"\1s", text).split()  # "h s" -> "hs"
-        words = " ".join(_abbreviations.get(w, w) for w in words).split()
-        distinctive = [w for w in words if w not in _generic and not w.isdigit()]
-        return " ".join(words), " ".join(distinctive), frozenset(w for w in words if w.isdigit())
-
-    def name_score(a: tuple[str, str, frozenset[str]], b: tuple[str, str, frozenset[str]]) -> float:
-        if not a[0] or not b[0]:
-            return 0.0
-        if a[2] and b[2] and not (a[2] & b[2]):
-            return 0.0
-        if a[1] and b[1]:
-            return fuzz.token_set_ratio(a[1], b[1])
-        return fuzz.token_sort_ratio(a[0], b[0])
-
-    return name_score, normalise
 
 
 @app.cell
@@ -543,7 +327,7 @@ def _(hifld, layers, osm, overture_plants, places):
 
 
 @app.cell
-def _(candidates, hifld_points, layers, name_score, normalise):
+def _(candidates, hifld_points, layers):
     _started = time.perf_counter()
     _pairs = []
     for _layer in layers.index:
@@ -630,7 +414,7 @@ def _():
 
 
 @app.cell
-def _(box_filter, crosswalk, overture_connection):
+def _(crosswalk):
     _ct_box = (-73.73, 40.98, -71.78, 42.05)
     _ct = crosswalk[(crosswalk["state"] == "CT") & crosswalk["building_id"].notna()]
     footprints_path = DATA / f"overture-ct-footprints-{OVERTURE_RELEASE}.parquet"
@@ -724,7 +508,7 @@ def _():
 
 
 @app.cell
-def _(crosswalk, hifld_points, layers, name_score, normalise):
+def _(crosswalk, hifld_points, layers):
     _far = lambda x, p: (x[f"{p}_nearest_m"] > 250) | x[f"{p}_nearest_m"].isna()  # noqa: E731
     _named_far = lambda x, p: x[f"{p}_name_match"] & (x[f"{p}_distance_m"] > 250)  # noqa: E731
     crosswalk["hifld_only"] = _far(crosswalk, "overture") & _far(crosswalk, "osm")
