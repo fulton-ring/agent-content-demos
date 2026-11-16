@@ -245,11 +245,11 @@ def _(co_extra, co_fields, co_location, co_match_rate, mo, rebuilt_co, wade_allo
     _lost = wade_alloc.index[~wade_alloc.index.isin(rebuilt_co.index)]
     mo.md(f"""
     **{co_match_rate:.1%}** of WaDE's {len(wade_alloc):,} Colorado rights are in today's
-    rebuild of {len(rebuilt_co):,}. {len(_lost):,} WaDE IDs are gone, most likely rights the
-    water court has since changed (a new admin number or decree makes a new ID).
+    rebuild of {len(rebuilt_co):,}. {len(_lost):,} WaDE IDs are gone. We didn't trace why;
+    a new admin number or decree on a right would give it a new ID.
     Of the {co_extra["not_in_wade"]:,} rebuilt rights WaDE didn't have,
     {co_extra["dropped_by_wade_checks"]:,} were dropped by WSWC's own error checks and
-    {co_extra["new_or_unexplained"]:,} are new decrees since WaDE's last load.
+    {co_extra["new_or_unexplained"]:,} are new since WaDE's last load.
     Location agrees for **{co_location:.1%}** of matched rights.
 
     Fields that come back at 95% or better:
