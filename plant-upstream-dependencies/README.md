@@ -58,11 +58,11 @@ water dependency".
 | Gas LDC or pipeline (gas-burning plants) | 98.0% | 0% |
 | Water source | 25.0% | 0% |
 
-![The headline table from the notebook](outputs/result_table.png)
+![Screenshot of the headline table in the notebook](outputs/result_table.png)
 
 - 98.6% of operating plants have grid owner, balancing authority and grid voltage all recorded in EIA-860.
 - HIFLD Next's 43 columns hold no balancing authority, grid owner, voltage, gas supplier or water source.
-  Its `SUB_1`/`SUB_2` substation names are the only upstream link, filled for 2,151 operating plants.
+  Its `SUB_1` substation name is the only upstream link, filled for 2,151 operating plants (we count `SUB_1` only).
 - Water source is low overall because solar, wind and storage plants (66% of plants) use none. It's
   recorded for 100% of hydro and nuclear, 99.5% of coal and 65.2% of gas plants (`outputs/by_fuel.csv`).
 - HIFLD's substation share varies by fuel (72% of nuclear, 44% of gas, 0.9% of solar) and by state

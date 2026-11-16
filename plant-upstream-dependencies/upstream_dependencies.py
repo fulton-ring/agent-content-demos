@@ -143,7 +143,7 @@ def _():
     - **Gas LDC and pipelines** (lines 16a and 16b): only plants with an existing gas-fired generator
       answer. So we measure those two only over gas-burning plants.
 
-    We group the fields into five dependency types: grid owner (transmission or distribution owner),
+    We group the fields into six dependency types: grid owner (transmission or distribution owner),
     balancing authority, grid voltage, gas LDC, gas pipeline, and water source.
     """)
     return
