@@ -21,7 +21,7 @@ From a clean run on 2026-11-16 (`outputs/summary.md` has the full tables):
 | Extra rights WSWC's own checks had dropped | 1,949 | 453 | 21,158 |
 | Newest record | application filed 2026-09-26 | modified 2026-11-13 | priority 2019-02-15 |
 | Source updated / how often | 2026-11-16, weekly | 2026-11-15, daily | export of 2019-03-02, never |
-| Run time (download + rebuild) | 23 s | 63 s | 28 s |
+| Run time (download + rebuild) | 23–24 s | 63–109 s (Socrata download speed varies) | 27–28 s |
 
 **Fields that come back** (share of matched rights with the same value, where WaDE had one):
 
