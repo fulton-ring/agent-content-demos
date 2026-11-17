@@ -386,8 +386,9 @@ def _(
     {ca_summary["newest_record"]}; the file was last updated {source_updated} and the Water
     Board updates it weekly. Run time {ca_summary["run_seconds"]} s.
 
-    **What came back:** the rights themselves, their locations, flow and use acreage. A
-    priority date came back too, which WaDE's California table never had.
+    **What came back:** the rights themselves, their locations, flow and use acreage.
+    Priority dates came back and agree where WaDE had one; CalWATRS adds dates for many
+    more rights.
     **What didn't:** owner (not in the open file), and WaDE's status and type vocabulary,
     which comes back only through a lookup learned from WaDE's own last table.
     """)
