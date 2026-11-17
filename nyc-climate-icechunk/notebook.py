@@ -3,9 +3,12 @@ import marimo
 __generated_with = "0.25.2"
 app = marimo.App(width="medium")
 
+with app.setup:
+    from typing import Any
+
 
 @app.cell
-def _():
+def _() -> Any:
     import io
     import json
     import os
@@ -54,7 +57,7 @@ def _():
 
 
 @app.cell
-def _(mo):
+def _(mo: Any) -> Any:
     mo.md("""
     # Can NYC climate datasets play nicely together?
 
@@ -70,7 +73,18 @@ def _(mo):
 
 
 @app.cell
-def _(download, end, hours, hourly_depth, json, measurements, os, output, pd, start):
+def _(
+    download: Any,
+    end: Any,
+    hours: Any,
+    hourly_depth: Any,
+    json: Any,
+    measurements: Any,
+    os: Any,
+    output: Any,
+    pd: Any,
+    start: Any,
+) -> Any:
     _body, measurements["floodnet_deployments"] = download(os.environ["CLIMATE_FLOOD_URL"])
     _deployments = json.loads(_body)["deployments"]
     _eligible = [
@@ -102,7 +116,17 @@ def _(download, end, hours, hourly_depth, json, measurements, os, output, pd, st
 
 
 @app.cell
-def _(download, end, io, json, measurements, os, output, pd, start):
+def _(
+    download: Any,
+    end: Any,
+    io: Any,
+    json: Any,
+    measurements: Any,
+    os: Any,
+    output: Any,
+    pd: Any,
+    start: Any,
+) -> Any:
     _body, measurements["coops"] = download(
         os.environ["CLIMATE_TIDE_URL"],
         {
@@ -161,7 +185,7 @@ def _(download, end, io, json, measurements, os, output, pd, start):
 
 
 @app.cell
-def _(download, json, measurements, os, output, requests):
+def _(download: Any, json: Any, measurements: Any, os: Any, output: Any, requests: Any) -> Any:
     _body, measurements["gieo_page"] = download(os.environ["CLIMATE_GIEO_URL"])
     _page = _body.decode()
     access_audit = [
@@ -253,26 +277,26 @@ def _(download, json, measurements, os, output, requests):
 
 @app.cell
 def _(
-    deployment,
-    depth,
-    depth_hourly,
-    distance_km,
-    end,
-    hours,
-    json,
-    measurements,
-    nws,
-    output,
-    pd,
-    plt,
-    sensor_lat,
-    sensor_lon,
-    start,
-    started,
-    tide,
-    time,
-    weather,
-):
+    deployment: Any,
+    depth: Any,
+    depth_hourly: Any,
+    distance_km: Any,
+    end: Any,
+    hours: Any,
+    json: Any,
+    measurements: Any,
+    nws: Any,
+    output: Any,
+    pd: Any,
+    plt: Any,
+    sensor_lat: Any,
+    sensor_lon: Any,
+    start: Any,
+    started: Any,
+    tide: Any,
+    time: Any,
+    weather: Any,
+) -> Any:
     rainfall = pd.read_parquet(output / "rainfall-hourly.parquet")
     rainfall["interval_start"] = pd.to_datetime(rainfall.interval_start, utc=True)
     rainfall["interval_end"] = pd.to_datetime(rainfall.interval_end, utc=True)
@@ -361,7 +385,7 @@ def _(
 
 
 @app.cell
-def _(access_audit, mo, summary):
+def _(access_audit: Any, mo: Any, summary: Any) -> Any:
     mo.md(f"""
     ## Result and boundaries
 

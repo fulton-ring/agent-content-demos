@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 import xarray as xr
 
-from gridded import hourly_rain, native_subset, round_trip
+from gridded_core import hourly_rain, native_subset, round_trip
 
 
 def fixture_grid(source: str) -> xr.Dataset:
