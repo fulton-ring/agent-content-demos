@@ -445,9 +445,9 @@ def _(joined):
                 Hand check: {", ".join(f"{_v}: {_n}" for _v, _n in hand_counts.items())}. Scaled up, that's about
                 **{quality["est_wrong_matches_from_outliers"]:,.0f}** wrong matches among the outliers alone.
                 Separately, on matches where HIFLD names an owner, **{owner_disagree:.1%}** name a different utility
-                from the Form 1 respondent (first word of the respondent's name not found in the HIFLD owner). That's an upper
-                bound: it counts renamed utilities (Progress Energy Carolinas filed as Duke Energy Progress, Westar as
-                Evergy) and HIFLD owner errors as well as wrong matches."""
+                from the Form 1 respondent (first word of the respondent's name not found in the HIFLD owner).
+                That's an upper bound: it counts renamed utilities (Progress Energy Carolinas filed as Duke Energy
+                Progress, Westar as Evergy) and HIFLD owner errors as well as wrong matches."""
             ),
             mo.ui.table(_verdicts, selection=None),
         ]
@@ -679,6 +679,10 @@ def _(
         - **Cost.** {cost_by_tier.loc["all tiers", "Share with cost"]:.1%} of matches carry a nonzero cost
           ({cost_by_tier.loc["high", "Share with cost"]:.1%} of high-confidence ones). That leaves
           **{costed_share["hv_miles"]:.1%} of HIFLD's 132 kV+ miles with a public Form 1 cost**.
+        - **Why blank.** In 2024, {
+            totals_check["blank_2024_with_respondent_total"]
+            / totals_check["blank_2024_in_pudl"]:.0%} of costless matches
+          belong to a utility that reported its cost only as a voltage or system total.
         - **Quality.** {quality["hand_wrong_share"]:.0%} of the 20 hand-checked length outliers are the wrong line.
         - **Vintage.** No LBNL line is missing from HIFLD Next and {vintage["vertex_off_line_over_1m"]} have moved;
           LBNL used the same HIFLD release.
@@ -696,8 +700,9 @@ def _():
 
     - **No circuit miles.** HIFLD has no circuit count, so shares are in route miles of HIFLD segments. Form 1's
       `number_of_circuits` exists only for matched lines, so it can't weight the denominator.
-    - **Owner type is approximate.** About a third of named owners aren't in the Retail Service Territories layer;
-      keywords and an "investor-owned by elimination" default cover them. Segments with no owner (`NOT AVAILABLE`)
+    - **Owner type is approximate.** Owners missing from the Retail Service Territories layer are typed by keyword
+      or counted investor-owned by elimination, and HIFLD's owner field has its own errors (Azusa Light & Power, a
+      small city utility, is listed on 779 segments). Segments with no owner (`NOT AVAILABLE`)
       can't be placed in the Form 1-covered subset at all, though LBNL matched many of them.
     - **One match per HIFLD segment, one segment per Form 1 line.** Form 1 reports a line end to end; HIFLD splits
       lines at taps. LBNL ties each Form 1 record to a single HIFLD segment, so the rest of a long line counts as
