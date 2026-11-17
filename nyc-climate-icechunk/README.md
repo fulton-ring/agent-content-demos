@@ -16,8 +16,7 @@ bash nyc-climate-icechunk/run.sh
 No API keys or paid services are needed for the tested core. Internet access is required.
 `uv sync --locked` installs the pinned Python environment. The default run downloads six hours
 on September 2, 2021, 00:00–06:00 UTC (Hurricane Ida), around 40.6–40.9°N, 74.1–73.7°W.
-Runtime outputs, upstream data and caches stay in ignored `output/`; do not publish that directory.
-Shell environment overrides defaults in `config.env`. Example of a fresh output directory:
+`config.env` defaults accept environment overrides; runtime files stay in ignored `output/`. Fresh run:
 
 ```sh
 CLIMATE_OUTPUT="$HOME/.capy/work/climate-proof" bash nyc-climate-icechunk/run.sh
@@ -51,8 +50,18 @@ elevation by UTC interval start. It does **not** join weather's trailing-hour ra
 
 ## Results
 
-Measured results from the clean-checkout run are recorded in `results/`.
-This spike must not be described as proving every discussed source: see the access audit below.
+Clean-checkout code `38cbb92`: **34.70 seconds**, peak RSS **330 MiB**; all 12 tests,
+ruff, ty and strict marimo checks pass. `results/` contains the measured summaries and chart.
+
+| Source | Native array shape (time × lat × lon) | Fresh Icechunk bytes | Six-hour rain at nearest cell |
+|---|---|---:|---:|
+| MRMS | 6 × 30 × 40 | 14,087 | 132.63 mm |
+| IMERG Early | 12 × 3 × 4 | 4,638 | 65.17 mm |
+| ERA5 | 6 × 1 × 2 | 3,224 | 38.61 mm |
+
+The join uses 81 depth readings, 60 tide readings and six historical weather reports.
+ERA5 transferred 11,273,221 response-body bytes; MRMS/IMERG network bytes are unmeasured.
+Not every discussed source works end to end: see the access audit below.
 
 ## Issues uncovered before a dashboard exists
 
@@ -96,8 +105,8 @@ This spike must not be described as proving every discussed source: see the acce
 - NYC stormwater maps: catalog metadata is reachable, but scenario geometries are not downloaded.
 - AirNow/AQS and NYC Micronet: not ingested. API accounts and/or reuse permissions remain work.
 
-No fake arrays substitute for these sources. NASA authentication, CDS retrieval, GIEO ingestion,
-satellite imagery analysis and stormwater geometry belong in follow-ups, not a false all-green claim.
+No fake arrays substitute for these sources. Access follow-ups: [GIEO #294](https://github.com/fulton-ring/agent-content-demos/issues/294)
+and [NASA/CDS #295](https://github.com/fulton-ring/agent-content-demos/issues/295); maps remain untested.
 
 ## Publishing and cost implications
 
