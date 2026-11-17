@@ -317,15 +317,25 @@ def _(
         for r in rainfall.drop_duplicates("source").itertuples()
     }
     _fig, _axes = plt.subplots(3, 1, figsize=(10, 8), sharex=True, layout="constrained")
-    rain_wide.plot.bar(ax=_axes[0], width=0.8)
+    for _series_index, (_source, _values) in enumerate(rain_wide.items()):
+        _axes[0].bar(
+            [p + (_series_index - 1) * 0.25 for p in range(hours)],
+            _values.to_numpy(),
+            width=0.25,
+            label=_source,
+        )
+    _axes[0].legend()
     _axes[0].set_ylabel("Rainfall (mm / UTC hour)")
     _axes[0].set_title("Ida: native-cell rainfall products disagree; grids are not interchangeable")
     _depth_plot = depth.set_index("time").depth_proc_mm.resample("h").max()
-    _axes[1].plot(range(hours), _depth_plot.reindex(joined.index), marker="o")
+    _axes[1].plot(range(hours), _depth_plot.reindex(joined.index).to_numpy(), marker="o")
     _axes[1].set_ylabel("Hourly maximum street depth (mm)")
-    _axes[2].plot(range(hours), joined.harbor_level_m_NAVD88_mean, marker="o", color="tab:green")
+    _axes[2].plot(
+        range(hours), joined.harbor_level_m_NAVD88_mean.to_numpy(), marker="o", color="tab:green"
+    )
     _axes[2].set_ylabel("Harbor elevation (m NAVD88)")
     _axes[2].set_xticks(range(hours), [t.strftime("%H:%M") for t in joined.index])
+    _axes[2].set_xlim(-0.5, hours - 0.5)
     _axes[2].set_xlabel(f"UTC interval start on {start:%Y-%m-%d}; exploratory, not causal")
     _fig.text(
         0.5,
