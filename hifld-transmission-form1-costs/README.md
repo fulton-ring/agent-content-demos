@@ -117,6 +117,8 @@ apparently filled in from Form 1. One trap: LBNL's column is named `GlobalID`, b
 - **A full error rate.** The hand check is 20 outliers, judged from names and lengths without imagery. It says
   little about matches that look normal.
 - **Footnotes.** We didn't read filing footnotes, which might explain individual blanks.
+- **Fixed totals-row figures.** PUDL's nightly build is updated as filings change, so the totals-row figures can
+  drift a little between runs. The other inputs are fixed releases.
 
 ## What we looked at first
 
