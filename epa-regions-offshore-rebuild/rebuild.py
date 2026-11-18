@@ -121,7 +121,10 @@ def _(DATA, json, requests, time, zipfile):
     def download_layer(url: str, name: str) -> dict:
         path = DATA / f"{name}.geojson"
         if not path.exists():
-            resp = fetch(f"{url}/query", {"where": "1=1", "outFields": "*", "outSR": 4326, "f": "geojson"})
+            resp = fetch(
+                f"{url}/query",
+                {"where": "1=1", "outFields": "*", "outSR": 4326, "f": "geojson"},
+            )
             body = resp.json()
             assert "features" in body and not body.get("exceededTransferLimit"), f"{name}: incomplete download"
             path.write_text(resp.text)
@@ -163,7 +166,18 @@ def _(DATA, gpd, shapely):
 
 
 @app.cell
-def _(EPA_2012, EPA_2023, NOAA_ZIP, item_2023, meta_2012, meta_2023, mo, noaa, noaa_http, pd):
+def _(
+    EPA_2012,
+    EPA_2023,
+    NOAA_ZIP,
+    item_2023,
+    meta_2012,
+    meta_2023,
+    mo,
+    noaa,
+    noaa_http,
+    pd,
+):
     def ms_date(ms: int | None) -> str:
         return pd.Timestamp(ms, unit="ms").date().isoformat() if ms else "not stated"
 
@@ -178,7 +192,8 @@ def _(EPA_2012, EPA_2023, NOAA_ZIP, item_2023, meta_2012, meta_2023, mo, noaa, n
             {
                 "input": "U.S. EPA Regions (DOC & EPA 2023), onshore",
                 "url": EPA_2023,
-                "current as of": "data last edited " + ms_date(meta_2023.get("editingInfo", {}).get("dataLastEditDate")),
+                "current as of": "data last edited "
+                + ms_date(meta_2023.get("editingInfo", {}).get("dataLastEditDate")),
                 "licence": "EPA Data Licensing Agreement, public use"
                 if "public" in (item_2023.get("licenseInfo") or "")
                 else "see item page",
@@ -224,7 +239,8 @@ def _(mo):
 def _(EQUAL_AREA, NM, gpd, new, noaa, np, polygonize, shapely, unary_union):
     def to_360(geom: shapely.Geometry) -> shapely.Geometry:
         return shapely.transform(
-            geom, lambda xy: np.column_stack([np.where(xy[:, 0] < 0, xy[:, 0] + 360, xy[:, 0]), xy[:, 1]])
+            geom,
+            lambda xy: np.column_stack([np.where(xy[:, 0] < 0, xy[:, 0] + 360, xy[:, 0]), xy[:, 1]]),
         )
 
     def km2(geom: shapely.Geometry) -> float:
@@ -349,7 +365,8 @@ def _(mo):
     - **D. Keep EPA's 2012 lines:** reuse the five straight segments measured above as cutters on the
       current EEZ and current coast.
 
-    For B, C and D the cut pieces go to the region whose coast each piece touches most.
+    For B, C and D the cut pieces go to the region whose coast each piece touches most. The BOEM lines and
+    the 2012 segments are stretched 0.3° past each end so they reach the current coast and EEZ edge.
     """)
     return
 
@@ -394,7 +411,8 @@ def _(EQUAL_AREA, gpd, land_by_region, offshore, polygonize, shapely, unary_unio
 
 @app.cell
 def _(gpd, land_by_region, np, shapely, shared, to_360, unary_union):
-    # Rule A: Voronoi cells (in an equal-area US projection) around points every 2 km along each region's coast facing the shared waters.
+    # Rule A: Voronoi cells (equal-area US projection) around points every 2 km along each region's coast
+    # that faces the shared waters.
     _crs = "EPSG:5070"
     _coast_pts, _labels = [], []
     _near = shared.buffer(0.05)
@@ -422,7 +440,13 @@ def _(gpd, land_by_region, np, shapely, shared, to_360, unary_union):
 @app.cell
 def _(PAIRS, boem, land_by_region, old_splits, pieces_by_coast, shapely, shared, to_360):
     # Rule B: from the seaward end of each onshore region line, a ray due east, west or south.
-    _direction = {(1, 2): (1, 0), (2, 3): (1, 0), (3, 4): (1, 0), (4, 6): (0, -1), (9, 10): (-1, 0)}
+    _direction = {
+        (1, 2): (1, 0),
+        (2, 3): (1, 0),
+        (3, 4): (1, 0),
+        (4, 6): (0, -1),
+        (9, 10): (-1, 0),
+    }
     _rays = []
     for _a, _b in PAIRS:
         _line = land_by_region[_a].boundary.intersection(land_by_region[_b].boundary)
@@ -430,21 +454,33 @@ def _(PAIRS, boem, land_by_region, old_splits, pieces_by_coast, shapely, shared,
         _start = min(_ends, key=shared.distance)
         _dx, _dy = _direction[(_a, _b)]
         _rays.append(
-            shapely.LineString([(_start.x - _dx * 0.05, _start.y - _dy * 0.05), (_start.x + _dx * 15, _start.y + _dy * 15)])
+            shapely.LineString(
+                [
+                    (_start.x - _dx * 0.05, _start.y - _dy * 0.05),
+                    (_start.x + _dx * 15, _start.y + _dy * 15),
+                ]
+            )
         )
     rule_b = pieces_by_coast(shared, _rays)
 
-    # Rule C: BOEM's state-to-state administrative boundaries.
-    rule_c = pieces_by_coast(shared, [to_360(g) for g in boem.geometry])
+    def stretch(line: shapely.LineString, deg: float = 0.3) -> shapely.LineString:
+        """Extend a line `deg` degrees past both ends along its end segments, so it crosses coast and EEZ edge."""
+        _xy = list(line.coords)
 
-    # Rule D: EPA's own 2012 segments, stretched 0.3 degrees past each end so they cross the current coast and edge.
-    def _stretch(seg: shapely.LineString) -> shapely.LineString:
-        (_x0, _y0), (_x1, _y1) = seg.coords[0], seg.coords[-1]
-        _len = ((_x1 - _x0) ** 2 + (_y1 - _y0) ** 2) ** 0.5
-        _ux, _uy = (_x1 - _x0) / _len, (_y1 - _y0) / _len
-        return shapely.LineString([(_x0 - 0.3 * _ux, _y0 - 0.3 * _uy), (_x1 + 0.3 * _ux, _y1 + 0.3 * _uy)])
+        def _past(a: tuple, b: tuple) -> tuple:
+            _len = ((b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2) ** 0.5
+            return (
+                b[0] + deg * (b[0] - a[0]) / _len,
+                b[1] + deg * (b[1] - a[1]) / _len,
+            )
 
-    rule_d = pieces_by_coast(shared, [_stretch(s) for s in old_splits.values()])
+        return shapely.LineString([_past(_xy[1], _xy[0]), *_xy, _past(_xy[-2], _xy[-1])])
+
+    # Rule C: BOEM's state-to-state administrative boundaries, stretched like rule D's segments.
+    rule_c = pieces_by_coast(shared, [stretch(to_360(g)) for g in boem.geometry])
+
+    # Rule D: EPA's own 2012 segments on the current coast and EEZ.
+    rule_d = pieces_by_coast(shared, [stretch(s) for s in old_splits.values()])
     return rule_b, rule_c, rule_d
 
 
@@ -461,8 +497,26 @@ def _(mo):
 
 
 @app.cell
-def _(OUT, km2, land, land_by_region, old_by_region, pd, rule_a, rule_b, rule_c, rule_d, single, unary_union):
-    rules = {"A nearest coast": rule_a, "B due seaward": rule_b, "C BOEM lines": rule_c, "D 2012 lines": rule_d}
+def _(
+    OUT,
+    km2,
+    land,
+    land_by_region,
+    old_by_region,
+    pd,
+    rule_a,
+    rule_b,
+    rule_c,
+    rule_d,
+    single,
+    unary_union,
+):
+    rules = {
+        "A nearest coast": rule_a,
+        "B due seaward": rule_b,
+        "C BOEM lines": rule_c,
+        "D 2012 lines": rule_d,
+    }
 
     def build(rule: dict) -> dict:
         _sea = {r: unary_union([g for g in (single.get(r), rule.get(r)) if g is not None]) for r in range(1, 11)}
@@ -475,12 +529,14 @@ def _(OUT, km2, land, land_by_region, old_by_region, pd, rule_a, rule_b, rule_c,
             _o, _n = old_by_region[_r], _layer[_r]
             _o_sea, _n_sea = _o.difference(land), _n.difference(land)
             _sea_union = km2(_o_sea.union(_n_sea))
+            # Inland regions keep only slivers offshore (TIGER 2011 vs 2023 coastline); score coastal ones.
+            _coastal = km2(_o_sea) > 1000
             _rows.append(
                 {
                     "rule": _name,
                     "region": _r,
                     "IoU region": round(km2(_o.intersection(_n)) / km2(_o.union(_n)), 4),
-                    "IoU offshore": round(km2(_o_sea.intersection(_n_sea)) / _sea_union, 4) if _sea_union else None,
+                    "IoU offshore": round(km2(_o_sea.intersection(_n_sea)) / _sea_union, 4) if _coastal else None,
                     "km2 differs": round(km2(_o.symmetric_difference(_n))),
                     "km2 2012 offshore": round(km2(_o_sea)),
                 }
@@ -529,13 +585,13 @@ def _(OUT, built, gpd, old_by_region, plt, summary):
 
 @app.cell
 def _(built, noaa, old_by_region, pd, to_360):
-    # Territories: which region holds each NOAA area in 2012 and in our rebuild (rule D; all rules agree off the lower 48).
+    # Territories: which region holds each NOAA area in 2012 and in our rebuild.
+    # Rule D shown; all rules agree away from the lower 48.
     _rows = []
     for _area, _grp in noaa.groupby("REGION"):
         if _area in ("Atlantic Coast and Gulf of Mexico", "Pacific Coast", "US-Canada"):
             continue
-        _pt = to_360(_grp.union_all()).centroid
-        _probe = _pt.buffer(0.5)
+        _probe = to_360(_grp.union_all())
         _in_old = [r for r, g in old_by_region.items() if g.intersects(_probe)]
         _in_new = [r for r, g in built["D 2012 lines"].items() if g.intersects(_probe)]
         _rows.append(
@@ -578,6 +634,31 @@ def _(OUT, STARTED, built, gpd, km2, shapely, summary, time):
     runtime = round(time.time() - STARTED)
     print(f"wrote epa_regions_offshore_derived.parquet with rule {best!r}; run time {runtime} s; cost $0")
     return best, runtime
+
+
+@app.cell
+def _(best, mo, runtime, summary):
+    _d, _b = summary.loc["D 2012 lines"], summary.loc["B due seaward"]
+    mo.md(f"""
+    ## Result
+
+    - **Yes, with EPA's own lines.** Rule {best!r}, keeping the five straight 2012 split segments and
+      rebuilding everything else from the 2023 regions and NOAA, scores offshore IoU of at least
+      **{_d.min_iou_offshore:.3f}** in every coastal region, with about {_d.km2_misassigned:,.0f} km² placed
+      differently from 2012, mostly coastline changes between the 2011 and 2023 TIGER states.
+    - **No simple rule from first principles gets there.** "Due seaward" comes closest (worst region
+      {_b.min_iou_offshore:.3f}, about {_b.km2_misassigned:,.0f} km² different) because three of EPA's five
+      lines are parallels; it misses the two oblique ones (1/2 and 4/6). Nearest coast and BOEM's
+      administrative lines agree with each other but not with EPA: they move the New York Bight and the
+      Mid-Atlantic split by up to half of Regions 1–3's offshore area.
+    - **Territories:** Puerto Rico and the US Virgin Islands go to Region 2; Hawaii, Guam, the Northern
+      Mariana Islands, American Samoa and the Pacific Remote Islands go to Region 9; Alaska to Region 10.
+      Same as 2012.
+    - **What the layer is:** a derived product. The offshore split lines were drawn by EPA in 2012 with no
+      published rule, so we document them as measured from that layer, not as EPA policy.
+    - Run time {runtime} s in a 4-core cloud container; cost $0 (public downloads only).
+    """)
+    return
 
 
 if __name__ == "__main__":
