@@ -825,6 +825,21 @@ def _(hifld, matched, osm, places):
     for _c in ["rebuilt_within_1km", "osm_polygon", "overture_place", "either_open_map"]:
         coverage[f"{_c}_share"] = (coverage[_c] / coverage["hifld_open"]).round(3)
     coverage.to_csv(OUT / "hifld_coverage.csv")
+    # The other direction: how many rebuilt facilities land within 1 km of any HIFLD record (open or not)?
+    _back = gpd.sjoin_nearest(
+        _pts[["facility_id", "source", "geometry"]], hifld[["TYPE", "geometry"]], max_distance=1000
+    )
+    _back = _back.drop_duplicates("facility_id")
+    _group = _pts["source"].where(_pts["source"].eq("BOP"), "state DOC")
+    on_hifld = pd.DataFrame(
+        {
+            "located": _group.value_counts(),
+            "within_1km_of_a_hifld_record": _group[_pts["facility_id"].isin(_back["facility_id"])].value_counts(),
+        }
+    )
+    on_hifld["share"] = (on_hifld.iloc[:, 1] / on_hifld["located"]).round(3)
+    on_hifld.to_csv(OUT / "rebuilt_on_hifld.csv")
+    print(on_hifld)
 
     # Outline agreement: each rebuilt outline against the HIFLD polygon it overlaps most.
     _outl = matched[matched.geometry.notna()].copy()
@@ -841,7 +856,7 @@ def _(hifld, matched, osm, places):
         lambda s: round((s > 0.5).mean(), 2)
     )
     outline_agreement.to_csv(OUT / "outline_agreement.csv")
-    mo.vstack([coverage, outline_agreement])
+    mo.vstack([coverage, on_hifld, outline_agreement])
     return
 
 
@@ -904,8 +919,22 @@ def _(matched):
     ]
     _out = _out[_out.geometry.notna() & ~_out.geometry.is_empty][_keep + ["geometry"]].to_crs(4326)
     _out.to_parquet(OUT / "prison_boundaries_rebuilt.parquet")
-    matched[_keep[:11] + ["lon", "lat", "outline"]].to_csv(OUT / "facilities.csv", index=False)
+    _cols = ["facility_id", "source", "state", "name", "address", "city", "zip", "kind", "source_url", "licence"]
+    matched[_cols + ["location", "lon", "lat", "outline"]].to_csv(OUT / "facilities.csv", index=False)
     print(f"wrote {len(_out)} rows; geometry licence: {_out['geometry_licence'].value_counts().to_dict()}")
+    # A map of the lower 48 for the README: each located facility, coloured by where its outline came from.
+    _pts = matched[matched["lon"].between(-125, -66) & matched["lat"].between(24, 50)]
+    _fig, _ax = plt.subplots(figsize=(11, 6.5))
+    for _kind, _colour in [("OSM prison polygon", "#1b7837"), ("Overture building", "#e08214"), ("none", "#b2182b")]:
+        _k = _pts[_pts["outline"].eq(_kind)]
+        _ax.scatter(_k["lon"], _k["lat"], s=7, c=_colour, label=f"{_kind} ({len(_k)})")
+    _ax.set_aspect(1.25)
+    _ax.set_axis_off()
+    _ax.legend(loc="lower left", frameon=False, title="Outline found")
+    _ax.set_title("BOP and state DOC facilities, lower 48, by outline source")
+    _fig.tight_layout()
+    _fig.savefig(OUT / "facilities_map.png", dpi=110)
+    plt.close(_fig)
     return
 
 
@@ -1001,6 +1030,32 @@ def _(sample):
         _by.to_csv(OUT / "hand_check_by_outline.csv")
         print(_by)
     hand_check
+    return
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ## What didn't work
+
+    - **Ten states have no list a script can read** (`fetch = none` or a low yield above): NY, RI and SD block
+      plain HTTP with bot protection; HI and DC describe their few facilities in prose; NH's only machine-readable
+      layer is about 15 years old; AK's addresses sit in a two-column PDF; CO gives no ZIP; KS and WY give PO boxes.
+      Sub-issue #308 takes these on, with Playwright for the blocked sites.
+    - **The generic scraper is noisy at the edges.** A few rows are head offices rather than prisons; Mississippi's
+      page also lists county-run regional prisons, Florida's adds work camps and release centres, and the state
+      GIS layers (AZ 2020, IA 2015, KY 2018, IL) lag their DOC's own list. We keep what each source says and let
+      the HIFLD comparison and the hand check show the cost.
+    - **The Census geocoder can't place rural prison addresses** (highways, rural routes); the Overture name match
+      recovers some, and the rest stay unlocated.
+    - **A building footprint is not a prison boundary.** Where OSM has no `amenity=prison` polygon, the nearest
+      Overture building is usually one cell block or the administration building, so it overlaps HIFLD's fence-line
+      polygon far less than an OSM outline does.
+    - **Local jails have no national public list with locations.** BJS's Census of Jails facility file is
+      restricted, the NIC National Jails Compendium isn't published, and the Census Bureau API (group-quarters
+      counts by block) now needs a key. The open maps above are the only national source we could measure.
+    - **Overpass** reset our connections, so OSM comes from QLever.
+    """)
     return
 
 
