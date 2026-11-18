@@ -27,6 +27,7 @@ with app.setup:
     import matplotlib.pyplot as plt
     from bs4 import BeautifulSoup
     from PIL import Image
+    from rapidfuzz import fuzz
 
     HERE = Path(__file__).parent
     DATA = Path(os.environ.get("PRISONS_DATA_DIR", HERE / "data"))
@@ -548,7 +549,7 @@ def _():
 
 
 @app.cell
-def _(bop, state_rows):
+def _(bop, places, state_rows):
     facilities = pd.concat([bop, state_rows], ignore_index=True)
     facilities["facility_id"] = [f"F{i:05d}" for i in range(len(facilities))]
     facilities["location"] = facilities["lon"].notna().map({True: "source coordinates", False: ""})
@@ -572,6 +573,17 @@ def _(bop, state_rows):
         facilities.loc[_match, "lon"] = pd.to_numeric(facilities.loc[_match, "facility_id"].map(_xy[0]))
         facilities.loc[_match, "lat"] = pd.to_numeric(facilities.loc[_match, "facility_id"].map(_xy[1]))
         facilities["location"] = facilities["location"].where(~_match, "Census geocoder")
+    # Fallback for addresses the geocoder can't place: an Overture jail_or_prison place in the same state whose
+    # name matches (token-set similarity of at least 90, and a clear best).
+    _region = places["region"].fillna("").str.replace("US-", "", regex=False).str.upper()
+    _xy = places.to_crs(4326).geometry
+    for _i in facilities.index[facilities["lon"].isna()]:
+        _cand = places.index[_region.eq(facilities.at[_i, "state"])]
+        _scores = [fuzz.token_set_ratio(facilities.at[_i, "name"], places.at[j, "place_name"] or "") for j in _cand]
+        _ranked = sorted(zip(_scores, _cand, strict=True), reverse=True)
+        if _ranked and _ranked[0][0] >= 90 and (len(_ranked) == 1 or _ranked[1][0] < _ranked[0][0]):
+            facilities.loc[_i, ["lon", "lat"]] = [_xy[_ranked[0][1]].x, _xy[_ranked[0][1]].y]
+            facilities.at[_i, "location"] = "Overture place name match"
     facilities["location"] = facilities["location"].where(facilities["lon"].notna(), "not located")
     geocode_summary = pd.crosstab(
         facilities["source"].where(facilities["source"].eq("BOP"), "state DOC"),
@@ -649,6 +661,7 @@ def _():
             COPY (
                 SELECT id AS place_id, names.primary AS place_name, taxonomy.primary AS category,
                        sources[1].dataset AS place_source, sources[1].license AS place_licence,
+                       addresses[1].region AS region,
                        ST_X(geometry) AS lon, ST_Y(geometry) AS lat
                 FROM read_parquet('{OVERTURE}/theme=places/type=place/*.parquet')
                 WHERE ({_boxes}) AND basic_category = 'jail_or_prison'
@@ -663,20 +676,23 @@ def _():
 
 @app.cell
 def _(facilities):
-    # One pass over Overture buildings, keeping only footprints whose bbox corner falls in a 0.01° cell
-    # around a facility (about 1 km). Reading the bbox column for the whole US takes about 20 minutes.
+    # One pass over Overture buildings, keeping footprints whose south-west bbox corner falls in a 0.002° cell
+    # (about 200 m) from 600 m south-west to 400 m north-east of a facility: enough for any building that contains
+    # the point or lies within 50 m of it. Reading the bbox column for the whole US takes about 20 minutes.
     _located = facilities.dropna(subset=["lon"])
     _path = DATA / f"overture-buildings-{len(_located)}.parquet"
     if not _path.exists():
         _con = duckdb.connect()
         _con.sql("INSTALL httpfs; LOAD httpfs; INSTALL spatial; LOAD spatial;")
         _con.sql("CREATE SECRET overture (TYPE s3, KEY_ID '', SECRET '', REGION 'us-west-2')")
-        _con.sql("SET threads = 16")
+        _con.sql("SET threads = 8")
+        _con.sql("SET memory_limit = '4GB'")
+        _con.sql("SET preserve_insertion_order = false")
         _con.register("pts", _located[["facility_id", "lon", "lat"]])
         _con.sql("""
-            CREATE TABLE cells AS SELECT DISTINCT CAST(floor(lon / 0.01) AS INT) + dx AS cx,
-                                                  CAST(floor(lat / 0.01) AS INT) + dy AS cy
-            FROM pts, range(-1, 2) a(dx), range(-1, 2) b(dy)""")
+            CREATE TABLE cells AS SELECT DISTINCT CAST(floor(lon / 0.002) AS INT) + dx AS cx,
+                                                  CAST(floor(lat / 0.002) AS INT) + dy AS cy
+            FROM pts, range(-3, 2) a(dx), range(-3, 2) b(dy)""")
         _parts = []
         for _i, (_a, _b, _c, _d) in enumerate(US_BOXES):
             _part = DATA / f"buildings-box{_i}.parquet"
@@ -685,8 +701,8 @@ def _(facilities):
                     SELECT b.id AS building_id, b.sources[1].dataset AS building_source,
                            ST_AsWKB(b.geometry) AS wkb
                     FROM read_parquet('{OVERTURE}/theme=buildings/type=building/*') b
-                    JOIN cells c ON c.cx = CAST(floor(b.bbox.xmin / 0.01) AS INT)
-                                AND c.cy = CAST(floor(b.bbox.ymin / 0.01) AS INT)
+                    JOIN cells c ON c.cx = CAST(floor(b.bbox.xmin / 0.002) AS INT)
+                                AND c.cy = CAST(floor(b.bbox.ymin / 0.002) AS INT)
                     WHERE b.bbox.xmin > {_a} AND b.bbox.xmax < {_c} AND b.bbox.ymin > {_b} AND b.bbox.ymax < {_d}
                 ) TO '{_part}' (FORMAT parquet)""")
             _parts.append(pd.read_parquet(_part))
