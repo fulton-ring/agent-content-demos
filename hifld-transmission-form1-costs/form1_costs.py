@@ -698,7 +698,8 @@ def _():
     mo.md(r"""
     ## What didn't work, and what this doesn't show
 
-    - **EIA-860 for owner type.** EIA's utility file blocked scripted download from our environment, so owner type comes from HIFLD Next's Retail Service Territories layer instead.
+    - **EIA-860 for owner type.** EIA's utility file blocked scripted download from our environment,
+      so owner type comes from HIFLD Next's Retail Service Territories layer instead.
     - **No circuit miles.** HIFLD has no circuit count, so shares are in route miles of HIFLD segments. Form 1's
       `number_of_circuits` exists only for matched lines, so it can't weight the denominator.
     - **Owner type is approximate.** Owners missing from the Retail Service Territories layer are typed by keyword
