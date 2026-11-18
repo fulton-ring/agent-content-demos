@@ -131,7 +131,12 @@ def get(url: str, data: dict | None = None, files: dict | None = None, timeout: 
             response.raise_for_status()
             return response.content
         except (requests.ConnectionError, requests.Timeout, requests.HTTPError) as error:
-            if attempt == 3:
+            client_error = (
+                isinstance(error, requests.HTTPError)
+                and error.response is not None
+                and error.response.status_code < 500
+            )
+            if attempt == 3 or client_error:
                 raise
             print(f"{url}: {error!r}, retrying", flush=True)
             time.sleep(5 * 2**attempt)
@@ -196,7 +201,8 @@ def _():
     hifld = hifld[hifld["STATE"].isin(STATES)].to_crs(METRIC)
     hifld_counts = pd.crosstab(hifld["TYPE"], hifld["STATUS"], margins=True, margins_name="total")
     hifld_counts.to_csv(OUT / "hifld_counts.csv")
-    print(f"HIFLD records in the 50 states and DC: {len(hifld)}, latest SOURCEDATE {hifld['SOURCEDATE'].max()}")
+    _latest = pd.to_datetime(pd.to_numeric(hifld["SOURCEDATE"], errors="coerce"), unit="ms").max().date()
+    print(f"HIFLD records in the 50 states and DC: {len(hifld)}, latest SOURCEDATE {_latest}")
     hifld_counts
     return (hifld,)
 
