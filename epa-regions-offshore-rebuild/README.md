@@ -20,7 +20,7 @@ method written down, not as an EPA layer.
 ```
 
 Needs [uv](https://docs.astral.sh/uv/). It downloads the inputs into `data/` (git-ignored), runs the
-marimo notebook `rebuild.py` as a script and writes `outputs/`. Takes about 3.5 minutes. To read the
+marimo notebook `rebuild.py` as a script and writes `outputs/`. Takes about 4 minutes. To read the
 notebook with its maps: `uv run marimo edit rebuild.py`.
 
 ## Data (all public, downloaded at run time)
@@ -75,7 +75,7 @@ Guam, the Northern Mariana Islands, American Samoa and the Pacific Remote Island
 Kingman, Howland, Baker, Jarvis) are in Region 9, and Alaska is in Region 10. The 2023 regions have no land
 for the Pacific Remote Islands, so their waters go to the nearest region (9).
 
-**Run time** 214 s in a 4-core cloud container. **Cost** $0.
+**Run time** 214 s (253 s on a clean checkout, including downloads) in a 4-core cloud container. **Cost** $0.
 
 ## Output
 
