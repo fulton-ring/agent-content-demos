@@ -357,8 +357,9 @@ def _(mo):
     mo.md(r"""
     Kansas, the state that has plugged the most, can't match at all: USGS lists its unplugged wells with no API
     number (USGS's own `USGSID` in 2022, no identifier in 2026). Illinois, Indiana and Arkansas report state well
-    numbers that match 1% or fewer of USGS's. So "on the 2022 list" is a lower bound. About one plugged well in seven is still listed as
-    unplugged in 2026, mostly in California and Texas, where the state files USGS used predate the plugging.
+    numbers that match 1% or fewer of USGS's. So "on the 2022 list" is a lower bound. About one plugged well in
+    seven is still listed as unplugged in 2026, mostly in California and Texas, where the state files USGS used
+    predate the plugging.
 
     ## Step 3: distance from every well to the nearest open hospital and school
 
