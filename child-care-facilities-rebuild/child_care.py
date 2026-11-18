@@ -944,8 +944,9 @@ def _(mo):
 
     Each was labelled by an AI subagent from web search (the provider's site, the state licence search, listings,
     news), given the record and its source in shuffled order but not its group. Labels and the evidence URL for
-    each are in `hand_check.csv` (no OSM names in it); the sample is rebuilt by the cell below, so a rerun checks
-    the labels still line up with it.
+    each are in `hand_check.csv` (no OSM names in it). The cell below redraws a sample into
+    `output/hand_check_sample_osm.csv` for a future relabel; the summary uses the labelled records and reports
+    how many still fall in their group, since rosters and OSM change daily.
     """)
     return
 
@@ -953,9 +954,10 @@ def _(mo):
 @app.cell
 def _(OUT, open_only, pairs_by_map, pd, roster, roster_found):
     _seed = 301
-    _overture_only = open_only["Overture"].sample(25, random_state=_seed)
-    _osm_only = open_only["OSM"].sample(25, random_state=_seed)
-    _centres = roster[roster["kind"] == "centre"]
+    # Sort by ID first, so the sample doesn't depend on the order a source returns its rows in.
+    _overture_only = open_only["Overture"].sort_values("source_id").sample(25, random_state=_seed)
+    _osm_only = open_only["OSM"].sort_values("source_id").sample(25, random_state=_seed)
+    _centres = roster[roster["kind"] == "centre"].sort_values("source_id")
     _missed = _centres[~_centres["source_id"].isin(roster_found["OSM"] | roster_found["Overture"])]
     _missed = _missed.sample(25, random_state=_seed)
     _agreeing = _centres[_centres["source_id"].isin(roster_found["Overture"])].sample(25, random_state=_seed)
@@ -999,14 +1001,22 @@ def _(OUT, open_only, pairs_by_map, pd, roster, roster_found):
 
 
 @app.cell
-def _(OUT, hand_sample, pd):
+def _(OUT, open_only, pd, roster, roster_found):
     import pathlib
 
-    _labels = pd.read_csv(pathlib.Path(__file__).parent / "hand_check.csv", dtype=str).fillna("")
-    hand_check = hand_sample[["group", "source", "source_id"]].merge(
-        _labels[["source", "source_id", "label", "same_facility"]], on=["source", "source_id"], how="left"
-    )
-    assert hand_check["label"].notna().all(), "hand_check.csv doesn't cover the sample: relabel it"
+    # The labelled sample was drawn on 2026-11-18. Rosters and OSM are live, so a later run checks that each
+    # labelled record still falls in the group it was drawn from, instead of drawing a new sample.
+    hand_check = pd.read_csv(pathlib.Path(__file__).parent / "hand_check.csv", dtype=str).fillna("")
+    _centres = set(roster.loc[roster["kind"] == "centre", "source_id"])
+    _groups = {
+        "overture_only": set(open_only["Overture"]["source_id"]),
+        "osm_only": set(open_only["OSM"]["source_id"]),
+        "roster_missed": _centres - roster_found["OSM"] - roster_found["Overture"],
+        "agree": roster_found["Overture"],
+    }
+    hand_check["still_in_group"] = [
+        i in _groups[g] for g, i in zip(hand_check["group"], hand_check["source_id"], strict=True)
+    ]
     hand_summary = pd.crosstab(hand_check["group"], hand_check["label"], margins=True)
     hand_summary.to_csv(OUT / "hand_check_summary.csv")
     same_facility = hand_check.loc[hand_check["group"] == "agree", "same_facility"].value_counts()
@@ -1015,8 +1025,11 @@ def _(OUT, hand_sample, pd):
 
 
 @app.cell
-def _(mo, same_facility):
-    mo.md(f"Agreeing matches judged the same facility: {same_facility.to_dict()}")
+def _(hand_check, mo, same_facility):
+    mo.md(
+        f"Agreeing matches judged the same facility: {same_facility.to_dict()}. Labelled records still in "
+        f"their group on this run: {hand_check['still_in_group'].sum()} of {len(hand_check)}."
+    )
     return
 
 

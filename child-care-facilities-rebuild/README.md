@@ -62,8 +62,9 @@ within 250 m with names agreeing, or within 50 m, as in `hifld-overture-crosswal
 **Head Start as a check on the rosters** (`output/head_start_in_roster.csv`): 70% of Head Start centres are in
 their state roster; PA (38%) and WA (47%) list fewer, since school-run or federal sites sit outside them.
 
-**Hand check** (`hand_check.csv`, `output/hand_check_summary.csv`; seeded sample of 100, labelled from web
-sources by AI subagents who didn't see which group a record came from):
+**Hand check** (`hand_check.csv`, `output/hand_check_summary.csv`; seeded sample of 100 drawn 2026-11-18,
+labelled from web sources by AI subagents who didn't see which group a record came from; each run reports how
+many labelled records still fall in their group, since rosters and OSM change daily):
 
 | Group (25 each) | licensed | exempt | closed | unclear |
 |---|---:|---:|---:|---:|
