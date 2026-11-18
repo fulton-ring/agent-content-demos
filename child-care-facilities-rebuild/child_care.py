@@ -108,7 +108,19 @@ def _(pd):
 
 @app.cell
 def _(survey):
-    survey[["state", "agency", "format", "machine_readable", "coords", "current", "record_count", "updated", "compared_here"]]
+    survey[
+        [
+            "state",
+            "agency",
+            "format",
+            "machine_readable",
+            "coords",
+            "current",
+            "record_count",
+            "updated",
+            "compared_here",
+        ]
+    ]
     return
 
 
@@ -231,7 +243,7 @@ def _(DATA, OVERTURE_RELEASE, duckdb, in_state, pd):
             ) TO '{_path}.part' (FORMAT parquet)""")
         _path.with_suffix(".parquet.part").rename(_path)
     _raw = pd.read_parquet(_path)
-    overture_closed = int((_raw["operating_status"] == "permanently_closed").sum())
+    overture_closed = len(in_state(_raw[_raw["operating_status"] == "permanently_closed"]))
     overture = in_state(_raw[_raw["operating_status"] != "permanently_closed"])
     overture["name"] = overture["name"].fillna("")
     overture["source"] = "Overture Places"
@@ -247,7 +259,9 @@ def _(DATA, HEADERS, in_state, json, pd, requests, states, time):
         for _state in sorted(states["state"]):
             for _attempt in range(4):
                 _r = requests.get(
-                    "https://headstart.gov/eclkc-apis/locator/center", params={"state": _state}, headers=HEADERS,
+                    "https://headstart.gov/eclkc-apis/locator/center",
+                    params={"state": _state},
+                    headers=HEADERS,
                     timeout=120,
                 )
                 if _r.status_code == 200:
@@ -327,12 +341,24 @@ def _(DATA, HEADERS, pd, requests, time):
         if not path.exists():
             rows: list[dict] = []
             for page in range(100):
-                params = {"where": "1=1", "outFields": "*", "outSR": 4326, "f": "json",
-                          "resultOffset": page * 1000, "resultRecordCount": 1000}
+                params = {
+                    "where": "1=1",
+                    "outFields": "*",
+                    "outSR": 4326,
+                    "f": "json",
+                    "resultOffset": page * 1000,
+                    "resultRecordCount": 1000,
+                }
                 body = get(f"{layer_url}/query", params).json()
                 assert "features" in body, f"{layer_url}: {body.get('error')}"
-                rows += [{**f["attributes"], "lon": (f.get("geometry") or {}).get("x"),
-                          "lat": (f.get("geometry") or {}).get("y")} for f in body["features"]]
+                rows += [
+                    {
+                        **f["attributes"],
+                        "lon": (f.get("geometry") or {}).get("x"),
+                        "lat": (f.get("geometry") or {}).get("y"),
+                    }
+                    for f in body["features"]
+                ]
                 if not body.get("exceededTransferLimit"):
                     break
             else:
@@ -368,102 +394,290 @@ def _(arcgis, download, io, pd):
     _ny = socrata("https://data.ny.gov/resource/cb42-qumz.csv?$limit=100000", "roster_ny.csv")
     _ny = _ny[_ny["facility_status"].isin(["License", "Registration"])]
     _ny["street"] = _ny["street_number"].fillna("") + " " + _ny["street_name"].fillna("")
-    _parts.append(frame("NY", _ny, where(_ny["program_type"], {"DCC", "SDCC", "SACC"}, {"FDC", "GFDC"}),
-                        source_id="facility_id", name="facility_name", street="street", city="city",
-                        zip="zip_code", capacity="total_capacity", lon="longitude", lat="latitude"))
+    _parts.append(
+        frame(
+            "NY",
+            _ny,
+            where(_ny["program_type"], {"DCC", "SDCC", "SACC"}, {"FDC", "GFDC"}),
+            source_id="facility_id",
+            name="facility_name",
+            street="street",
+            city="city",
+            zip="zip_code",
+            capacity="total_capacity",
+            lon="longitude",
+            lat="latitude",
+        )
+    )
     _nyc = socrata("https://data.cityofnewyork.us/resource/gy3q-4tzp.csv?$limit=100000", "roster_nyc.csv")
-    _parts.append(frame("NY", _nyc, where(_nyc["facility_type"], {"GCC", "SBCC"}, set()),
-                        source_id="dcid", name="program_name", street="address", city="borough", zip="zipcode",
-                        capacity="capacity", lon="longitude", lat="latitude"))
+    _parts.append(
+        frame(
+            "NY",
+            _nyc,
+            where(_nyc["facility_type"], {"GCC", "SBCC"}, set()),
+            source_id="dcid",
+            name="program_name",
+            street="address",
+            city="borough",
+            zip="zipcode",
+            capacity="capacity",
+            lon="longitude",
+            lat="latitude",
+        )
+    )
 
-    _ca = download("https://gis.data.chhs.ca.gov/api/download/v1/items/db31b0884a074cff9260facb3f2ade45/csv?layers=0",
-                   "roster_ca.csv")
+    _ca = download(
+        "https://gis.data.chhs.ca.gov/api/download/v1/items/db31b0884a074cff9260facb3f2ade45/csv?layers=0",
+        "roster_ca.csv",
+    )
     _ca = pd.read_csv(io.BytesIO(_ca), dtype=str)
     _ca = _ca[_ca["STATUS"] == "3"]  # 3 = licensed in CCLD's status codes
     _ca_centres = {"DAY CARE CENTER", "INFANT CENTER", "SINGLE CHILD CARE CE", "SCHOOL-AGE DC CENTER"}
-    _parts.append(frame("CA", _ca, where(_ca["FAC_TYPE_DESC"], _ca_centres, set()),
-                        source_id="FAC_NBR", name="NAME", street="RES_STREET_ADDR", city="RES_CITY",
-                        zip="RES_ZIP_CODE", capacity="CAPACITY", lon="FAC_LONGITUDE", lat="FAC_LATITUDE"))
+    _parts.append(
+        frame(
+            "CA",
+            _ca,
+            where(_ca["FAC_TYPE_DESC"], _ca_centres, set()),
+            source_id="FAC_NBR",
+            name="NAME",
+            street="RES_STREET_ADDR",
+            city="RES_CITY",
+            zip="RES_ZIP_CODE",
+            capacity="CAPACITY",
+            lon="FAC_LONGITUDE",
+            lat="FAC_LATITUDE",
+        )
+    )
 
     _pa = socrata("https://data.pa.gov/resource/ajn5-kaxt.csv?$limit=100000", "roster_pa.csv")
     _pa_xy = _pa["geocoded_column"].str.extract(r"POINT \(([-\d.]+) ([-\d.]+)\)")
     _pa["lon"], _pa["lat"] = _pa_xy[0], _pa_xy[1]
-    _parts.append(frame("PA", _pa, where(_pa["provider_type"], {"Child Care Center"},
-                                         {"Family Child Care Home", "Group Child Care Home"}),
-                        source_id="master_provider_index", name="facility_name", street="facility_address",
-                        city="facility_city", zip="facility_zip_code", capacity="capacity", lon="lon", lat="lat"))
+    _parts.append(
+        frame(
+            "PA",
+            _pa,
+            where(_pa["provider_type"], {"Child Care Center"}, {"Family Child Care Home", "Group Child Care Home"}),
+            source_id="master_provider_index",
+            name="facility_name",
+            street="facility_address",
+            city="facility_city",
+            zip="facility_zip_code",
+            capacity="capacity",
+            lon="lon",
+            lat="lat",
+        )
+    )
 
     _ma = socrata("https://educationtocareer.data.mass.gov/resource/iyks-y3g6.csv?$limit=100000", "roster_ma.csv")
     _ma = _ma[(_ma["licensed_funded"] == "Licensed") & (_ma["licensed_provider_status"] != "Expired")]
-    _parts.append(frame("MA", _ma, where(_ma["program_type"], {"Center-based Care", "Public School", "Private School"},
-                                         {"Family Child Care"}),
-                        source_id="provider_number", name="program_name", street="program_street_address1",
-                        city="program_city", zip="program_zipcode", capacity="licensed_capacity",
-                        lon="program_longitude", lat="program_latitude"))
+    _parts.append(
+        frame(
+            "MA",
+            _ma,
+            where(_ma["program_type"], {"Center-based Care", "Public School", "Private School"}, {"Family Child Care"}),
+            source_id="provider_number",
+            name="program_name",
+            street="program_street_address1",
+            city="program_city",
+            zip="program_zipcode",
+            capacity="licensed_capacity",
+            lon="program_longitude",
+            lat="program_latitude",
+        )
+    )
 
-    _mi = download("https://gis-michigan.opendata.arcgis.com/api/download/v1/items/a79c3b0caedf412599085941e2af91d4/csv?layers=5",
-                   "roster_mi.csv")
+    _mi = download(
+        "https://gis-michigan.opendata.arcgis.com/api/download/v1/items/a79c3b0caedf412599085941e2af91d4/csv?layers=5",
+        "roster_mi.csv",
+    )
     _mi = pd.read_csv(io.BytesIO(_mi), dtype=str)
-    _parts.append(frame("MI", _mi, where(_mi["FacilityType"], {"Center"}, {"Family Home (1-6)", "Group Home (7-12)"}),
-                        source_id="LicenseNumber", name="FacilityName", street="StreetAddress", city="City",
-                        zip="ZIPCode", capacity="Capacity", lon="Longitude", lat="Latitude"))
+    _parts.append(
+        frame(
+            "MI",
+            _mi,
+            where(_mi["FacilityType"], {"Center"}, {"Family Home (1-6)", "Group Home (7-12)"}),
+            source_id="LicenseNumber",
+            name="FacilityName",
+            street="StreetAddress",
+            city="City",
+            zip="ZIPCode",
+            capacity="Capacity",
+            lon="Longitude",
+            lat="Latitude",
+        )
+    )
 
     _wa = socrata("https://data.wa.gov/resource/was8-3ni8.csv?$limit=100000", "roster_wa.csv")
     _wa = _wa[_wa["latestoperatingstatus"] == "Active"]
-    _parts.append(frame("WA", _wa, where(_wa["facilitytypegeneric"],
-                                         {"CHILD CARE CENTER", "SCHOOL-AGE PROGRAM", "OUTDOOR NATURE BASED PROGRAM"},
-                                         set()),
-                        source_id="wacompassid", name="providername", street="physicalstreetaddress",
-                        city="physicalcity", zip="physicalzip", capacity="licensecapacity",
-                        lon="physicallongitude", lat="physciallatitude"))
+    _parts.append(
+        frame(
+            "WA",
+            _wa,
+            where(
+                _wa["facilitytypegeneric"],
+                {"CHILD CARE CENTER", "SCHOOL-AGE PROGRAM", "OUTDOOR NATURE BASED PROGRAM"},
+                set(),
+            ),
+            source_id="wacompassid",
+            name="providername",
+            street="physicalstreetaddress",
+            city="physicalcity",
+            zip="physicalzip",
+            capacity="licensecapacity",
+            lon="physicallongitude",
+            lat="physciallatitude",
+        )
+    )
 
     _wi = arcgis("https://dhsgis.wi.gov/server/rest/services/DHS_DCF/Child_Care/MapServer/0", "roster_wi.csv")
-    _parts.append(frame("WI", _wi, where(_wi["CategoryType"], {"LICENSED GROUP", "PUBLIC SCHOOL PROGRAM"},
-                                         {"LICENSED FAMILY", "REGULAR CERTIFIED", "PROVISIONAL CERTIFIED"}),
-                        source_id="OBJECTID", name="FacilityName", street="LocationLineAddress1", city="City",
-                        zip="ZipCode", capacity="Capacity", lon="lon", lat="lat"))
+    _parts.append(
+        frame(
+            "WI",
+            _wi,
+            where(
+                _wi["CategoryType"],
+                {"LICENSED GROUP", "PUBLIC SCHOOL PROGRAM"},
+                {"LICENSED FAMILY", "REGULAR CERTIFIED", "PROVISIONAL CERTIFIED"},
+            ),
+            source_id="OBJECTID",
+            name="FacilityName",
+            street="LocationLineAddress1",
+            city="City",
+            zip="ZipCode",
+            capacity="Capacity",
+            lon="lon",
+            lat="lat",
+        )
+    )
 
-    _tn = arcgis("https://services1.arcgis.com/YuVBSS7Y1of2Qud1/arcgis/rest/services/Active_ChildCare_Locations/FeatureServer/0",
-                 "roster_tn.csv")
-    _parts.append(frame("TN", _tn, where(_tn["Child_Care_Type"], {"Child Care Center", "Drop-in Child Care Center"},
-                                         {"Group Child Care Home", "Family Child Care Home"}),
-                        source_id="Provider_ID", name="Provider_Name", street="Street_Address", city="City", zip="Zip",
-                        lon="lon", lat="lat"))
+    _tn = arcgis(
+        "https://services1.arcgis.com/YuVBSS7Y1of2Qud1/arcgis/rest/services/Active_ChildCare_Locations/FeatureServer/0",
+        "roster_tn.csv",
+    )
+    _parts.append(
+        frame(
+            "TN",
+            _tn,
+            where(
+                _tn["Child_Care_Type"],
+                {"Child Care Center", "Drop-in Child Care Center"},
+                {"Group Child Care Home", "Family Child Care Home"},
+            ),
+            source_id="Provider_ID",
+            name="Provider_Name",
+            street="Street_Address",
+            city="City",
+            zip="Zip",
+            lon="lon",
+            lat="lat",
+        )
+    )
 
-    _md = arcgis("https://services.arcgis.com/njFNhDsUCentVYJW/arcgis/rest/services/ChildCare_All_Active_Providers_May_20_2024/FeatureServer/0",
-                 "roster_md.csv")
-    _parts.append(frame("MD", _md, where(_md["Provider_Type"],
-                                         {"Child Care Center", "School-Age Only", "Public Prekindergarten", "LOC"},
-                                         {"Family Child Care", "Large Family Child Care"}),
-                        source_id="License_Number", name="Facility_Name", street="Street_Address", city="City",
-                        zip="Zip_Code", lon="Longitude_API", lat="Latitude_API"))
+    _md = arcgis(
+        "https://services.arcgis.com/njFNhDsUCentVYJW/arcgis/rest/services/ChildCare_All_Active_Providers_May_20_2024/FeatureServer/0",
+        "roster_md.csv",
+    )
+    _parts.append(
+        frame(
+            "MD",
+            _md,
+            where(
+                _md["Provider_Type"],
+                {"Child Care Center", "School-Age Only", "Public Prekindergarten", "LOC"},
+                {"Family Child Care", "Large Family Child Care"},
+            ),
+            source_id="License_Number",
+            name="Facility_Name",
+            street="Street_Address",
+            city="City",
+            zip="Zip_Code",
+            lon="Longitude_API",
+            lat="Latitude_API",
+        )
+    )
 
     _de = socrata("https://data.delaware.gov/resource/iuzd-3dbt.csv?$limit=100000", "roster_de.csv")
     _de_xy = _de["geocoded_location"].str.extract(r"POINT \(([-\d.]+) ([-\d.]+)\)")
     _de["lon"], _de["lat"] = _de_xy[0], _de_xy[1]
-    _parts.append(frame("DE", _de, where(_de["resource_type"], {"Licensed Child Care Center"},
-                                         {"Licensed Family Child Care", "Licensed Large Family Child Care"}),
-                        source_id="resource_id", name="resource_name", street="site_street_address",
-                        city="site_city", zip="site_zip_code", capacity="capacity", lon="lon", lat="lat"))
+    _parts.append(
+        frame(
+            "DE",
+            _de,
+            where(
+                _de["resource_type"],
+                {"Licensed Child Care Center"},
+                {"Licensed Family Child Care", "Licensed Large Family Child Care"},
+            ),
+            source_id="resource_id",
+            name="resource_name",
+            street="site_street_address",
+            city="site_city",
+            zip="site_zip_code",
+            capacity="capacity",
+            lon="lon",
+            lat="lat",
+        )
+    )
 
     _vt = socrata("https://data.vermont.gov/resource/ctdw-tmfz.csv?$limit=100000", "roster_vt.csv")
     _vt = _vt[_vt["provider_referral_status"] != "Inactive"]
-    _parts.append(frame("VT", _vt, where(_vt["provider_program_type"],
-                                         {"CBCCPP", "CBCCPP - Non-Recurring", "Afterschool Child Care Program"},
-                                         {"Licensed FCCH", "Registered FCCH"}),
-                        source_id="provider_id", name="provider_name", street="address_1", city="provider_town",
-                        zip="zip_code", capacity="total_licensed_capacity", lon="longitude", lat="latitude"))
+    _parts.append(
+        frame(
+            "VT",
+            _vt,
+            where(
+                _vt["provider_program_type"],
+                {"CBCCPP", "CBCCPP - Non-Recurring", "Afterschool Child Care Program"},
+                {"Licensed FCCH", "Registered FCCH"},
+            ),
+            source_id="provider_id",
+            name="provider_name",
+            street="address_1",
+            city="provider_town",
+            zip="zip_code",
+            capacity="total_licensed_capacity",
+            lon="longitude",
+            lat="latitude",
+        )
+    )
 
-    _dc = arcgis("https://maps2.dcgis.dc.gov/dcgis/rest/services/DCGIS_DATA/Public_Service_WebMercator/MapServer/33",
-                 "roster_dc.csv")
+    _dc = arcgis(
+        "https://maps2.dcgis.dc.gov/dcgis/rest/services/DCGIS_DATA/Public_Service_WebMercator/MapServer/33",
+        "roster_dc.csv",
+    )
     _dc = _dc[_dc["LICENSE_TYPE"] != "Expired"]
-    _parts.append(frame("DC", _dc, _dc["LICENSE_NUMBER"].str[:3].map({"CDC": "centre", "CDH": "home", "CDX": "home"}),
-                        source_id="LICENSE_NUMBER", name="NAME", street="ADDRESS", city="ADDRESS", zip="ZIPCODE",
-                        capacity="AUTHORIZED_CAPACITY", lon="lon", lat="lat"))
+    _parts.append(
+        frame(
+            "DC",
+            _dc,
+            _dc["LICENSE_NUMBER"].str[:3].map({"CDC": "centre", "CDH": "home", "CDX": "home"}),
+            source_id="LICENSE_NUMBER",
+            name="NAME",
+            street="ADDRESS",
+            city="ADDRESS",
+            zip="ZIPCODE",
+            capacity="AUTHORIZED_CAPACITY",
+            lon="lon",
+            lat="lat",
+        )
+    )
 
     _nj = arcgis("https://mapsdep.nj.gov/arcgis/rest/services/Features/Structures/MapServer/4", "roster_nj.csv")
-    _parts.append(frame("NJ", _nj, pd.Series("centre", index=_nj.index), source_id="center_id", name="center_name",
-                        street="address", city="city", zip="zip", capacity="licensed_capacity", lon="lon", lat="lat"))
+    _parts.append(
+        frame(
+            "NJ",
+            _nj,
+            pd.Series("centre", index=_nj.index),
+            source_id="center_id",
+            name="center_name",
+            street="address",
+            city="city",
+            zip="zip",
+            capacity="licensed_capacity",
+            lon="lon",
+            lat="lat",
+        )
+    )
 
     roster_all = pd.concat(_parts, ignore_index=True)
     roster_all["kind"] = roster_all["kind"].fillna("")
@@ -483,19 +697,25 @@ def _(in_state, pd, roster_all):
     assert roster["source_id"].duplicated().sum() < 10, "roster IDs aren't unique"
     roster = roster.drop_duplicates("source_id").reset_index(drop=True)
     roster["source"] = "State roster"
-    roster["licence"] = roster["state"].map(
-        {"DE": "Public domain", "PA": "Public domain", "DC": "CC BY 4.0", "VT": "ODbL-1.0"}
-    ).fillna("State open data (terms vary, see rosters.csv)")
-    roster_losses = pd.DataFrame(
-        {
-            "rows read": roster_all.groupby("state").size(),
-            "other types dropped": roster_all[roster_all["kind"] == ""].groupby("state").size(),
-            "no coordinates": _kept[_kept["lon"].isna() | _kept["lat"].isna()].groupby("state").size(),
-            "point outside the state": _located.groupby("state").size() - roster.groupby("state").size(),
-            "centres kept": roster[roster["kind"] == "centre"].groupby("state").size(),
-            "homes kept": roster[roster["kind"] == "home"].groupby("state").size(),
-        }
-    ).fillna(0).astype(int)
+    roster["licence"] = (
+        roster["state"]
+        .map({"DE": "Public domain", "PA": "Public domain", "DC": "CC BY 4.0", "VT": "ODbL-1.0"})
+        .fillna("State open data (terms vary, see rosters.csv)")
+    )
+    roster_losses = (
+        pd.DataFrame(
+            {
+                "rows read": roster_all.groupby("state").size(),
+                "other types dropped": roster_all[roster_all["kind"] == ""].groupby("state").size(),
+                "no coordinates": _kept[_kept["lon"].isna() | _kept["lat"].isna()].groupby("state").size(),
+                "point outside the state": _located.groupby("state").size() - roster.groupby("state").size(),
+                "centres kept": roster[roster["kind"] == "centre"].groupby("state").size(),
+                "homes kept": roster[roster["kind"] == "home"].groupby("state").size(),
+            }
+        )
+        .fillna(0)
+        .astype(int)
+    )
     roster_losses
     return roster, roster_losses
 
@@ -596,7 +816,7 @@ def _(head_start, match, osm, overture, pd, roster, states, survey):
 
 
 @app.cell
-def _(counts, mo):
+def _(counts, mo, overture_closed):
     _roster_states = counts[counts["roster centres"] > 0].drop(index="US total")
     _ratio = _roster_states["open maps, deduplicated"].sum() / _roster_states["roster centres"].sum()
     mo.md(f"""
@@ -604,6 +824,7 @@ def _(counts, mo):
     child care features against **{_roster_states["roster centres"].sum():,}** licensed centres
     (and {_roster_states["roster homes"].sum():,} licensed homes): {_ratio:.0%} as many features as centres. Raw
     counts flatter the maps, though: section 6 asks how many of those features are the licensed centres.
+    Overture places marked permanently closed were dropped first: {overture_closed:,} in the 51 states.
     """)
     return
 
@@ -721,9 +942,10 @@ def _(mo):
     - 25 **roster centres found on neither map**: does the centre exist and operate at that address?
     - 25 **agreeing matches**: is the match the same facility?
 
-    Each was labelled by a subagent from web search (the provider's site, the state licence search, news,
-    reviews), seeing only the record, not the group it came from. Labels are in `hand_check.csv`; the sample
-    itself is rebuilt by this cell, so a rerun checks the labels still line up with the sample.
+    Each was labelled by an AI subagent from web search (the provider's site, the state licence search, listings,
+    news), given the record and its source in shuffled order but not its group. Labels and the evidence URL for
+    each are in `hand_check.csv` (no OSM names in it); the sample is rebuilt by the cell below, so a rerun checks
+    the labels still line up with it.
     """)
     return
 
@@ -777,24 +999,25 @@ def _(OUT, open_only, pairs_by_map, pd, roster, roster_found):
 
 
 @app.cell
-def _(hand_sample, mo, pd):
+def _(OUT, hand_sample, pd):
     import pathlib
 
-    _labels_path = pathlib.Path(__file__).parent / "hand_check.csv"
-    if _labels_path.exists():
-        _labels = pd.read_csv(_labels_path, dtype=str)
-        hand_check = hand_sample[["group", "source", "source_id"]].merge(
-            _labels[["source", "source_id", "label"]], on=["source", "source_id"], how="left"
-        )
-        assert hand_check["label"].notna().all(), "hand_check.csv doesn't cover the sample: relabel"
-        hand_summary = pd.crosstab(hand_check["group"], hand_check["label"], margins=True)
-        _out = hand_summary
-    else:
-        hand_check = None
-        hand_summary = None
-        _out = mo.md("No `hand_check.csv` yet.")
-    _out
-    return hand_check, hand_summary
+    _labels = pd.read_csv(pathlib.Path(__file__).parent / "hand_check.csv", dtype=str).fillna("")
+    hand_check = hand_sample[["group", "source", "source_id"]].merge(
+        _labels[["source", "source_id", "label", "same_facility"]], on=["source", "source_id"], how="left"
+    )
+    assert hand_check["label"].notna().all(), "hand_check.csv doesn't cover the sample: relabel it"
+    hand_summary = pd.crosstab(hand_check["group"], hand_check["label"], margins=True)
+    hand_summary.to_csv(OUT / "hand_check_summary.csv")
+    same_facility = hand_check.loc[hand_check["group"] == "agree", "same_facility"].value_counts()
+    hand_summary
+    return hand_check, hand_summary, same_facility
+
+
+@app.cell
+def _(mo, same_facility):
+    mo.md(f"Agreeing matches judged the same facility: {same_facility.to_dict()}")
+    return
 
 
 @app.cell
@@ -833,6 +1056,47 @@ def _(OUT, gpd, head_start, match, osm, overture, pd, roster):
     layer_summary = layer.groupby(["source", "licence"]).size().rename("rows").reset_index()
     layer_summary
     return layer, layer_summary
+
+
+@app.cell
+def _(either_map, hand_summary, head_start_in_roster, layer, match_rates, mo, same_facility):
+    _all = match_rates[match_rates["state"] == "all 13"].set_index("map")
+    _either = either_map.loc["all 13", "found %"]
+    _right = same_facility.get("yes", 0) / same_facility.sum()
+    _osm_rows = int((layer["source"] == "OpenStreetMap").sum())
+    mo.md(f"""
+    ## 9. The answer
+
+    **Open maps can't rebuild the layer; rosters can, for about half the states.** Overture finds
+    {_all.loc["Overture", "found %"]:.0f}% of licensed centres in the thirteen roster states, OSM
+    {_all.loc["OSM", "found %"]:.0f}% and the two together {_either:.0f}%; the hand check judged
+    {_right:.0%} of matches the same facility, so the true share is lower still. The centres both maps miss are
+    real: {hand_summary.loc["roster_missed", "licensed"]} of 25 sampled were operating licensed centres.
+    Of 50 sampled open-map-only features, {
+        hand_summary.loc["overture_only", "licensed"] + hand_summary.loc["osm_only", "licensed"]
+    } were licensed providers the roster missed or placed more than
+    250 m away (mostly family homes), {
+        hand_summary.loc["overture_only", "closed"] + hand_summary.loc["osm_only", "closed"]
+    } had closed and the rest were exempt or couldn't be confirmed.
+
+    **Licence.** The rosters are public domain or open state data (Vermont's is ODbL, DC's CC BY 4.0). Overture
+    Places (CDLA-Permissive 2.0) needs only attribution, so a roster + Head Start + Overture layer can be published
+    openly. Adding OSM makes the whole layer an ODbL Derivative Database with share-alike, and buys only
+    {_osm_rows:,} extra rows. That's the rights decision HIFLD Next would need to record; this notebook doesn't
+    make it.
+
+    **What didn't work or isn't shown.** Name matching across sources is loose: the 50 m rule pairs a roster
+    centre with whatever shares its building, which is where the wrong matches come from. Roster type columns
+    differ by state, so *centre* and *home* are our mapping (in the roster cell). Head Start centres are found in
+    the rosters only {
+        head_start_in_roster.loc[
+            "all 13", "%"
+        ]:.0f}% of the time, low in PA and WA, where school-run and federally run sites sit
+    outside the state list or under another name. The hand check labels are AI subagents' calls from
+    third-party directories (state search pages mostly refused scripted access), not checked by a person.
+    Thirteen states were compared; eight more with addresses only, and the form and PDF states, are in #310.
+    """)
+    return
 
 
 @app.cell
