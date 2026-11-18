@@ -15,7 +15,7 @@ and have no public list. The open maps reach about half of them, mostly as point
 ## How to run it
 
 ```bash
-./run.sh     # needs uv. First run about 25 minutes (most of it reading Overture buildings from S3), then seconds
+./run.sh     # needs uv. First run about 21 minutes (state sites and Overture buildings from S3), then seconds
 uv run marimo edit rebuild.py   # to read it as a notebook
 ```
 
@@ -107,9 +107,9 @@ land on the road outside, which is why matching allows 250 m.
   `jail_or_prison` place within 250 m of 45%, and either one on 53%. For HIFLD's 299 local records, either one
   covers 34%. Across the whole layer (5,804 open records), either one covers 61%.
 
-**Run time and cost.** The first run takes about 25 minutes: state scraping about 10, the Overture buildings
-pass about 9, and the rest a few minutes. After that it runs from `data/` in seconds. Cost is $0, with no paid
-services.
+**Run time and cost.** A run from a clean checkout took 1,238 s (about 21 minutes). The state scraping and the
+Overture buildings pass take most of that. After that it runs from `data/` in seconds, and every output CSV
+matched the committed copies. Cost is $0, with no paid services.
 
 ## What it doesn't show
 
