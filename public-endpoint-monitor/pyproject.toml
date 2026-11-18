@@ -1,0 +1,34 @@
+[project]
+name = "public-endpoint-monitor"
+version = "0.1.0"
+description = "Who would notice if a public data endpoint went dark for a week?"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "marimo>=0.25.2",
+    "pandas>=3.1.0",
+    "requests>=2.34.2",
+]
+
+[dependency-groups]
+dev = [
+    "pandas-stubs>=3.1.0.261029",
+    "ruff>=0.17.3",
+    "ty>=0.0.95",
+    "types-requests>=2.33.0.20261030",
+]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+# A bare expression at the end of a marimo cell is what the cell displays.
+"*.py" = ["B018"]
+# The monitors table in notice.py is a markdown table; its rows can't wrap.
+"notice.py" = ["B018", "E501"]
