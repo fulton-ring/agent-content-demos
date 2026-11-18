@@ -66,7 +66,7 @@ environmental pages, built on Wayback captures. The PHPocalypse Tracker followed
 until about October 30. Small uptime pages watch a handful of big .gov sites. Sources and quotes are in the
 notebook's Step 3.
 
-**The monitor is 75 lines and takes 5 seconds.** `monitor.py` would have caught any of the 50 sources going
+**The monitor is 73 lines and takes about 5 seconds.** `monitor.py` would have caught any of the 50 sources going
 dark on the first daily run. On October 21 to 23 the archive captured one of the 50; the PHP2Shell spike's
 own live checks on November 11 and 12 found all 50 up. Scheduling it daily (for example a GitHub Actions cron
 that commits `log/checks.csv`) is a founder decision and isn't set up.
