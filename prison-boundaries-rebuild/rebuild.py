@@ -891,7 +891,16 @@ def _(matched):
     _out["geometry_licence"] = (
         _out["outline"]
         .map({"OSM prison polygon": "ODbL 1.0", "Overture building": "ODbL 1.0"})
-        .fillna(_out["licence"].where(_out["location"].ne("Census geocoder"), "public domain (US Census geocoder)"))
+        .fillna(
+            _out["location"]
+            .map(
+                {
+                    "Census geocoder": "public domain (US Census geocoder)",
+                    "Overture place name match": "CDLA-Permissive-2.0",
+                }
+            )
+            .fillna(_out["licence"])
+        )
     )
     _out = _out.set_geometry(_out.geometry.where(_out.geometry.notna(), _points)).rename(
         columns={"licence": "attributes_licence"}
@@ -1011,8 +1020,8 @@ def _(sample):
         hand_check = None
     else:
         _labels = pd.read_csv(_labels_path, dtype=str)
-        _h = sample[["facility_id", "name", "outline"]].merge(
-            _labels[["facility_id", "point", "outline_fit"]], on="facility_id", how="left"
+        _h = sample[["facility_id", "state", "name", "outline"]].merge(
+            _labels[["state", "name", "point", "outline_fit"]], on=["state", "name"], how="left"
         )
         assert _h["point"].notna().all(), "hand_check.csv is missing facilities from the sample"
         hand_check = pd.DataFrame(

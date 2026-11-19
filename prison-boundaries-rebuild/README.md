@@ -19,6 +19,9 @@ and have no public list. The open maps reach about half of them, mostly as point
 uv run marimo edit rebuild.py   # to read it as a notebook
 ```
 
+State pages are cached in `data/states/`. If a state site was down during a run (the log shows a failed
+fetch), delete `data/states/<ST>.csv` and run again, or that state's list stays short.
+
 Everything is in one marimo notebook, [`rebuild.py`](rebuild.py), which reads top to bottom: the answer key,
 the state survey, BOP, the state scraper, geocoding, OSM and Overture, matching, the HIFLD comparison, the
 output, the hand check, and what didn't work. Downloads go to `data/`, results to `output/`. The buildings
