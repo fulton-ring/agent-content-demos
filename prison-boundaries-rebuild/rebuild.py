@@ -164,7 +164,8 @@ def _():
     facility in the US, from federal prisons to county jails. It moved behind DHS's restricted GII portal, so HIFLD
     Next can't republish it. This notebook asks whether we can rebuild it from sources anyone can download:
 
-    1. **Points**: the Federal Bureau of Prisons' facility list, plus each state department of corrections' list.
+    1. **Points**: the Federal Bureau of Prisons' facility list, each state department of corrections' list, and
+       the county jail lists that 12 states publish.
     2. **Outlines**: an OpenStreetMap `amenity=prison` polygon, or failing that an Overture building footprint.
     3. **Check**: against the last public HIFLD copy (the answer key) and by eye on aerial imagery.
 
@@ -1002,15 +1003,17 @@ def _(hifld, matched, osm, places):
     # Outline agreement: each rebuilt outline against the HIFLD polygon it overlaps most.
     _outl = matched[matched.geometry.notna()].copy()
     _pairs = gpd.sjoin(
-        _outl[["facility_id", "outline", "geometry"]], hifld[["geometry"]].reset_index(), predicate="intersects"
+        _outl[["facility_id", "group", "outline", "geometry"]],
+        hifld[["geometry"]].reset_index(),
+        predicate="intersects",
     )
     _pairs["hifld_geom"] = hifld.geometry.loc[_pairs["index"]].to_numpy()
     _pairs["iou"] = [
         a.intersection(b).area / a.union(b).area for a, b in zip(_pairs.geometry, _pairs["hifld_geom"], strict=True)
     ]
     _best = _pairs.sort_values("iou", ascending=False).drop_duplicates("facility_id")
-    outline_agreement = _best.groupby("outline")["iou"].describe()[["count", "25%", "50%", "75%"]].round(2)
-    outline_agreement["share_iou_over_0.5"] = _best.groupby("outline")["iou"].apply(
+    outline_agreement = _best.groupby(["group", "outline"])["iou"].describe()[["count", "25%", "50%", "75%"]].round(2)
+    outline_agreement["share_iou_over_0.5"] = _best.groupby(["group", "outline"])["iou"].apply(
         lambda s: round((s > 0.5).mean(), 2)
     )
     outline_agreement.to_csv(OUT / "outline_agreement.csv")
@@ -1250,10 +1253,21 @@ def _():
     mo.md(r"""
     ## What didn't work
 
-    - **Ten states have no list a script can read** (`fetch = none` or a low yield above): NY, RI and SD block
-      plain HTTP with bot protection; HI and DC describe their few facilities in prose; NH's only machine-readable
-      layer is about 15 years old; AK's addresses sit in a two-column PDF; CO gives no ZIP; KS and WY give PO boxes.
-      Sub-issue #308 takes these on, with Playwright for the blocked sites.
+    - **Five state corrections lists stay unreadable** (the `reason` column of the yield table). NY and RI
+      (Cloudflare) and SD and NH (Akamai) block scripted requests, and they also blocked headless Chromium through
+      Playwright, so we stopped there rather than work around the block. NH's only GIS layer dates from 2006-2009.
+      DC describes its two facilities in prose with no ZIP. #308 made five more readable with three scraper
+      options: AK (`two_columns`, the handbook's two-column address page), CO (`map_address`, the street in the
+      Google Maps embed title), and KS, WY and HI (`by_name`, PO-box-only rows placed by an Overture name match).
+    - **Colorado's Cañon City complex can't be placed.** Six prisons share the address "East Hwy 50 and Evans
+      Ave.", an intersection the geocoder can't read, and their names don't give one clear Overture match.
+    - **Name-only jail lists place poorly.** Tennessee, Kentucky and California list names and counties but no
+      addresses. The name match placed 36 of Tennessee's 110, 52 of Kentucky's 73 and 33 of California's 209
+      (most of California's are Type I police lockups). When the match does place one, it is usually right (see
+      the HIFLD comparison by location method), but most stay unlocated.
+    - **Jail lists are partial.** Georgia's DOC table has 141 of its 159 counties. Pennsylvania's inspection
+      schedules list each county prison every other year, so two years are read together. Kentucky's and
+      California's files change weekly or quarterly, so `jail_sources.csv` pins the current one.
     - **The generic scraper is noisy at the edges.** A few rows are head offices rather than prisons; Mississippi's
       page also lists county-run regional prisons, Florida's adds work camps and release centres, and the state
       GIS layers (AZ 2020, IA 2015, KY 2018, IL) lag their DOC's own list. We keep what each source says and let
@@ -1262,10 +1276,12 @@ def _():
       recovers some, and the rest stay unlocated.
     - **A building footprint is not a prison boundary.** Where OSM has no `amenity=prison` polygon, the nearest
       Overture building is usually one cell block or the administration building, so it overlaps HIFLD's fence-line
-      polygon far less than an OSM outline does.
+      polygon far less than an OSM outline does. For a county jail, often one building, a footprint fits better
+      (median intersection over union 0.59 against HIFLD, against 0.23 for state prisons).
     - **Local jails have no national public list with locations.** BJS's Census of Jails facility file is
       restricted, the NIC National Jails Compendium isn't published, and the Census Bureau API (group-quarters
-      counts by block) now needs a key. The open maps above are the only national source we could measure.
+      counts by block) now needs a key. Only 12 states' jail lists could be added; elsewhere the open maps above
+      are the only source.
     - **Overpass** reset our connections, so OSM comes from QLever.
     """)
     return
