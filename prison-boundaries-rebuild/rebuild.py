@@ -342,7 +342,7 @@ def addresses(text: str, state: str, po_boxes: bool = False) -> list[dict]:
     pattern = re.compile(
         rf"(?<![\d-])(?P<street>{po_box}(?:\d{{1,3}}-)?\d{{1,6}}\s+[A-Za-z][A-Za-z0-9 .#'&/-]{{1,60}}?)"
         r"[ \t]*(?:,|\n)\s*"
-        r"(?:[A-Za-z0-9 .#'-]{1,40}\n\s*)?"
+        r"(?:(?P<middle>[A-Za-z0-9 .#'-]{1,40})\n\s*)?"
         rf"(?P<city>[A-Za-z][A-Za-z .'-]{{1,30}}?)\s*,?\s+(?:{state}|{STATE_NAMES[state]})\.?,?\s+(?P<zip>\d{{5}})"
     )
     found = []
@@ -350,9 +350,11 @@ def addresses(text: str, state: str, po_boxes: bool = False) -> list[dict]:
         po_box = bool(re.search(r"\b(p\.?\s*o\.?\s*box|box)\b", m["street"], re.I))
         if po_box and not po_boxes:
             continue
+        # 'P.O. Box 12' followed by a street line: the street is the location.
+        street_after_box = m["middle"].strip() if m["middle"] and re.match(r"\d+\s+[A-Za-z]", m["middle"]) else ""
         found.append(
             {
-                "street": "" if po_box else re.sub(r"\s+", " ", m["street"]).strip(),
+                "street": re.sub(r"\s+", " ", m["street"]).strip() if not po_box else street_after_box,
                 "city": m["city"].strip(),
                 "zip": m["zip"],
                 "start": m.start(),
@@ -383,6 +385,7 @@ def from_record(record: dict) -> dict:
             "county facility",
             "county correctional institution",
             "facility_name",
+            "agency_name",
             "prison_name",
             "institution",
             "title",
@@ -495,15 +498,20 @@ def pdf_table_rows(cfg: dict, body: bytes) -> list[dict]:
 
 @app.function
 def follow_links(cfg: dict, url: str, html: str) -> list[dict]:
-    """Open every link on a list page (or in a JSON list) that matches link_pattern; read one address from each."""
+    """Open every link on a list page (or in a JSON list) that matches link_pattern and read its address.
+
+    link_pattern is a regular expression for the link, or 'css <selector>' for the links a CSS selector picks. With a
+    selector, each element it picks on a linked page is one facility; otherwise each page is one facility."""
     links: dict[str, str] = {}
-    for a in BeautifulSoup(html, "html.parser").find_all("a", href=True):
-        href = str(a["href"])
-        if re.search(cfg["link_pattern"], href):
+    soup = BeautifulSoup(html, "html.parser")
+    by_css = cfg["link_pattern"].startswith("css ")
+    for a in soup.select(cfg["link_pattern"][4:]) if by_css else soup.find_all("a", href=True):
+        href = str(a.get("href", ""))
+        if href and (by_css or re.search(cfg["link_pattern"], href)):
             links.setdefault(urljoin(url, href), a.get_text(" ", strip=True))
     for href in re.findall(r'"(?:url|link)"\s*:\s*"([^"]+)"', html):
         href = href.replace("\\/", "/")
-        if re.search(cfg["link_pattern"], href):
+        if not by_css and re.search(cfg["link_pattern"], href):
             links.setdefault(urljoin(url, href), "")
     rows = []
     for link, label in list(links.items())[:200]:
@@ -511,6 +519,21 @@ def follow_links(cfg: dict, url: str, html: str) -> list[dict]:
             page = get(link).decode("utf-8", "replace")
         except requests.RequestException as error:
             print(f"{cfg['state']}: {link} failed: {error!r}")
+            continue
+        if cfg["selector"]:
+            for item in BeautifulSoup(page, "html.parser").select(cfg["selector"]):
+                block = page_text(str(item))
+                lines = [ln.strip() for ln in block.split("\n") if ln.strip() and not LABEL.match(ln.strip())]
+                found = addresses(block, cfg["state"], "by_name" in cfg["options"])
+                rows.append(
+                    {"name": lines[0] if lines else ""}
+                    | (
+                        {"address": found[0]["street"], "city": found[0]["city"], "zip": found[0]["zip"]}
+                        if found
+                        else {}
+                    )
+                )
+            time.sleep(0.3)
             continue
         text = page_text(page)
         start = re.search(cfg["after"], text) if cfg["after"] else None
