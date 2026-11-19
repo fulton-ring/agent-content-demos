@@ -75,7 +75,7 @@ Guam, the Northern Mariana Islands, American Samoa and the Pacific Remote Island
 Kingman, Howland, Baker, Jarvis) are in Region 9, and Alaska is in Region 10. The 2023 regions have no land
 for the Pacific Remote Islands, so their waters go to the nearest region (9).
 
-**Run time** 214 s (253 s on a clean checkout, including downloads) in a 4-core cloud container. **Cost** $0.
+**Run time** about 4 to 4.5 minutes (214 to 271 s across runs, including downloads) in a 4-core cloud container. **Cost** $0.
 
 ## Output
 
