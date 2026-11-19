@@ -57,8 +57,7 @@ Data Rescue Project's copy archived in August 2025. Its latest source date is 20
 `attributes_licence` and `geometry_licence` on every row.
 - The 1,451 rows with an OSM or Overture-building outline are ODbL (share-alike).
 - The other 641 are points that carry BOP, state or Census terms, or CDLA-Permissive for an Overture name match.
-- Whether HIFLD Next may publish ODbL polygons is a founder call; this spike doesn't decide it.
-- `output/facilities.csv` (committed) holds the same facilities with no OSM-derived geometry.
+- Publishing ODbL polygons in HIFLD Next is a founder call. `output/facilities.csv` (committed) has no OSM geometry.
 
 ## Results (from one `./run.sh`)
 
