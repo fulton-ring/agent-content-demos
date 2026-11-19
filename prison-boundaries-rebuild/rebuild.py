@@ -1137,10 +1137,10 @@ def _():
     A seeded sample of 40 located BOP and state facilities (20 with an OSM outline, 15 with only an Overture
     building, 5 with neither), drawn in #300, is shown on Esri World Imagery at two zooms, with the outline in
     yellow and the point in red. The images go to `data/chips/` (not committed: the imagery is Esri's). Each image
-    was labelled by a reviewer who saw only the image and the facility's name: is the point on a correctional facility, and does the outline fit
-    it? The labels are in `hand_check.csv`, keyed by state and name. Later runs find the same 40 facilities by
-    state and name rather than drawing again, so the labels stay valid as states and jails are added. The added
-    jails are not hand-checked.
+    was labelled by a reviewer who saw only the image and the facility's name: is the point on a correctional
+    facility, and does the outline fit it? The labels are in `hand_check.csv`, keyed by state and name. Later runs
+    find the same 40 facilities by state and name rather than drawing again, so the labels stay valid as states
+    and jails are added. The added jails are not hand-checked.
     """)
     return
 
