@@ -1,0 +1,62 @@
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+{
+ "noaa": {
+  "last_modified": "Tue, 31 Mar 2020 01:54:13 GMT"
+ },
+ "boem": {
+  "Atl_admn.zip": {
+   "last_modified": "Wed, 25 Sep 2024 20:14:08 GMT"
+  },
+  "gom_admn.zip": {
+   "last_modified": "Wed, 25 Sep 2024 20:14:10 GMT"
+  },
+  "pac_admn.zip": {
+   "last_modified": "Wed, 25 Sep 2024 20:14:11 GMT"
+  }
+ }
+}
+                                        input                                                                                                                 url                                                                             current as of                                   licence
+0      EPA regions with EEZ (2012, reference)                                          https://geodata.epa.gov/arcgis/rest/services/OEI/EPA_Locations/MapServer/4  built from 2011 TIGER/Line;  2011 TIGER/Line and NOAA U.S. Maritime Boundaries geometry                   US Government work (EPA)
+1  U.S. EPA Regions (DOC & EPA 2023), onshore  https://services.arcgis.com/cJ9YHowT8TU7DUyn/arcgis/rest/services/US_EPA_Regions__DOC___EPA_2023_/FeatureServer/13                                                               data last edited 2026-07-02  EPA Data Licensing Agreement, public use
+2  NOAA OCS US Maritime Limits and Boundaries                                  https://maritimeboundaries.noaa.gov/downloads/USMaritimeLimitsAndBoundariesSHP.zip                newest line published 2013-09-13; file dated Tue, 31 Mar 2020 01:54:13 GMT  US Government work (NOAA), public domain
+EEZ faces kept 125, dropped as high seas 4 (181,622 km2)
+US offshore waters beyond 2023 state lines: 11,780,653 km2
+{'2012 area missing from rebuilt EEZ + land (km2)': 690, 'rebuilt area not in 2012 (km2)': 2248, 'IoU of outer extent': 0.9999}
+  regions  vertices              from                to  latitude change (deg)        bearing
+0     1/2         2   -71.726, 41.046   -65.699, 40.452                 -0.594        oblique
+1     2/3         2   -74.932, 38.845   -66.962, 38.843                 -0.001  due east/west
+2     3/4         2   -75.787, 36.551   -71.501, 36.533                 -0.018  due east/west
+3     4/6         2   -88.755, 29.977   -86.612, 26.500                 -3.476        oblique
+4    9/10         2  -129.014, 42.003  -124.349, 41.998                 -0.005  due east/west
+regions sharing a coast piece: [1, 2, 3, 4, 6, 9, 10]
+shared offshore km2: 2295651
+rule A coast points: 4909
+rule    A nearest coast  B due seaward  C BOEM lines  D 2012 lines
+region                                                            
+1                0.4791         0.7819        0.4781        0.9990
+2                0.6798         0.9292        0.6778        0.9998
+3                0.5092         0.9635        0.4962        1.0000
+4                0.9753         0.9286        0.9713        0.9999
+5                   NaN            NaN           NaN           NaN
+6                0.9593         0.8300        0.9528        0.9999
+7                   NaN            NaN           NaN           NaN
+8                   NaN            NaN           NaN           NaN
+9                0.9989         1.0000        0.9989        1.0000
+10               0.9976         0.9993        0.9975        0.9994
+                 min_iou_offshore  mean_iou_offshore  min_iou_region  km2_misassigned
+rule                                                                                 
+A nearest coast            0.4791             0.7999          0.7214         174124.0
+B due seaward              0.7819             0.9189          0.9225          88160.0
+C BOEM lines               0.4781             0.7961          0.7206         178658.0
+D 2012 lines               0.9990             0.9997          0.9996           1841.0
+                                                            NOAA area 2012 region rebuilt region
+0                                                              Alaska          10             10
+1                                                      American Samoa           9              9
+2  Commonwealth of the Northern Mariana Islands and Territory of Guam           9              9
+3                                                    Hawaiian Islands           9              9
+4                      Howland Island, Baker Island and Jarvis Island           9              9
+5                                                      Johnston Atoll           9              9
+6                                      Palmyra Atoll and Kingman Reef           9              9
+7                                 Puerto Rico and U.S. Virgin Islands           2              2
+8                                                         Wake Island           9              9
+wrote epa_regions_offshore_derived.parquet with rule 'D 2012 lines'; run time 214 s; cost $0
