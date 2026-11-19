@@ -38,7 +38,7 @@ No keys, no paid services: cost $0. It needs about 3 GB of memory.
 [`rosters.csv`](rosters.csv) is the hand survey of all 51 rosters (done 2026-11-18 by three research
 subagents, each URL checked with curl): agency, format, download URL, coordinates, update date, terms.
 
-## Results (from one `./run.sh`, 2026-11-18)
+## Results (from one `./run.sh`, 2026-11-18; live rosters move by a few rows a day)
 
 **Rosters** (`output/survey_summary.csv`): 26 states publish a machine-readable statewide roster; 18 have
 coordinates; 24 were updated in the last year (AZ and MN are stale). 25 are search forms, PDFs or exports
@@ -84,7 +84,7 @@ match neither, and 5,368 OSM features that match none. `child_care_layer_no_osm.
 ## Licence consequences
 
 The rosters and Head Start are public domain or open data, and Overture Places needs only attribution, so a
-roster + Head Start + Overture layer can be published under permissive terms (credit Overture, DC and Maryland;
+roster + Head Start + Overture layer can be published under permissive terms (credit Overture and DC, and check each state's terms in `rosters.csv`;
 Vermont's roster is ODbL). Adding OSM makes the whole layer an ODbL Derivative Database with share-alike, for
 5,368 extra rows (3%). HIFLD Next allows OSM and Overture only after a recorded rights decision: that's a
 founder call, and this spike doesn't make it.
