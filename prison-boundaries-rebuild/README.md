@@ -21,7 +21,7 @@ measures the result against the last public copy.
 ## How to run it
 
 ```bash
-./run.sh     # needs uv. First run about 21 minutes (state sites and Overture buildings from S3), then seconds
+./run.sh     # needs uv. First run about 24 minutes (state sites and Overture buildings from S3), then seconds
 uv run marimo edit rebuild.py   # to read it as a notebook
 ```
 
@@ -134,8 +134,9 @@ matching allows 250 m.
 an OSM polygon and 45% have an Overture `jail_or_prison` place within 250 m; 53% have either. For the 299 local
 records, either one covers 34%.
 
-**Run time and cost.** A run with empty state and jail caches took 1,227 s (about 20.5 minutes). The Overture
-buildings pass takes most of that. After that it runs from `data/` in 11 s. Cost is $0, with no paid services.
+**Run time and cost.** A run from a clean checkout took 1,433 s (about 24 minutes), and every output file it
+wrote matched the committed copies. The Overture buildings pass takes most of that. After that it runs from
+`data/` in 11 s. Cost is $0, with no paid services.
 
 ## What it doesn't show
 
