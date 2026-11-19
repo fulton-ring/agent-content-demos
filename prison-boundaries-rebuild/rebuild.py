@@ -12,7 +12,7 @@ with app.setup:
     import re
     import time
     from pathlib import Path
-    from urllib.parse import urljoin
+    from urllib.parse import quote, urljoin
 
     import duckdb
     import geopandas as gpd
@@ -329,23 +329,30 @@ def page_text(html: str) -> str:
     soup = BeautifulSoup(html.replace("<br>", "\n").replace("<br />", "\n").replace("<br/>", "\n"), "html.parser")
     for tag in soup(["script", "style", "noscript"]):
         tag.decompose()
-    return re.sub(r"\n\s*\n+", "\n", soup.get_text("\n"))
+    # A "(map)" link after a street would hide the street from the address pattern.
+    return re.sub(r"\n\s*\n+", "\n", re.sub(r"[ \t]*\(\s*map\s*\)", "", soup.get_text("\n")))
 
 
 @app.function
-def addresses(text: str, state: str) -> list[dict]:
-    """Every street address in text for this state ('123 Main St, Town, ST 12345'), PO boxes left out."""
+def addresses(text: str, state: str, po_boxes: bool = False) -> list[dict]:
+    """Every street address in text for this state ('123 Main St, Town, ST 12345').
+
+    PO boxes are left out, or with po_boxes kept with an empty street (the town and ZIP still say where it is)."""
+    po_box = r"P\.?\s*O\.?\s*Box\s+\d[A-Za-z0-9 .#'&/-]{0,60}?|" if po_boxes else ""
     pattern = re.compile(
-        r"(?P<street>\d{1,6}\s+[A-Za-z][A-Za-z0-9 .#'&/-]{1,60}?)[ \t]*(?:,|\n)\s*(?:[A-Za-z0-9 .#'-]{1,40}\n\s*)?"
+        rf"(?<![\d-])(?P<street>{po_box}(?:\d{{1,3}}-)?\d{{1,6}}\s+[A-Za-z][A-Za-z0-9 .#'&/-]{{1,60}}?)"
+        r"[ \t]*(?:,|\n)\s*"
+        r"(?:[A-Za-z0-9 .#'-]{1,40}\n\s*)?"
         rf"(?P<city>[A-Za-z][A-Za-z .'-]{{1,30}}?)\s*,?\s+(?:{state}|{STATE_NAMES[state]})\.?,?\s+(?P<zip>\d{{5}})"
     )
     found = []
     for m in pattern.finditer(text):
-        if re.search(r"\b(p\.?\s*o\.?\s*box|box)\b", m["street"], re.I):
+        po_box = bool(re.search(r"\b(p\.?\s*o\.?\s*box|box)\b", m["street"], re.I))
+        if po_box and not po_boxes:
             continue
         found.append(
             {
-                "street": re.sub(r"\s+", " ", m["street"]).strip(),
+                "street": "" if po_box else re.sub(r"\s+", " ", m["street"]).strip(),
                 "city": m["city"].strip(),
                 "zip": m["zip"],
                 "start": m.start(),
@@ -369,8 +376,19 @@ def pick(record: dict, *candidates: str) -> str:
 def from_record(record: dict) -> dict:
     """A facility from a GIS or JSON record, whatever its field names."""
     return {
-        "name": pick(record, "name", "facility", "facility_name", "prison_name", "institution", "title", "landmkname"),
-        "address": pick(record, "address", "addressline1", "physical_address", "street", "address1"),
+        "name": pick(
+            record,
+            "name",
+            "facility",
+            "county facility",
+            "county correctional institution",
+            "facility_name",
+            "prison_name",
+            "institution",
+            "title",
+            "landmkname",
+        ),
+        "address": pick(record, "address", "street address", "addressline1", "physical_address", "street", "address1"),
         "city": pick(record, "city", "town", "city_1"),
         "zip": pick(record, "zip", "zipcode", "zip5", "zip_code").split(".")[0][:5],
         "lat": pick(record, "latitude", "lat", "n_lat"),
@@ -380,8 +398,9 @@ def from_record(record: dict) -> dict:
 
 @app.function
 def scrape_state(cfg: dict) -> list[dict]:
-    """Facilities from one state's sources, as configured by its row of state_sources.csv."""
-    state, fetch = cfg["state"], cfg["fetch"]
+    """Facilities from one source, as configured by its row of state_sources.csv or jail_sources.csv."""
+    state, fetch, options = cfg["state"], cfg["fetch"], cfg["options"].split()
+    po_boxes = "by_name" in options
     rows: list[dict] = []
     for url in cfg["list_urls"].split():
         if fetch == "vector":
@@ -394,13 +413,27 @@ def scrape_state(cfg: dict) -> list[dict]:
             data = json.loads(body)
             rows += [from_record(r) for r in (data if isinstance(data, list) else data["items"])]
             continue
+        if fetch == "pdf_table":
+            rows += pdf_table_rows(cfg, body)
+            continue
         html = body.decode("utf-8", "replace")
         if cfg["link_pattern"]:
             rows += follow_links(cfg, url, html)
             continue
         if fetch == "pdf":
             with pdfplumber.open(io.BytesIO(body)) as pdf:
-                text = "\n".join(p.extract_text() or "" for p in pdf.pages)
+                pages = pdf.pages
+                if "two_columns" in options:
+                    pages = [
+                        p.crop(box)
+                        for p in pages
+                        for box in [(0, 0, p.width / 2, p.height), (p.width / 2, 0, p.width, p.height)]
+                    ]
+                text = "\n".join(p.extract_text() or "" for p in pages)
+            if cfg["selector"]:
+                # In a PDF the selector is a regular expression for one facility's line, with named groups.
+                rows += [m.groupdict() for m in re.finditer(cfg["selector"], text, re.M)]
+                continue
         elif fetch == "raw":
             for _ in range(5):
                 html = htmllib.unescape(html.replace("\\u0026", "&")).replace("\\/", "/").replace('\\"', '"')
@@ -415,7 +448,7 @@ def scrape_state(cfg: dict) -> list[dict]:
                 if cfg["keep"] and not re.search(cfg["keep"], block):
                     continue
                 lines = [ln.strip() for ln in block.split("\n") if ln.strip() and not LABEL.match(ln.strip())]
-                found = addresses(block, state)
+                found = addresses(block, state, po_boxes)
                 rows.append(
                     {
                         "name": lines[0] if lines else "",
@@ -426,7 +459,7 @@ def scrape_state(cfg: dict) -> list[dict]:
                 )
             continue
         text = text or page_text(html)
-        for found in addresses(text, state):
+        for found in addresses(text, state, po_boxes):
             before = [
                 ln.strip() for ln in text[: found["start"]].split("\n") if ln.strip() and not LABEL.match(ln.strip())
             ]
@@ -438,6 +471,25 @@ def scrape_state(cfg: dict) -> list[dict]:
                     "zip": found["zip"],
                 }
             )
+    return rows
+
+
+@app.function
+def pdf_table_rows(cfg: dict, body: bytes) -> list[dict]:
+    """Rows of every PDF table with a header row whose first cell matches the selector, read by column name."""
+    rows = []
+    with pdfplumber.open(io.BytesIO(body)) as pdf:
+        for page in pdf.pages:
+            for table in page.extract_tables():
+                cells = [[re.sub(r"\s+", " ", c or "").strip() for c in row] for row in table]
+                starts = [i for i, row in enumerate(cells) if row and re.search(cfg["selector"], row[0])]
+                if not starts:
+                    continue
+                header = cells[starts[0]]
+                for row in cells[starts[0] + 1 :]:
+                    if cfg["keep"] and not re.search(cfg["keep"], " | ".join(row)):
+                        continue
+                    rows.append(from_record(dict(zip(header, row, strict=False))))
     return rows
 
 
@@ -468,7 +520,12 @@ def follow_links(cfg: dict, url: str, html: str) -> list[dict]:
         name = label or (h1.get_text(" ", strip=True) if h1 else "")
         if cfg["keep"] and not re.search(cfg["keep"], name):
             continue
-        found = addresses(text, cfg["state"])
+        if "map_address" in cfg["options"]:
+            # The street address is only in the title of the page's Google Maps embed, with no ZIP.
+            title = re.search(r'title="Google map for ([^"]+)"', page)
+            rows.append({"name": name, "address": " ".join(htmllib.unescape(title[1]).split()) if title else ""})
+            continue
+        found = addresses(text, cfg["state"], "by_name" in cfg["options"])
         rows.append(
             {"name": name}
             | ({"address": found[0]["street"], "city": found[0]["city"], "zip": found[0]["zip"]} if found else {})
@@ -477,28 +534,59 @@ def follow_links(cfg: dict, url: str, html: str) -> list[dict]:
     return rows
 
 
+@app.function
+def read_sources(sources: pd.DataFrame, folder: str) -> pd.DataFrame:
+    """Scrape each source row once (cached in DATA/folder/<ST>.csv) and drop rows that are not facilities."""
+    frames = []
+    for cfg in sources[sources["fetch"].ne("none")].to_dict("records"):
+        path = DATA / folder / f"{cfg['state']}.csv"
+        if not path.exists():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                rows = scrape_state(cfg)
+            except (requests.RequestException, ValueError, KeyError) as error:
+                print(f"{folder}/{cfg['state']}: failed, {error!r}")
+                rows = []
+            pd.DataFrame(rows, columns=["name", "address", "city", "zip", "lat", "lon"]).to_csv(path, index=False)
+        f = pd.read_csv(path, dtype=str).fillna("")
+        # Drop names that are phone numbers or addresses, and rows we can't locate (unless the source is one whose
+        # rows we place by name). The same address and ZIP twice is a head office repeated on every page.
+        f = f[f["name"].str.len().between(3, 120) & ~f["name"].str.match(r"^[\d(]")]
+        f = f[f["address"].ne("") | f["lat"].ne("") | ("by_name" in cfg["options"].split())]
+        f = f[f["zip"].eq("") | f["address"].eq("") | ~(f["address"] + f["zip"]).duplicated()]
+        if cfg["exclude"]:
+            f = f[~f["name"].str.contains(cfg["exclude"], case=False, regex=True)]
+        frames.append(f.drop_duplicates("name").assign(state=cfg["state"], source_url=cfg["source_url"]))
+    rows = pd.concat(frames, ignore_index=True)
+    rows["lon"] = pd.to_numeric(rows["lon"], errors="coerce")
+    rows["lat"] = pd.to_numeric(rows["lat"], errors="coerce")
+    # A few GIS layers use a projected X/Y; anything outside the US boxes is treated as no coordinates.
+    bad = ~rows["lon"].between(-180, -66) | ~rows["lat"].between(18, 72)
+    rows.loc[bad, ["lon", "lat"]] = float("nan")
+    return rows
+
+
+@app.function
+def yield_table(rows: pd.DataFrame, sources: pd.DataFrame) -> pd.DataFrame:
+    """Per state: rows scraped, with an address, with coordinates, or a name only, against the expected count."""
+    counts = rows.groupby("state").agg(
+        scraped=("name", "size"),
+        with_address=("address", lambda s: int(s.ne("").sum())),
+        with_coordinates=("lon", lambda s: int(s.notna().sum())),
+    )
+    counts["name_only"] = (
+        rows[rows["address"].eq("") & rows["lon"].isna()].groupby("state").size().reindex(counts.index, fill_value=0)
+    )
+    table = sources.set_index("state")[["fetch", "n_facilities", "reason"]].join(counts).fillna({"scraped": 0})
+    table["hand_count"] = pd.to_numeric(table.pop("n_facilities"), errors="coerce")
+    table["located"] = table[["with_address", "with_coordinates"]].max(axis=1).fillna(0)
+    table["located_share_of_hand_count"] = (table["located"] / table["hand_count"]).round(2)
+    return table[[c for c in table.columns if c != "reason"] + ["reason"]]
+
+
 @app.cell
 def _(sources):
-    _frames = []
-    for _cfg in sources[sources["fetch"].ne("none")].to_dict("records"):
-        _path = DATA / "states" / f"{_cfg['state']}.csv"
-        if not _path.exists():
-            _path.parent.mkdir(parents=True, exist_ok=True)
-            try:
-                _rows = scrape_state(_cfg)
-            except (requests.RequestException, ValueError, KeyError) as _error:
-                print(f"{_cfg['state']}: failed, {_error!r}")
-                _rows = []
-            pd.DataFrame(_rows, columns=["name", "address", "city", "zip", "lat", "lon"]).to_csv(_path, index=False)
-        _f = pd.read_csv(_path, dtype=str).fillna("")
-        # Drop what is not a facility: names that are phone numbers or addresses, and rows we can't locate.
-        _f = _f[_f["name"].str.len().between(3, 120) & ~_f["name"].str.match(r"^[\d(]")]
-        _f = _f[_f["address"].ne("") | _f["lat"].ne("")]
-        _f = _f[(_f["address"] + _f["zip"]).eq("") | ~(_f["address"] + _f["zip"]).duplicated()]
-        if _cfg["exclude"]:
-            _f = _f[~_f["name"].str.contains(_cfg["exclude"], case=False, regex=True)]
-        _frames.append(_f.drop_duplicates("name").assign(state=_cfg["state"], source_url=_cfg["source_url"]))
-    _s = pd.concat(_frames, ignore_index=True)
+    _s = read_sources(sources, "states")
     state_rows = pd.DataFrame(
         {
             "source": _s["state"] + " DOC",
@@ -507,30 +595,20 @@ def _(sources):
             "address": _s["address"],
             "city": _s["city"],
             "zip": _s["zip"],
-            "lon": pd.to_numeric(_s["lon"], errors="coerce"),
-            "lat": pd.to_numeric(_s["lat"], errors="coerce"),
+            "lon": _s["lon"],
+            "lat": _s["lat"],
             "kind": "state",
             "source_url": _s["source_url"],
             "licence": "state government public record (terms vary by state)",
         }
     )
-    # A few GIS layers use a projected X/Y; anything outside the US boxes is treated as no coordinates.
-    _bad = ~state_rows["lon"].between(-180, -66) | ~state_rows["lat"].between(18, 72)
-    state_rows.loc[_bad, ["lon", "lat"]] = float("nan")
-    _yield = state_rows.groupby("state").agg(
-        scraped=("name", "size"),
-        with_address=("address", lambda s: int(s.ne("").sum())),
-        with_coordinates=("lon", lambda s: int(s.notna().sum())),
-    )
-    scrape_yield = sources.set_index("state")[["fetch", "n_facilities"]].join(_yield).fillna({"scraped": 0})
-    scrape_yield["hand_count"] = pd.to_numeric(scrape_yield.pop("n_facilities"), errors="coerce")
-    scrape_yield["located"] = scrape_yield[["with_address", "with_coordinates"]].max(axis=1).fillna(0)
-    scrape_yield["located_share_of_hand_count"] = (scrape_yield["located"] / scrape_yield["hand_count"]).round(2)
+    scrape_yield = yield_table(state_rows, sources)
     scrape_yield.to_csv(OUT / "scrape_yield.csv")
     print(
         f"{len(state_rows)} state rows from {state_rows['state'].nunique()} states; "
         f"states where the scraper located at least 80% of the hand count: "
-        f"{int((scrape_yield['located_share_of_hand_count'] >= 0.8).sum())}"
+        f"{int((scrape_yield['located_share_of_hand_count'] >= 0.8).sum())}; "
+        f"name only, placed later by name: {int(scrape_yield['name_only'].sum())}"
     )
     scrape_yield
     return (state_rows,)
@@ -539,21 +617,69 @@ def _(sources):
 @app.cell(hide_code=True)
 def _():
     mo.md(r"""
-    ## Geocoding addresses
+    ## County and local jails: the states that publish a jail list
 
-    Most state lists give a street address, not coordinates. We send every row without coordinates to the US
-    Census batch geocoder (free, no key). Prisons are often on rural routes or PO boxes the geocoder can't place,
-    so we count how many it misses.
+    No national public list of jails with locations exists (BJS's Census of Jails facility file is restricted; the
+    NIC National Jails Compendium isn't published). But several states regulate their county jails through a
+    jail-standards body, and some of those publish a list. `jail_sources.csv` configures them for the same scraper:
+    GIS layers with coordinates, DOC location pages, and PDFs. Two scraper settings exist for the PDFs: `pdf_table`
+    reads a table by its column names (the `selector` is the first header cell), and for a `pdf` the `selector` can
+    be a regular expression for one facility's line. Where a list gives only names (Tennessee, Kentucky,
+    California), the rows are kept (`by_name`) and placed later by the same Overture name match as the state lists.
+    The `hand_count` here is the count the source itself states or that we counted by hand in the file.
     """)
     return
 
 
 @app.cell
-def _(bop, places, state_rows):
-    facilities = pd.concat([bop, state_rows], ignore_index=True)
+def _():
+    jail_sources = pd.read_csv(HERE / "jail_sources.csv", dtype=str).fillna("")
+    jail_sources["reason"] = ""
+    _j = read_sources(jail_sources, "jails")
+    jail_rows = pd.DataFrame(
+        {
+            "source": _j["state"] + " jail list",
+            "state": _j["state"],
+            "name": _j["name"],
+            "address": _j["address"],
+            "city": _j["city"],
+            "zip": _j["zip"],
+            "lon": _j["lon"],
+            "lat": _j["lat"],
+            "kind": "local jail",
+            "source_url": _j["source_url"],
+            "licence": "state government public record (terms vary by state)",
+        }
+    )
+    jail_yield = yield_table(jail_rows, jail_sources).drop(columns="reason")
+    jail_yield.to_csv(OUT / "jail_yield.csv")
+    print(f"{len(jail_rows)} local jails from {jail_rows['state'].nunique()} state lists")
+    jail_yield
+    return (jail_rows,)
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ## Geocoding addresses
+
+    Most state lists give a street address, not coordinates. We send every row without coordinates to the US
+    Census batch geocoder (free, no key). Colorado's addresses come from map titles with no ZIP and no comma before
+    the town, which the batch format can't split, so those go one at a time to the geocoder's one-line endpoint.
+    Prisons are often on rural routes or PO boxes the geocoder can't place, so we count how many it misses. Rows it
+    can't place, and rows that only have a name, get an Overture place whose name matches.
+    """)
+    return
+
+
+@app.cell
+def _(bop, jail_rows, places, state_rows):
+    facilities = pd.concat([bop, state_rows, jail_rows], ignore_index=True)
     facilities["facility_id"] = [f"F{i:05d}" for i in range(len(facilities))]
+    facilities["group"] = facilities["kind"].map({"state": "state DOC", "local jail": "local jail"}).fillna("BOP")
     facilities["location"] = facilities["lon"].notna().map({True: "source coordinates", False: ""})
-    _todo = facilities[facilities["lon"].isna() & facilities["address"].fillna("").ne("")]
+    _no_town = facilities["city"].fillna("").eq("")
+    _todo = facilities[facilities["lon"].isna() & facilities["address"].fillna("").ne("") & ~_no_town]
     _body = io.StringIO()
     _todo[["facility_id", "address", "city", "state", "zip"]].to_csv(_body, header=False, index=False)
     _path = DATA / f"geocode-{len(_todo)}.csv"
@@ -573,6 +699,22 @@ def _(bop, places, state_rows):
         facilities.loc[_match, "lon"] = pd.to_numeric(facilities.loc[_match, "facility_id"].map(_xy[0]))
         facilities.loc[_match, "lat"] = pd.to_numeric(facilities.loc[_match, "facility_id"].map(_xy[1]))
         facilities["location"] = facilities["location"].where(~_match, "Census geocoder")
+    _oneline = facilities[facilities["lon"].isna() & facilities["address"].fillna("").ne("") & _no_town]
+    _path = DATA / f"geocode-oneline-{len(_oneline)}.json"
+    if not _path.exists():
+        _found = {}
+        for _address in _oneline["address"].unique()[:200]:
+            _url = (
+                f"{CENSUS_GEOCODER.replace('addressbatch', 'onelineaddress')}?benchmark=Public_AR_Current&format=json"
+            )
+            _hits = json.loads(get(f"{_url}&address={quote(_address)}"))["result"]["addressMatches"]
+            _found[_address] = [_hits[0]["coordinates"]["x"], _hits[0]["coordinates"]["y"]] if _hits else None
+        _path.write_text(json.dumps(_found))
+    _found = json.loads(_path.read_text())
+    for _i in _oneline.index:
+        if _found.get(facilities.at[_i, "address"]):
+            facilities.loc[_i, ["lon", "lat"]] = _found[facilities.at[_i, "address"]]
+            facilities.at[_i, "location"] = "Census geocoder"
     # Fallback for addresses the geocoder can't place: an Overture jail_or_prison place in the same state whose
     # name matches (token-set similarity of at least 90, and a clear best).
     _region = places["region"].fillna("").str.replace("US-", "", regex=False).str.upper()
@@ -586,7 +728,7 @@ def _(bop, places, state_rows):
             facilities.at[_i, "location"] = "Overture place name match"
     facilities["location"] = facilities["location"].where(facilities["lon"].notna(), "not located")
     geocode_summary = pd.crosstab(
-        facilities["source"].where(facilities["source"].eq("BOP"), "state DOC"),
+        facilities["group"],
         facilities["location"],
         margins=True,
         margins_name="total",
@@ -768,7 +910,7 @@ def _(buildings, facilities, osm, places):
         else:
             _geoms.append(None)
     matched = gpd.GeoDataFrame(matched.drop(columns=["osm_row", "building_row"]), geometry=_geoms, crs=METRIC)
-    _group = matched["source"].where(matched["source"].eq("BOP"), "state DOC")
+    _group = matched["group"]
     outline_summary = pd.crosstab(_group, matched["outline"], margins=True, margins_name="total")
     outline_share = pd.crosstab(_group, matched["outline"], normalize="index").round(3)
     outline_summary.to_csv(OUT / "outline_summary.csv")
@@ -803,12 +945,8 @@ def _(hifld, matched, osm, places):
     _open = hifld[hifld["STATUS"].eq("OPEN")].reset_index(drop=True)
     _pts = matched[matched["lon"].notna()].copy()
     _pts = gpd.GeoDataFrame(_pts, geometry=gpd.points_from_xy(_pts["lon"], _pts["lat"]), crs=4326).to_crs(METRIC)
-    _near = gpd.sjoin_nearest(_open[["geometry"]], _pts[["facility_id", "source", "geometry"]], max_distance=1000)
+    _near = gpd.sjoin_nearest(_open[["geometry"]], _pts[["facility_id", "geometry"]], max_distance=1000)
     _open["rebuilt"] = _open.index.isin(_near.index)
-    _open["rebuilt_from"] = _near.groupby(level=0)["source"].first().reindex(_open.index)
-    _open["rebuilt_from"] = _open["rebuilt_from"].where(
-        _open["rebuilt_from"].isna() | _open["rebuilt_from"].eq("BOP"), "state DOC"
-    )
     _hit = gpd.sjoin(_open[["geometry"]], osm[osm["polygon"]][["geometry"]], predicate="intersects")
     _open["osm_polygon"] = _open.index.isin(_hit.index)
     _pl = gpd.sjoin_nearest(_open[["geometry"]], places[["geometry"]], max_distance=250)
@@ -829,15 +967,12 @@ def _(hifld, matched, osm, places):
     _back = gpd.sjoin_nearest(
         _pts[["facility_id", "source", "geometry"]], hifld[["TYPE", "geometry"]], max_distance=1000
     )
-    _back = _back.drop_duplicates("facility_id")
-    _group = _pts["source"].where(_pts["source"].eq("BOP"), "state DOC")
-    on_hifld = pd.DataFrame(
-        {
-            "located": _group.value_counts(),
-            "within_1km_of_a_hifld_record": _group[_pts["facility_id"].isin(_back["facility_id"])].value_counts(),
-        }
-    )
-    on_hifld["share"] = (on_hifld.iloc[:, 1] / on_hifld["located"]).round(3)
+    _pts["near_hifld"] = _pts["facility_id"].isin(_back["facility_id"])
+    _agg = {"located": "size", "within_1km_of_a_hifld_record": "sum"}
+    _all = _pts.groupby("group")["near_hifld"].agg(**_agg)
+    _all.index = pd.MultiIndex.from_product([_all.index, ["all"]], names=["group", "location"])
+    on_hifld = pd.concat([_all, _pts.groupby(["group", "location"])["near_hifld"].agg(**_agg)]).sort_index()
+    on_hifld["share"] = (on_hifld["within_1km_of_a_hifld_record"] / on_hifld["located"]).round(3)
     on_hifld.to_csv(OUT / "rebuilt_on_hifld.csv")
     print(on_hifld)
 
@@ -857,6 +992,51 @@ def _(hifld, matched, osm, places):
     )
     outline_agreement.to_csv(OUT / "outline_agreement.csv")
     mo.vstack([coverage, on_hifld, outline_agreement])
+    return
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ## The state jail lists against HIFLD's county and local jails
+
+    For each state with a jail list: how many jails it gives, how many we could locate and outline (same rules as
+    above), and what share of HIFLD's open COUNTY and LOCAL records have one of these jails within 1 km.
+    """)
+    return
+
+
+@app.cell
+def _(hifld, matched):
+    _jails = matched[matched["group"].eq("local jail")]
+    _pts = _jails[_jails["lon"].notna()]
+    _pts = gpd.GeoDataFrame(_pts, geometry=gpd.points_from_xy(_pts["lon"], _pts["lat"]), crs=4326).to_crs(METRIC)
+    _local = hifld[hifld["STATUS"].eq("OPEN") & hifld["TYPE"].isin(["COUNTY", "LOCAL"])].reset_index(drop=True)
+    _near = gpd.sjoin_nearest(_local[["geometry"]], _pts[["geometry"]], max_distance=1000)
+    _local["matched"] = _local.index.isin(_near.index)
+    jail_coverage = pd.crosstab(_jails["state"], _jails["outline"]).reindex(
+        columns=["OSM prison polygon", "Overture building", "none", "not located"], fill_value=0
+    )
+    jail_coverage.insert(0, "jails_listed", _jails.groupby("state").size())
+    for _type in ["COUNTY", "LOCAL"]:
+        _t = _local[_local["TYPE"].eq(_type)].groupby("STATE")["matched"]
+        jail_coverage[f"hifld_open_{_type.lower()}"] = _t.size().reindex(jail_coverage.index, fill_value=0)
+        jail_coverage[f"{_type.lower()}_within_1km"] = _t.sum().reindex(jail_coverage.index, fill_value=0)
+    jail_coverage.loc["states with a list"] = jail_coverage.sum()
+    _all = _local.groupby("TYPE")["matched"]
+    jail_coverage.loc["all states"] = 0
+    for _type in ["COUNTY", "LOCAL"]:
+        jail_coverage.loc["all states", f"hifld_open_{_type.lower()}"] = _all.size()[_type]
+        jail_coverage.loc["all states", f"{_type.lower()}_within_1km"] = _all.sum()[_type]
+    _hifld = jail_coverage["hifld_open_county"] + jail_coverage["hifld_open_local"]
+    _hit = jail_coverage["county_within_1km"] + jail_coverage["local_within_1km"]
+    jail_coverage["county_and_local_share"] = (_hit / _hifld.where(_hifld > 0)).round(3)
+    jail_coverage["outlined_share"] = (
+        (jail_coverage["OSM prison polygon"] + jail_coverage["Overture building"]) / jail_coverage["jails_listed"]
+    ).round(3)
+    jail_coverage.loc["all states", ["jails_listed", "outlined_share"]] = float("nan")
+    jail_coverage.to_csv(OUT / "jail_coverage.csv")
+    jail_coverage
     return
 
 
@@ -935,12 +1115,14 @@ def _(matched):
     _pts = matched[matched["lon"].between(-125, -66) & matched["lat"].between(24, 50)]
     _fig, _ax = plt.subplots(figsize=(11, 6.5))
     for _kind, _colour in [("OSM prison polygon", "#1b7837"), ("Overture building", "#e08214"), ("none", "#b2182b")]:
-        _k = _pts[_pts["outline"].eq(_kind)]
-        _ax.scatter(_k["lon"], _k["lat"], s=7, c=_colour, label=f"{_kind} ({len(_k)})")
+        for _jail, _marker in [(False, "o"), (True, "^")]:
+            _k = _pts[_pts["outline"].eq(_kind) & _pts["group"].eq("local jail").eq(_jail)]
+            _label = f"{_kind}, {'state-listed jail' if _jail else 'prison'} ({len(_k)})"
+            _ax.scatter(_k["lon"], _k["lat"], s=7, c=_colour, marker=_marker, label=_label)
     _ax.set_aspect(1.25)
     _ax.set_axis_off()
     _ax.legend(loc="lower left", frameon=False, title="Outline found")
-    _ax.set_title("BOP and state DOC facilities, lower 48, by outline source")
+    _ax.set_title("BOP and state DOC facilities and state-listed jails, lower 48, by outline source")
     _fig.tight_layout()
     _fig.savefig(OUT / "facilities_map.png", dpi=110)
     plt.close(_fig)
@@ -952,11 +1134,13 @@ def _():
     mo.md(r"""
     ## Hand check against imagery
 
-    A seeded sample of 40 located facilities (20 with an OSM outline, 15 with only an Overture building, 5 with
-    neither) is drawn on Esri World Imagery at two zooms, with the outline in yellow and the point in red. The
-    images go to `data/chips/` (not committed: the imagery is Esri's). Each image was labelled by a reviewer who
-    saw only the image and the facility's name: is the point on a correctional facility, and does the outline fit
-    it? The labels are in `hand_check.csv`.
+    A seeded sample of 40 located BOP and state facilities (20 with an OSM outline, 15 with only an Overture
+    building, 5 with neither), drawn in #300, is shown on Esri World Imagery at two zooms, with the outline in
+    yellow and the point in red. The images go to `data/chips/` (not committed: the imagery is Esri's). Each image
+    was labelled by a reviewer who saw only the image and the facility's name: is the point on a correctional facility, and does the outline fit
+    it? The labels are in `hand_check.csv`, keyed by state and name. Later runs find the same 40 facilities by
+    state and name rather than drawing again, so the labels stay valid as states and jails are added. The added
+    jails are not hand-checked.
     """)
     return
 
@@ -979,14 +1163,10 @@ def tile_mosaic(lon: float, lat: float, zoom: int) -> tuple[Image.Image, list[fl
 
 @app.cell
 def _(matched):
-    _located = matched[matched["lon"].notna()]
-    sample = pd.concat(
-        [
-            _located[_located["outline"].eq("OSM prison polygon")].sample(20, random_state=7),
-            _located[_located["outline"].eq("Overture building")].sample(15, random_state=7),
-            _located[_located["outline"].eq("none")].sample(5, random_state=7),
-        ]
-    )
+    _labelled = pd.read_csv(HERE / "hand_check.csv", dtype=str)[["state", "name"]]
+    _located = matched[matched["lon"].notna() & matched["group"].ne("local jail")]
+    sample = _located.merge(_labelled, on=["state", "name"]).drop_duplicates(["state", "name"])
+    assert len(sample) == len(_labelled), f"found {len(sample)} of the {len(_labelled)} hand-checked facilities"
     sample[["facility_id", "source", "state", "name", "outline"]].to_csv(OUT / "hand_check_sample.csv", index=False)
     _chips = DATA / "chips"
     _chips.mkdir(exist_ok=True)
