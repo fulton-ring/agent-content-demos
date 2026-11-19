@@ -20,7 +20,7 @@ versus where the wells near people are (Ohio, Pennsylvania, California, Missouri
 
 Needs [uv](https://docs.astral.sh/uv/). The first run downloads about 60 MB into `data/` (`DATA_DIR`) and writes
 results to `outputs/` (`OUTPUT_DIR`), including `outputs/proximity.html`, the notebook with every table. About
-1.5 minutes from a clean checkout, most of it downloading; $0, no paid services or keys. To read it
+2 to 3 minutes from a clean checkout, most of it downloading; $0, no paid services or keys. To read it
 interactively: `uv run marimo edit proximity.py`.
 
 ## Data (all public, downloaded at run time)
