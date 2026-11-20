@@ -39,6 +39,7 @@ def _(mo):
     | Momentum 6-1 | each ETF on while its 6-1 month return > 0 |
     | Top 3 rotation | each month-end hold the 3 ETFs with the best 12-1 momentum, 1/3 each |
     | Dual momentum | same top 3, but an ETF is held only if its 12-1 momentum is also > 0, else cash |
+    | Momentum-weighted daily / monthly | weight each ETF by its positive 12-1 momentum divided by the sum over all ETFs (6-1 in the second daily variant); cash if none is positive; reallocated every day, or month-end |
     | Top 3 and Dual momentum, weekly / daily | same rules, re-ranked every week-end or every day instead of month-end |
     | SPY filter, 200-day | hold the equal-weight basket unless SPY is below its 200-day average, then cash |
     | SPY filter, momentum | hold the basket unless SPY's 12-1 return is < 0, then cash |
@@ -131,6 +132,13 @@ def _(pd, prices):
         dual = dual_w.loc[month_ends].reindex(px.index).ffill()
         rotation_weekly = top3_w.loc[week_ends].reindex(px.index).ffill()
         dual_weekly = dual_w.loc[week_ends].reindex(px.index).ffill()
+        positive = mom12.clip(lower=0)
+        total = positive.sum(axis=1)
+        mom_weighted = positive.div(total.where(total > 0), axis=0).fillna(0.0)
+        mom6_positive = mom6.clip(lower=0)
+        total6 = mom6_positive.sum(axis=1)
+        mom6_weighted = mom6_positive.div(total6.where(total6 > 0), axis=0).fillna(0.0)
+        mom_weighted_monthly = mom_weighted.loc[month_ends].reindex(px.index).ffill()
         equal = pd.DataFrame(1.0 / n, index=px.index, columns=tickers)
         raw = {
             "Buy & hold": equal,
@@ -141,6 +149,9 @@ def _(pd, prices):
             "Dual momentum": dual,
             "Top 3 weekly": rotation_weekly,
             "Top 3 daily": top3_w,
+            "Momentum-weighted daily": mom_weighted,
+            "Momentum-weighted 6-1 daily": mom6_weighted,
+            "Momentum-weighted monthly": mom_weighted_monthly,
             "Dual momentum weekly": dual_weekly,
             "Dual momentum daily": dual_w,
             "SPY filter, 200-day": equal.mul(spy_above_200, axis=0),
@@ -175,6 +186,7 @@ def _(end, np, out_dir, pd, prices, study_start, universes, weights):
             "sharpe": gross.mean() / gross.std() * np.sqrt(252),
             "max_drawdown_%": 100 * (equity / equity.cummax() - 1).min(),
             "exposure_%": 100 * w.sum(axis=1).mean(),
+            "avg_largest_weight_%": 100 * w.max(axis=1).mean(),
         }
 
     windows = {
