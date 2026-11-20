@@ -91,6 +91,7 @@ def _(build_weights, funds, prices, sectors):
     ours = {
         "Ours: SMA 10/50": "SMA 10/50",
         "Ours: Top 3 rotation": "Top 3 rotation",
+        "Ours: Top 3 daily": "Top 3 daily",
         "Ours: Momentum-weighted daily": "Momentum-weighted daily",
         "Ours: SPY 200-day filter": "SPY filter, 200-day",
         "Ours: Equal-weight buy & hold": "Buy & hold",
@@ -107,7 +108,7 @@ def _(build_weights, funds, prices, sectors):
     _fee_labels = {
         f"{_k} (after 0.6% fee)": _v - fee
         for _k, _v in series.items()
-        if "Top 3" in _k or "SMA" in _k or "200-day" in _k
+        if "Top 3 rotation" in _k or "SMA" in _k or "200-day" in _k
     }
     for _label in funds:
         series[_label] = daily[_label]

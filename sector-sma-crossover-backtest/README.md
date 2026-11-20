@@ -114,14 +114,15 @@ that holds cash for a pick with negative momentum (invested 94-100% in sectors, 
 
 ## Compared with existing funds (`real_products.py`)
 
-Real funds (after fees) versus our rules (before fees; cash earns T-bill returns). XLSR is a sector
+Real funds (after fees) versus our rules (before fees; cash earns T-bill returns). Top 3 rotation is monthly; Top 3 daily re-ranks every day. XLSR is a sector
 rotation fund, PTLC and TRND are Pacer Trendpilot 200-day trend funds, MTUM a momentum fund. Since 2019-07, %:
 
 | Line | Return | Ann. vol | Max drawdown | Covid crash | 2022 bear |
 |---|---|---|---|---|---|
 | Ours: SMA 10/50 | 50.21 | 9.44 | -12.37 | -7.56 | -11.26 |
 | Ours: Top 3 rotation | 164.86 | 19.74 | -31.52 | -31.52 | -2.69 |
-| Ours: SPY 200-day filter | 100.94 | 11.33 | -16.87 | -16.2 | -5.96 |
+| Ours: Top 3 daily | 202.63 | 19.79 | -32.39 | -32.27 | -2.43 |
+| Ours: SPY 200-day filter | 100.93 | 11.33 | -16.87 | -16.2 | -5.96 |
 | Ours: Equal-weight buy & hold | 134.38 | 18.43 | -36.34 | -36.21 | -18.13 |
 | XLSR | 123.8 | 20.05 | -32.94 | -32.34 | -21.91 |
 | PTLC | 92.36 | 14.19 | -26.63 | -22.79 | -9.22 |
@@ -142,8 +143,8 @@ window. Yearly return and drawdown for every line: `outputs/products_yearly.csv`
 ## What it doesn't show
 
 - The first backtest is one year, one market regime. Later sections add 5 and 7 years and two selloffs.
-- No tax, spread or slippage beyond the 5 and 10 bps cases; close-to-close fills only; no out-of-sample test.
-- Buy-and-hold baskets are rebalanced daily, a simplification.
+- No tax, spread or slippage beyond the 5 and 10 bps cases; close-to-close fills; no out-of-sample test;
+  buy-and-hold baskets are rebalanced daily.
 
 ## What I looked at first
 `yfinance` and `pandas`; backtesting libraries like `vectorbt` were skipped, as these rules are a few lines.
