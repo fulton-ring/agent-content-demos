@@ -65,9 +65,8 @@ Return % (before costs) for the basket of 11 ETFs:
 | Inverse volatility | 2.69 | 6.44 | 37 |
 | Buy & hold basket | 12.64 | 55.80 | 100 |
 
-Fibonacci progression starts every trade at 1/8 of full size, so it was invested about 8% of the
-time. It is not comparable with the others on return. Sizing changes were small next to the gap to
-buy-and-hold in both windows.
+Fibonacci progression starts each trade at 1/8 size, so it was invested about 8% of the time and
+is not comparable on return. Sizing changes were small next to the gap to buy-and-hold.
 
 ## Momentum, rotation and market filters (`rotation_momentum.py`)
 
@@ -75,7 +74,7 @@ Asks whether momentum (trailing return) instead of price averages, rotating into
 or a market-wide filter can get ahead of big selloffs. Run on the 11 sectors and on 10 country ETFs
 (SPY, EWC, EWU, EWG, EWJ, MCHI, INDA, EWZ, EWA, EWY, in US dollars). Rules are in the notebook; windows
 (12-1 and 6-1 month momentum, top 3, 200-day filter) were set once, not tuned. Cash earns 0%.
-Other windows (1 year, 5 years) are in `outputs/rotation_*.csv`.
+All strategies and windows, including 6-1 momentum and dual momentum, are in `outputs/rotation_*.csv`.
 
 **Sectors**
 
@@ -84,9 +83,7 @@ Other windows (1 year, 5 years) are in `outputs/rotation_*.csv`.
 | Buy & hold | 133.43 | -36.34 | -36.21 | -18.13 |
 | SMA 10/50 | 43.76 | -13.02 | -7.7 | -11.31 |
 | Momentum 12-1 | 72.12 | -31.39 | -31.3 | -10.21 |
-| Momentum 6-1 | 42.22 | -32.51 | -32.37 | -8.49 |
 | Top 3 rotation | 166.39 | -31.5 | -31.5 | -2.56 |
-| Dual momentum | 155.54 | -31.5 | -31.5 | -2.56 |
 | SPY filter, 200-day | 99.35 | -16.72 | -16.12 | -6.06 |
 | SPY filter, momentum | 107.08 | -36.34 | -36.21 | -6.64 |
 
@@ -97,9 +94,7 @@ Other windows (1 year, 5 years) are in `outputs/rotation_*.csv`.
 | Buy & hold | 82.59 | -38.78 | -36.89 | -22.12 |
 | SMA 10/50 | 40.05 | -17.39 | -3.7 | -9.98 |
 | Momentum 12-1 | 26.67 | -37.93 | -35.84 | -3.87 |
-| Momentum 6-1 | 22.76 | -38.78 | -36.89 | -7.28 |
 | Top 3 rotation | 75.03 | -40.81 | -40.11 | -19.28 |
-| Dual momentum | 68.17 | -40.81 | -40.11 | -6.26 |
 | SPY filter, 200-day | 66.51 | -16.99 | -12.64 | -1.9 |
 | SPY filter, momentum | 68.18 | -38.78 | -36.89 | -7.27 |
 
@@ -108,6 +103,33 @@ In both universes only two rules cut the max drawdown by more than half: SMA 10/
 since the prior year's return was still positive in February 2020. Rotation and dual momentum
 results depend on which few ETFs led, and the country version did not beat buy-and-hold on drawdown.
 Two selloffs are a small sample.
+
+## By calendar year (`rotation_momentum.py`)
+
+Return %. `*` marks a partial year (2019 from July, 2026 to Nov 20). Max drawdown per year and the other strategies are in `outputs/yearly_*.csv`.
+
+**Sectors**
+
+| Strategy | 2019* | 2020 | 2021 | 2022 | 2023 | 2024 | 2025 | 2026* |
+|---|---|---|---|---|---|---|---|---|
+| Buy & hold | 7.1 | 10.8 | 29.9 | -10.5 | 17.0 | 16.6 | 13.5 | 9.2 |
+| SMA 10/50 | 0.9 | 12.2 | 17.3 | -10.7 | 5.2 | 8.8 | 1.8 | 4.0 |
+| Top 3 rotation | 7.2 | 16.1 | 21.0 | 9.2 | 13.5 | 18.6 | 12.3 | 6.9 |
+| SPY filter, 200-day | 7.1 | 6.9 | 29.9 | -8.4 | 7.7 | 16.6 | 10.8 | 5.3 |
+| SPY filter, momentum | 5.3 | 1.0 | 29.9 | -6.6 | 9.5 | 16.6 | 15.1 | 9.2 |
+
+**Countries**
+
+| Strategy | 2019* | 2020 | 2021 | 2022 | 2023 | 2024 | 2025 | 2026* |
+|---|---|---|---|---|---|---|---|---|
+| Buy & hold | 5.8 | 11.6 | 6.0 | -12.1 | 17.1 | 3.3 | 33.4 | 2.7 |
+| SMA 10/50 | 1.1 | 24.7 | 1.2 | -5.9 | 7.3 | -4.0 | 14.0 | -0.7 |
+| Top 3 rotation | 6.0 | 12.7 | 10.0 | -13.0 | 3.5 | 2.9 | 24.0 | 15.6 |
+| SPY filter, 200-day | 5.8 | 17.6 | 6.0 | -3.7 | 6.1 | 3.3 | 23.7 | -3.4 |
+| SPY filter, momentum | 4.5 | 6.2 | 6.0 | -7.3 | 8.8 | 3.3 | 33.4 | 2.7 |
+
+No strategy was best in every year. In sectors, buy and hold led in 2023 and tied the SPY filters in 2021;
+top-3 rotation led 2020 and 2022. In countries, the 10/50 SMA led 2020 and the 200-day filter led 2022.
 
 ## What didn't work / failure cases
 
@@ -119,12 +141,10 @@ Two selloffs are a small sample.
 
 ## What it doesn't show
 
-- One year is one market regime, so this says nothing about other periods.
-- No tax, spread or slippage beyond the 5 and 10 bps cases. No intraday fills (close-to-close only).
-- No comparison with other window lengths, and no out-of-sample test.
-- The buy-and-hold basket is rebalanced daily, a simplification.
+- The first backtest is one year, one market regime. Later sections add 5 and 7 years and two selloffs.
+- No tax, spread or slippage beyond the 5 and 10 bps cases; close-to-close fills only; no out-of-sample test.
+- Buy-and-hold baskets are rebalanced daily, a simplification.
 
 ## What I looked at first
-
 `yfinance` for data and `pandas` rolling means for the averages. Backtesting libraries such as
 `vectorbt` or `backtrader` were not used, since a one-rule backtest is a few lines of pandas.

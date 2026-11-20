@@ -195,6 +195,51 @@ def _(end, np, out_dir, pd, prices, study_start, universes, weights):
 @app.cell
 def _(mo):
     mo.md("""
+    ## By calendar year
+
+    Return and max drawdown for each strategy inside each calendar year, from the same position
+    paths. The first and last years are partial: the first starts on the study start date, the
+    last ends on the final data date.
+    """)
+
+
+@app.cell
+def _(daily, end, out_dir, pd, study_start, universes, weights):
+    for _uni_name, _uni_tickers in universes.items():
+        _uni_paths = weights(_uni_tickers)
+        _returns, _drawdowns = {}, {}
+        for _year in range(study_start.year, end.year + 1):
+            _lo = max(study_start, pd.Timestamp(year=_year, month=1, day=1))
+            _hi = min(end, pd.Timestamp(year=_year, month=12, day=31))
+            _sel = (daily.index >= _lo) & (daily.index <= _hi)
+            _year_ret = daily.loc[_sel, _uni_tickers]
+            assert not _year_ret.isna().any().any(), (
+                f"missing data in {_uni_name} {_year}"
+            )
+            _partial = _lo > pd.Timestamp(
+                year=_year, month=1, day=7
+            ) or _hi < pd.Timestamp(year=_year, month=12, day=24)
+            _label = f"{_year}*" if _partial else str(_year)
+            _returns[_label], _drawdowns[_label] = {}, {}
+            for _strat, _w in _uni_paths.items():
+                _equity = (1 + (_w[_sel] * _year_ret).sum(axis=1)).cumprod()
+                _returns[_label][_strat] = 100 * (_equity.iloc[-1] - 1)
+                _drawdowns[_label][_strat] = (
+                    100 * (_equity / _equity.cummax() - 1).min()
+                )
+        _ret_table = pd.DataFrame(_returns).round(1)
+        _dd_table = pd.DataFrame(_drawdowns).round(1)
+        _ret_table.to_csv(out_dir / f"yearly_return_{_uni_name}.csv")
+        _dd_table.to_csv(out_dir / f"yearly_drawdown_{_uni_name}.csv")
+        print(f"\n=== {_uni_name}: return % by calendar year (* = partial year) ===")
+        print(_ret_table.to_string())
+        print(f"\n=== {_uni_name}: max drawdown % within each year ===")
+        print(_dd_table.to_string())
+
+
+@app.cell
+def _(mo):
+    mo.md("""
     ## What this does not show
 
     - Covid 2020 and 2022 are two selloffs. Rules that happened to exit early in them may not
