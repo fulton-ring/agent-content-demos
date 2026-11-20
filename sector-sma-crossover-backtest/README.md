@@ -114,8 +114,8 @@ that holds cash for a pick with negative momentum (invested 94-100% in sectors, 
 
 ## Compared with existing funds (`real_products.py`)
 
-Real funds (after fees) versus our rules (before fees; cash earns T-bill returns). Top 3 rotation is monthly; Top 3 daily re-ranks every day. XLSR is a sector
-rotation fund, PTLC and TRND are Pacer Trendpilot 200-day trend funds, MTUM a momentum fund. Since 2019-07, %:
+Funds are after fees; our rules before fees, cash at T-bill returns. Top 3 rotation is monthly, Top 3 daily re-ranks daily.
+XLSR: sector rotation. PTLC, TRND: Pacer 200-day trend funds. MTUM: momentum. Since 2019-07, %:
 
 | Line | Return | Ann. vol | Max drawdown | Covid crash | 2022 bear |
 |---|---|---|---|---|---|
