@@ -200,7 +200,7 @@ def _(mo):
     - Covid 2020 and 2022 are two selloffs. Rules that happened to exit early in them may not
       exit early in the next one, which could look different (slow grind, sudden gap).
     - Country returns are in dollars, so currency moves are mixed in with local stock moves.
-    - Three universes picks (11 sectors, 10 countries) are one choice each, not a survey.
+    - The two universes (11 sectors, 10 countries) are one choice each, not a survey.
     - Momentum windows, top-3 count and the 200-day filter were set once, not tuned.
     - Taxes and spreads beyond 5 bps are ignored. Cash earns 0%.
     """)

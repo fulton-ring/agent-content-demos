@@ -103,8 +103,8 @@ Other windows (1 year, 5 years) are in `outputs/rotation_*.csv`.
 | SPY filter, 200-day | 66.51 | -16.99 | -12.64 | -1.9 |
 | SPY filter, momentum | 68.18 | -38.78 | -36.89 | -7.27 |
 
-In both universes the SPY 200-day filter kept the largest share of the buy-and-hold return while
-cutting the drawdown the most. The SPY 12-1 momentum filter stayed invested through the Covid crash,
+In both universes only two rules cut the max drawdown by more than half: SMA 10/50 and the SPY
+200-day filter. The filter kept more of the buy-and-hold return (sectors 99 vs 44, countries 67 vs 40). The SPY 12-1 momentum filter stayed invested through the Covid crash,
 since the prior year's return was still positive in February 2020. Rotation and dual momentum
 results depend on which few ETFs led, and the country version did not beat buy-and-hold on drawdown.
 Two selloffs are a small sample.
