@@ -12,7 +12,8 @@ measures the result against the last public copy.
   OpenStreetMap).
 - **Jails.** County and local jails are 65% of the old layer, and no national list of them is public. Twelve
   states publish a jail list. Those lists give 1,000 jails and put one within 1 km of 56% of HIFLD's open county
-  and local records in those states. Nationally that is 22%.
+  and local records in those states. Nationally the jail lists reach 19% of HIFLD's county records, and 22% have
+  one of our facilities of any kind within 1 km (`output/jail_coverage.csv`, `output/hifld_coverage.csv`).
 - **Open maps.** OSM and Overture alone reach about half of HIFLD's county records, mostly as points rather than
   outlines.
 
