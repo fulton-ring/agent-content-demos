@@ -39,7 +39,7 @@ def _(mo):
     | Momentum 6-1 | each ETF on while its 6-1 month return > 0 |
     | Top 3 rotation | each month-end hold the 3 ETFs with the best 12-1 momentum, 1/3 each |
     | Dual momentum | same top 3, but an ETF is held only if its 12-1 momentum is also > 0, else cash |
-    | Top 3 weekly / daily, Dual momentum daily | same rules, re-ranked every week-end or every day instead of month-end |
+    | Top 3 and Dual momentum, weekly / daily | same rules, re-ranked every week-end or every day instead of month-end |
     | SPY filter, 200-day | hold the equal-weight basket unless SPY is below its 200-day average, then cash |
     | SPY filter, momentum | hold the basket unless SPY's 12-1 return is < 0, then cash |
 
@@ -130,6 +130,7 @@ def _(pd, prices):
         rotation = top3_w.loc[month_ends].reindex(px.index).ffill()
         dual = dual_w.loc[month_ends].reindex(px.index).ffill()
         rotation_weekly = top3_w.loc[week_ends].reindex(px.index).ffill()
+        dual_weekly = dual_w.loc[week_ends].reindex(px.index).ffill()
         equal = pd.DataFrame(1.0 / n, index=px.index, columns=tickers)
         raw = {
             "Buy & hold": equal,
@@ -140,6 +141,7 @@ def _(pd, prices):
             "Dual momentum": dual,
             "Top 3 weekly": rotation_weekly,
             "Top 3 daily": top3_w,
+            "Dual momentum weekly": dual_weekly,
             "Dual momentum daily": dual_w,
             "SPY filter, 200-day": equal.mul(spy_above_200, axis=0),
             "SPY filter, momentum": equal.mul(spy_mom_ok, axis=0),
@@ -217,7 +219,7 @@ def _(mo):
 def _(daily, end, out_dir, pd, study_start, universes, weights):
     for _uni_name, _uni_tickers in universes.items():
         _uni_paths = weights(_uni_tickers)
-        _returns, _drawdowns = {}, {}
+        _returns, _drawdowns, _exposures = {}, {}, {}
         for _year in range(study_start.year, end.year + 1):
             _lo = max(study_start, pd.Timestamp(year=_year, month=1, day=1))
             _hi = min(end, pd.Timestamp(year=_year, month=12, day=31))
@@ -230,9 +232,10 @@ def _(daily, end, out_dir, pd, study_start, universes, weights):
                 year=_year, month=1, day=7
             ) or _hi < pd.Timestamp(year=_year, month=12, day=24)
             _label = f"{_year}*" if _partial else str(_year)
-            _returns[_label], _drawdowns[_label] = {}, {}
+            _returns[_label], _drawdowns[_label], _exposures[_label] = {}, {}, {}
             for _strat, _w in _uni_paths.items():
                 _equity = (1 + (_w[_sel] * _year_ret).sum(axis=1)).cumprod()
+                _exposures[_label][_strat] = 100 * _w[_sel].sum(axis=1).mean()
                 _returns[_label][_strat] = 100 * (_equity.iloc[-1] - 1)
                 _drawdowns[_label][_strat] = (
                     100 * (_equity / _equity.cummax() - 1).min()
@@ -241,10 +244,14 @@ def _(daily, end, out_dir, pd, study_start, universes, weights):
         _dd_table = pd.DataFrame(_drawdowns).round(1)
         _ret_table.to_csv(out_dir / f"yearly_return_{_uni_name}.csv")
         _dd_table.to_csv(out_dir / f"yearly_drawdown_{_uni_name}.csv")
+        _exp_table = pd.DataFrame(_exposures).round(0)
+        _exp_table.to_csv(out_dir / f"yearly_exposure_{_uni_name}.csv")
         print(f"\n=== {_uni_name}: return % by calendar year (* = partial year) ===")
         print(_ret_table.to_string())
         print(f"\n=== {_uni_name}: max drawdown % within each year ===")
         print(_dd_table.to_string())
+        print(f"\n=== {_uni_name}: average % of capital invested in each year ===")
+        print(_exp_table.to_string())
 
 
 @app.cell

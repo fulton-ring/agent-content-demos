@@ -37,8 +37,7 @@ slightly between runs (one run moved the basket from 4.72% to 4.58%). The end da
 | Buy & hold, equal-weight basket | 12.97 | 10.14 | 1.25 | -6.26 | 100.0 |
 | Buy & hold SPY | 9.62 | 13.88 | 0.73 | -8.88 | 100.0 |
 
-89 position changes across the 11 ETFs (about 8 each), counting entries on day one for ETFs already
-above their 50-day average.
+89 position changes across the 11 ETFs (about 8 each), including day-one entries.
 
 Per ETF, the rule beat that ETF's own buy-and-hold in 1 of 11 cases (XLI). Largest
 shortfalls: XLE -20.8, XLB -18.1, XLP -15.5 points. See `outputs/per_etf.csv`.
@@ -108,28 +107,29 @@ most to costs (about 32 points in sectors, 19 in countries). Drawdowns changed l
 
 ## By calendar year (`rotation_momentum.py`)
 
-Return %. `*` marks a partial year (2019 from July, 2026 to Nov 19). Drawdown per year and the other
-strategies are in `outputs/yearly_*.csv`.
+Return % / max drawdown % within the year. `*` marks a partial year (2019 from July, 2026 to Nov 19).
+Dual momentum is top 3 rotation that holds cash for a pick with negative momentum (sector exposure
+94-100%, countries 56-100% by year). Other strategies and yearly exposure: `outputs/yearly_*.csv`.
 
 **Sectors**
 
 | Strategy | 2019* | 2020 | 2021 | 2022 | 2023 | 2024 | 2025 | 2026* |
 |---|---|---|---|---|---|---|---|---|
-| Buy & hold | 7.1 | 10.8 | 29.9 | -10.5 | 17.0 | 16.6 | 13.5 | 9.8 |
-| SMA 10/50 | 0.9 | 12.2 | 17.3 | -10.7 | 5.2 | 8.8 | 1.8 | 3.9 |
-| Top 3 rotation | 7.2 | 16.1 | 21.0 | 9.2 | 13.5 | 18.6 | 12.3 | 8.4 |
-| SPY filter, 200-day | 7.1 | 6.9 | 29.9 | -8.4 | 7.7 | 16.6 | 10.8 | 5.3 |
+| Buy & hold | 7.1 / -5.1 | 10.8 / -36.3 | 29.9 / -4.7 | -10.5 / -19.2 | 17.0 / -10.3 | 16.6 / -6.4 | 13.5 / -15.0 | 9.8 / -6.3 |
+| SMA 10/50 | 0.9 / -6.1 | 12.2 / -9.5 | 17.3 / -4.2 | -10.7 / -11.1 | 5.2 / -6.3 | 8.8 / -4.3 | 1.8 / -6.9 | 3.9 / -3.8 |
+| Top 3 rotation | 7.2 / -4.1 | 16.1 / -31.5 | 21.0 / -7.8 | 9.2 / -15.3 | 13.5 / -10.7 | 18.6 / -8.9 | 12.3 / -15.2 | 8.4 / -9.9 |
+| Dual momentum | 7.2 / -4.1 | 14.5 / -31.5 | 21.0 / -7.8 | 7.1 / -15.3 | 12.6 / -10.7 | 18.6 / -8.9 | 12.3 / -15.2 | 8.4 / -9.9 |
+| SPY filter, 200-day | 7.1 / -5.1 | 6.9 / -16.7 | 29.9 / -4.7 | -8.4 / -9.2 | 7.7 / -10.0 | 16.6 / -6.4 | 10.8 / -6.2 | 5.3 / -6.2 |
 
 **Countries**
 
 | Strategy | 2019* | 2020 | 2021 | 2022 | 2023 | 2024 | 2025 | 2026* |
 |---|---|---|---|---|---|---|---|---|
-| Buy & hold | 5.8 | 11.6 | 6.0 | -12.1 | 17.1 | 3.3 | 33.4 | 4.5 |
-| SMA 10/50 | 1.1 | 24.7 | 1.2 | -5.9 | 7.3 | -4.0 | 14.0 | -0.6 |
-| Top 3 rotation | 6.0 | 12.7 | 10.0 | -13.0 | 3.5 | 2.9 | 24.0 | 19.9 |
-| SPY filter, 200-day | 5.8 | 17.6 | 6.0 | -3.7 | 6.1 | 3.3 | 23.7 | -3.4 |
-
-No strategy was best in every year.
+| Buy & hold | 5.8 / -8.3 | 11.6 / -38.8 | 6.0 / -9.4 | -12.1 / -24.0 | 17.1 / -11.9 | 3.3 / -8.7 | 33.4 / -12.8 | 4.5 / -11.2 |
+| SMA 10/50 | 1.1 / -7.4 | 24.7 / -7.9 | 1.2 / -8.7 | -5.9 / -12.1 | 7.3 / -7.3 | -4.0 / -6.4 | 14.0 / -9.3 | -0.6 / -10.7 |
+| Top 3 rotation | 6.0 / -10.4 | 12.7 / -40.8 | 10.0 / -10.3 | -13.0 / -22.5 | 3.5 / -16.8 | 2.9 / -7.4 | 24.0 / -16.7 | 19.9 / -17.7 |
+| Dual momentum | 6.0 / -10.4 | 7.8 / -40.8 | 10.0 / -10.3 | -6.5 / -17.2 | -3.2 / -17.3 | 2.9 / -7.4 | 24.0 / -16.7 | 19.9 / -17.7 |
+| SPY filter, 200-day | 5.8 / -8.3 | 17.6 / -15.3 | 6.0 / -9.4 | -3.7 / -6.5 | 6.1 / -10.9 | 3.3 / -8.7 | 23.7 / -4.9 | -3.4 / -13.9 |
 
 ## What didn't work / failure cases
 
