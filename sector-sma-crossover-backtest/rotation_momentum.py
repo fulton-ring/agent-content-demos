@@ -39,6 +39,7 @@ def _(mo):
     | Momentum 6-1 | each ETF on while its 6-1 month return > 0 |
     | Top 3 rotation | each month-end hold the 3 ETFs with the best 12-1 momentum, 1/3 each |
     | Dual momentum | same top 3, but an ETF is held only if its 12-1 momentum is also > 0, else cash |
+    | Top 3 weekly / daily, Dual momentum daily | same rules, re-ranked every week-end or every day instead of month-end |
     | SPY filter, 200-day | hold the equal-weight basket unless SPY is below its 200-day average, then cash |
     | SPY filter, momentum | hold the basket unless SPY's 12-1 return is < 0, then cash |
 
@@ -48,7 +49,7 @@ def _(mo):
 
 @app.cell
 def _(Path, os, pd, yf):
-    end = pd.Timestamp(os.environ.get("BACKTEST_END", "2026-11-20"))
+    end = pd.Timestamp(os.environ.get("BACKTEST_END", "2026-11-19"))
     universes = {
         "Sectors": [
             "XLK",
@@ -111,6 +112,9 @@ def _(pd, prices):
     month_ends = (
         prices.index.to_series().groupby(prices.index.to_period("M")).last().to_numpy()
     )
+    week_ends = (
+        prices.index.to_series().groupby(prices.index.to_period("W")).last().to_numpy()
+    )
     spy = prices["SPY"]
     spy_above_200 = (spy > spy.rolling(200).mean()).astype(float)
     spy_mom_ok = (spy.shift(21) / spy.shift(252) - 1 > 0).astype(float)
@@ -121,8 +125,11 @@ def _(pd, prices):
         mom12 = px.shift(21) / px.shift(252) - 1
         mom6 = px.shift(21) / px.shift(126) - 1
         top3 = (mom12.rank(axis=1, ascending=False) <= 3) & mom12.notna()
-        rotation = (top3 / 3).loc[month_ends].reindex(px.index).ffill()
-        dual = ((top3 & (mom12 > 0)) / 3).loc[month_ends].reindex(px.index).ffill()
+        top3_w = top3 / 3
+        dual_w = (top3 & (mom12 > 0)) / 3
+        rotation = top3_w.loc[month_ends].reindex(px.index).ffill()
+        dual = dual_w.loc[month_ends].reindex(px.index).ffill()
+        rotation_weekly = top3_w.loc[week_ends].reindex(px.index).ffill()
         equal = pd.DataFrame(1.0 / n, index=px.index, columns=tickers)
         raw = {
             "Buy & hold": equal,
@@ -131,6 +138,9 @@ def _(pd, prices):
             "Momentum 6-1": (mom6 > 0) / n,
             "Top 3 rotation": rotation,
             "Dual momentum": dual,
+            "Top 3 weekly": rotation_weekly,
+            "Top 3 daily": top3_w,
+            "Dual momentum daily": dual_w,
             "SPY filter, 200-day": equal.mul(spy_above_200, axis=0),
             "SPY filter, momentum": equal.mul(spy_mom_ok, axis=0),
         }

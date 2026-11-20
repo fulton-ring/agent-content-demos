@@ -42,7 +42,7 @@ def _(mo):
 
 @app.cell
 def _(Path, os, pd, yf):
-    end = pd.Timestamp(os.environ.get("BACKTEST_END", "2026-11-20"))
+    end = pd.Timestamp(os.environ.get("BACKTEST_END", "2026-11-19"))
     etfs = [
         "XLK",
         "XLF",
