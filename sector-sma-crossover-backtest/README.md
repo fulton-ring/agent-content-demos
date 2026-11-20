@@ -25,24 +25,49 @@ Set `BACKTEST_END=YYYY-MM-DD` to move the window.
 
 Daily dividend-adjusted closes from Yahoo Finance via the `yfinance` library, downloaded at run time
 and not committed. Prices from 6 months before the window are loaded only to warm up the 50-day average.
-Yahoo adjusts past prices after dividends, so re-running later can shift the numbers by a few hundredths
-of a percent (a re-run during this work moved the basket from 4.72% to 4.71%).
+The final day's price can still change after the close, and Yahoo adjusts past prices for dividends, so
+re-running can shift the numbers (the same window moved the basket from 4.72% to 4.58% across three runs
+on 2026-11-20, mostly from the last day's XLK price).
 
 ## Results (from the run in `outputs/`)
 
 | Strategy | Return % | Ann. vol % | Sharpe | Max drawdown % | Time invested % |
 |---|---|---|---|---|---|
-| SMA 10/50 basket, no costs | 4.71 | 6.61 | 0.73 | -3.83 | 61.9 |
-| SMA 10/50 basket, 5 bps/trade | 4.29 | 6.62 | 0.67 | -3.90 | 61.9 |
-| SMA 10/50 basket, 10 bps/trade | 3.87 | 6.62 | 0.61 | -3.98 | 61.9 |
-| Buy & hold, equal-weight basket | 12.86 | 10.14 | 1.24 | -6.26 | 100 |
-| Buy & hold SPY | 7.43 | 13.97 | 0.58 | -9.61 | 100 |
+| SMA 10/50 basket, no costs | 4.58 | 6.61 | 0.71 | -3.83 | 61.9 |
+| SMA 10/50 basket, 5 bps/trade | 4.16 | 6.61 | 0.65 | -3.90 | 61.9 |
+| SMA 10/50 basket, 10 bps/trade | 3.74 | 6.62 | 0.59 | -3.98 | 61.9 |
+| Buy & hold, equal-weight basket | 12.64 | 10.15 | 1.22 | -6.26 | 100 |
+| Buy & hold SPY | 7.20 | 14.00 | 0.57 | -9.80 | 100 |
 
 89 position changes across the 11 ETFs (about 8 each), counting entries on day one for ETFs already
 above their 50-day average.
 
-Per ETF, the rule beat that ETF's own buy-and-hold in 1 of 11 cases (XLI, +5.6 points). Largest
+Per ETF, the rule beat that ETF's own buy-and-hold in 1 of 11 cases (XLI, +5.9 points). Largest
 shortfalls: XLB -17.7, XLE -21.8, XLP -16.8 points. See `outputs/per_etf.csv`.
+
+## Position sizing variants (`position_sizing.py`)
+
+Same signal, different sizes: thirds in, Fibonacci tranches (1,1,2,3,5) in, Fibonacci in and out,
+a Fibonacci win/loss progression, trend-strength sizing and inverse-volatility sizing. Results for
+the last 1 and 5 years are in `outputs/sizing_1_year.csv` and `outputs/sizing_5_years.csv`; the
+notebook prints them with exposure, drawdown and turnover.
+
+Return % (before costs) for the basket of 11 ETFs:
+
+| Variant | 1 year | 5 years | Avg. exposure % (1y) |
+|---|---|---|---|
+| Baseline all-in/all-out | 4.58 | 9.66 | 62 |
+| Thirds in | 5.67 | 9.41 | 60 |
+| Fibonacci in | 5.51 | 8.34 | 58 |
+| Fibonacci in and out | 6.00 | 9.99 | 60 |
+| Fibonacci progression | 0.54 | 0.91 | 8 |
+| Trend strength | 1.99 | 9.72 | 41 |
+| Inverse volatility | 2.69 | 6.44 | 37 |
+| Buy & hold basket | 12.64 | 55.80 | 100 |
+
+Fibonacci progression starts every trade at 1/8 of full size, so it was invested about 8% of the
+time. It is not comparable with the others on return. Sizing changes were small next to the gap to
+buy-and-hold in both windows.
 
 ## What didn't work / failure cases
 
