@@ -13,7 +13,9 @@ def _():
     import pandas as pd
     import yfinance as yf
 
-    return Path, mo, np, os, pd, yf
+    from strategies import build_weights
+
+    return Path, build_weights, mo, np, os, pd, yf
 
 
 @app.cell
@@ -103,63 +105,10 @@ def _(mo):
     mo.md("""
     ## Strategy positions
 
-    `weights` returns the fraction of capital in each ETF, decided at each close and applied to the
-    next day. The rotation rules only change on the last trading day of each month.
+    `strategies.build_weights` returns the fraction of capital in each ETF, decided at each close and
+    applied to the next day. Rotation rules change only on the last trading day of each month or week.
+    It lives in `strategies.py` because `real_products.py` uses the same rules.
     """)
-
-
-@app.cell
-def _(pd, prices):
-    month_ends = (
-        prices.index.to_series().groupby(prices.index.to_period("M")).last().to_numpy()
-    )
-    week_ends = (
-        prices.index.to_series().groupby(prices.index.to_period("W")).last().to_numpy()
-    )
-    spy = prices["SPY"]
-    spy_above_200 = (spy > spy.rolling(200).mean()).astype(float)
-    spy_mom_ok = (spy.shift(21) / spy.shift(252) - 1 > 0).astype(float)
-
-    def weights(tickers: list[str]) -> dict[str, pd.DataFrame]:
-        px = prices[tickers]
-        n = len(tickers)
-        mom12 = px.shift(21) / px.shift(252) - 1
-        mom6 = px.shift(21) / px.shift(126) - 1
-        top3 = (mom12.rank(axis=1, ascending=False) <= 3) & mom12.notna()
-        top3_w = top3 / 3
-        dual_w = (top3 & (mom12 > 0)) / 3
-        rotation = top3_w.loc[month_ends].reindex(px.index).ffill()
-        dual = dual_w.loc[month_ends].reindex(px.index).ffill()
-        rotation_weekly = top3_w.loc[week_ends].reindex(px.index).ffill()
-        dual_weekly = dual_w.loc[week_ends].reindex(px.index).ffill()
-        positive = mom12.clip(lower=0)
-        total = positive.sum(axis=1)
-        mom_weighted = positive.div(total.where(total > 0), axis=0).fillna(0.0)
-        mom6_positive = mom6.clip(lower=0)
-        total6 = mom6_positive.sum(axis=1)
-        mom6_weighted = mom6_positive.div(total6.where(total6 > 0), axis=0).fillna(0.0)
-        mom_weighted_monthly = mom_weighted.loc[month_ends].reindex(px.index).ffill()
-        equal = pd.DataFrame(1.0 / n, index=px.index, columns=tickers)
-        raw = {
-            "Buy & hold": equal,
-            "SMA 10/50": (px.rolling(10).mean() > px.rolling(50).mean()) / n,
-            "Momentum 12-1": (mom12 > 0) / n,
-            "Momentum 6-1": (mom6 > 0) / n,
-            "Top 3 rotation": rotation,
-            "Dual momentum": dual,
-            "Top 3 weekly": rotation_weekly,
-            "Top 3 daily": top3_w,
-            "Momentum-weighted daily": mom_weighted,
-            "Momentum-weighted 6-1 daily": mom6_weighted,
-            "Momentum-weighted monthly": mom_weighted_monthly,
-            "Dual momentum weekly": dual_weekly,
-            "Dual momentum daily": dual_w,
-            "SPY filter, 200-day": equal.mul(spy_above_200, axis=0),
-            "SPY filter, momentum": equal.mul(spy_mom_ok, axis=0),
-        }
-        return {k: v.astype(float).shift(1).fillna(0.0) for k, v in raw.items()}
-
-    return (weights,)
 
 
 @app.cell
@@ -174,7 +123,7 @@ def _(mo):
 
 
 @app.cell
-def _(end, np, out_dir, pd, prices, study_start, universes, weights):
+def _(build_weights, end, np, out_dir, pd, prices, study_start, universes):
     def metrics(w: pd.DataFrame, ret: pd.DataFrame) -> dict[str, float]:
         gross = (w * ret).sum(axis=1)
         cost = w.diff().abs().fillna(w.abs()).sum(axis=1) * 5 / 10_000
@@ -199,7 +148,7 @@ def _(end, np, out_dir, pd, prices, study_start, universes, weights):
     daily = prices.pct_change()
     tables = {}
     for uni, tickers in universes.items():
-        paths = weights(tickers)
+        paths = build_weights(prices, tickers)
         for label, (lo, hi) in windows.items():
             sel = (daily.index >= lo) & (daily.index <= hi)
             ret = daily.loc[sel, tickers]
@@ -228,9 +177,9 @@ def _(mo):
 
 
 @app.cell
-def _(daily, end, out_dir, pd, study_start, universes, weights):
+def _(build_weights, daily, end, out_dir, pd, prices, study_start, universes):
     for _uni_name, _uni_tickers in universes.items():
-        _uni_paths = weights(_uni_tickers)
+        _uni_paths = build_weights(prices, _uni_tickers)
         _returns, _drawdowns, _exposures = {}, {}, {}
         for _year in range(study_start.year, end.year + 1):
             _lo = max(study_start, pd.Timestamp(year=_year, month=1, day=1))

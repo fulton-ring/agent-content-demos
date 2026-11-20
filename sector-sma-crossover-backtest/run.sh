@@ -4,3 +4,4 @@ cd "$(dirname "$0")"
 uv run backtest.py
 uv run position_sizing.py
 uv run rotation_momentum.py
+uv run real_products.py
