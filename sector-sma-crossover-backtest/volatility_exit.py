@@ -13,9 +13,10 @@ def _():
     import pandas as pd
     import yfinance as yf
 
+    from gates import hysteresis_gate
     from strategies import build_weights
 
-    return Path, build_weights, mo, np, os, pd, yf
+    return Path, build_weights, hysteresis_gate, mo, np, os, pd, yf
 
 
 @app.cell
@@ -344,6 +345,59 @@ def _(end, frame, out_dir, pd, study_start):
     _yearly = pd.DataFrame(_years)
     _yearly.to_csv(out_dir / "volatility_yearly.csv")
     print(_yearly.to_string())
+
+
+@app.cell
+def _(mo):
+    mo.md("""
+    ## Separate re-entry level on the sector strategies
+
+    Exit when the 5-day average VIX is above 25 (as above), re-enter only when it is at or below
+    the level shown. The grid (25, 22, 20, 18, 15) was fixed before running. BIL cash, 5 bps costs.
+    """)
+
+
+@app.cell
+def _(base, daily, hysteresis_gate, np, out_dir, pd, prices, sectors, study_start):
+    _vix5 = prices["^VIX"].rolling(5).mean()
+    _windows = {
+        "since 2019-07": (study_start, prices.index[-1]),
+        "Covid crash": (pd.Timestamp("2020-02-19"), pd.Timestamp("2020-03-23")),
+        "2022 bear": (pd.Timestamp("2022-01-03"), pd.Timestamp("2022-10-14")),
+    }
+    _out = {}
+    for _name in ("Buy & hold", "Top 3 rotation"):
+        for _level in (None, 25, 22, 20, 18, 15):
+            _gate = (
+                pd.Series(1.0, index=_vix5.index)
+                if _level is None
+                else hysteresis_gate(_vix5, 25, _level)
+            )
+            _gw = base[_name].mul(_gate, axis=0)
+            _cost = _gw.diff().abs().fillna(_gw.abs()).sum(axis=1) * 5 / 10_000
+            _r = (
+                (_gw * daily[sectors]).sum(axis=1)
+                + (1 - _gw.sum(axis=1)) * daily["BIL"]
+                - _cost
+            )
+            _label = f"{_name}, " + (
+                "no gate" if _level is None else f"re-enter {_level}"
+            )
+            _row = {}
+            for _wname, (_lo, _hi) in _windows.items():
+                _part = _r[(_r.index >= _lo) & (_r.index <= _hi)]
+                _equity = (1 + _part).cumprod()
+                _row[f"{_wname} return_%"] = 100 * (_equity.iloc[-1] - 1)
+                _row[f"{_wname} max_dd_%"] = (
+                    100 * (_equity / _equity.cummax() - 1).min()
+                )
+            _g = _gate[_gate.index >= study_start]
+            _row["days_in_cash_%"] = 100 * (1 - _g.mean())
+            _row["exits"] = int(((_g.shift(1) == 1) & (_g == 0)).sum())
+            _out[_label] = _row
+    _reentry = pd.DataFrame(_out).T.round(2)
+    _reentry.to_csv(out_dir / "volatility_reentry.csv")
+    print(_reentry.to_string())
 
 
 @app.cell

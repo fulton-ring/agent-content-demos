@@ -13,7 +13,9 @@ def _():
     import pandas as pd
     import yfinance as yf
 
-    return Path, mo, np, os, pd, yf
+    from gates import hysteresis_gate
+
+    return Path, hysteresis_gate, mo, np, os, pd, yf
 
 
 @app.cell
@@ -124,11 +126,11 @@ def _(mo):
 
 
 @app.cell
-def _(pd, prices):
+def _(hysteresis_gate, pd, prices):
     vix5 = prices["^VIX"].rolling(5).mean()
-    gate5 = (vix5 <= 25).astype(float).shift(1)
-    gate1 = (prices["^VIX"] <= 25).astype(float).shift(1)
-    first_valid = gate5.first_valid_index()
+    gate5 = hysteresis_gate(vix5, 25, 25)
+    gate1 = hysteresis_gate(prices["^VIX"], 25, 25)
+    first_valid = vix5.first_valid_index()
     assert first_valid is not None
     start_day = pd.Timestamp(first_valid)
     spy_ret = prices["SPY"].pct_change()
@@ -235,6 +237,89 @@ def _(out_dir, pd, prices, vix5):
         print(
             f"further drop of {_limit}% or more: {100 * (ep5['further_drop_%'] <= -_limit).mean():.0f}%"
         )
+
+
+@app.cell
+def _(mo):
+    mo.md("""
+    ## Separate re-entry level
+
+    Same exit (5-day average VIX above 25), but the gate returns to SPY only when the 5-day average
+    is at or below a lower level. The grid (25, 22, 20, 18, 15) was fixed before running. A lower
+    level keeps the portfolio in cash longer, which avoids buying back into rebounds that fail but
+    also misses fast recoveries. Cash earns 0%, 5 bps per switch.
+    """)
+
+
+@app.cell
+def _(hysteresis_gate, np, out_dir, pd, spy_ret, start_day, vix5):
+    reentry_levels = [25, 22, 20, 18, 15]
+    reentry_lines = {"SPY buy & hold": spy_ret}
+    reentry_gates = {}
+    for _level in reentry_levels:
+        _gate = hysteresis_gate(vix5, 25, _level)
+        reentry_gates[_level] = _gate
+        _cost = _gate.diff().abs().fillna(0.0) * 5 / 10_000
+        reentry_lines[f"exit 25, re-enter {_level}"] = spy_ret * _gate - _cost
+    reentry_frame = pd.DataFrame(reentry_lines).loc[start_day:].iloc[1:]
+
+    def reentry_stats(r: pd.Series) -> dict[str, float]:
+        equity = (1 + r).cumprod()
+        return {
+            "return_%": 100 * (equity.iloc[-1] - 1),
+            "sharpe": r.mean() / r.std() * np.sqrt(252),
+            "max_drawdown_%": 100 * (equity / equity.cummax() - 1).min(),
+        }
+
+    reentry_windows = {
+        "all years": (reentry_frame.index[0], reentry_frame.index[-1]),
+        "dot-com 2000-2002": (pd.Timestamp("2000-03-24"), pd.Timestamp("2002-10-09")),
+        "financial crisis 2007-2009": (
+            pd.Timestamp("2007-10-09"),
+            pd.Timestamp("2009-03-09"),
+        ),
+        "Covid crash": (pd.Timestamp("2020-02-19"), pd.Timestamp("2020-03-23")),
+        "2022 bear": (pd.Timestamp("2022-01-03"), pd.Timestamp("2022-10-14")),
+        "since 2019-07": (pd.Timestamp("2019-07-04"), reentry_frame.index[-1]),
+    }
+    for _label, (_lo, _hi) in reentry_windows.items():
+        _part = reentry_frame[
+            (reentry_frame.index >= _lo) & (reentry_frame.index <= _hi)
+        ]
+        _table = pd.DataFrame(
+            {c: reentry_stats(_part[c]) for c in reentry_frame.columns}
+        ).T.round(2)
+        _table.to_csv(out_dir / f"vix_reentry_{_label.replace(' ', '_')}.csv")
+        print(
+            f"\n=== {_label}: {_part.index[0].date()} to {_part.index[-1].date()} ==="
+        )
+        print(_table.to_string())
+    _activity = {}
+    for _level, _gate in reentry_gates.items():
+        _g = _gate.loc[reentry_frame.index]
+        _activity[f"re-enter {_level}"] = {
+            "days_in_cash_%": round(100 * (1 - _g.mean()), 1),
+            "exits": int(((_g.shift(1) == 1) & (_g == 0)).sum()),
+        }
+    print("\n=== Activity, all years ===")
+    print(pd.DataFrame(_activity).T.to_string())
+    return reentry_frame, reentry_gates
+
+
+@app.cell
+def _(out_dir, pd, reentry_frame):
+    _years = {}
+    for _year, _part in reentry_frame.groupby(reentry_frame.index.year):
+        _equity = (1 + _part).cumprod()
+        _ret = 100 * (_equity.iloc[-1] - 1)
+        _dd = 100 * (_equity / _equity.cummax() - 1).min()
+        _years[str(_year)] = {
+            c: f"{_ret[c]:.1f} / {_dd[c]:.1f}" for c in reentry_frame.columns
+        }
+    _table = pd.DataFrame(_years).T
+    _table.to_csv(out_dir / "vix_reentry_yearly.csv")
+    print("\nReturn % / max drawdown % by calendar year")
+    print(_table.to_string())
 
 
 @app.cell
