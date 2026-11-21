@@ -34,17 +34,17 @@ earning T-bill returns. Max drawdown is peak to trough on daily closes.
 
 | Line | Return | Ann. vol | Max drawdown | Covid crash | 2022 bear |
 |---|---|---|---|---|---|
-| Sector buy and hold | 134.38 | 18.43 | -36.34 | -36.21 | -18.13 |
-| SMA 10/50 (each sector) | 50.21 | 9.44 | -12.37 | -7.56 | -11.26 |
-| Top 3 rotation, monthly | 164.86 | 19.74 | -31.52 | -31.52 | -2.69 |
-| Top 3 rotation, daily | 202.63 | 19.79 | -32.39 | -32.27 | -2.43 |
-| SPY 200-day filter | 100.93 | 11.33 | -16.87 | -16.2 | -5.96 |
+| Equal-weight all sectors (no top 3) | 134.38 | 18.43 | -36.34 | -36.21 | -18.13 |
+| Equal-weight + SPY volatility level gate | 144.09 | 12.66 | -13.66 | -8.37 | -6.36 |
+| Equal-weight + exit on 5-day avg VIX > 25 | 59.98 | 11.12 | -21.06 | -11.22 | -17.04 |
+| Equal-weight + exit on 10-day avg VIX > 25 | 59.08 | 11.17 | -19.55 | -8.37 | -15.76 |
+| Top 3 daily | 202.63 | 19.79 | -32.39 | -32.27 | -2.43 |
 | Top 3 daily + SPY volatility level gate | 162.87 | 14.93 | -17.97 | -7.8 | 4.53 |
 | Top 3 daily + exit on 5-day avg VIX > 25 | 89.07 | 13.32 | -18.21 | -11.51 | -4.09 |
 | Top 3 daily + exit on 10-day avg VIX > 25 | 84.21 | 13.53 | -18.39 | -7.8 | -4.38 |
+| SMA 10/50 (each sector) | 50.21 | 9.44 | -12.37 | -7.56 | -11.26 |
 | XLSR (fund) | 123.8 | 20.05 | -32.94 | -32.34 | -21.91 |
 | PTLC (fund) | 92.36 | 14.19 | -26.63 | -22.79 | -9.22 |
-| TRND (fund) | 51.78 | 11.34 | -17.88 | -16.38 | -15.85 |
 | MTUM (fund) | 126.87 | 24.29 | -34.08 | -33.93 | -24.73 |
 | SPY | 166.01 | 19.6 | -33.72 | -33.4 | -23.83 |
 
