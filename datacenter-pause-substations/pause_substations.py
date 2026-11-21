@@ -520,6 +520,10 @@ def _(AS_OF, all_units, gpd, pauses_joined, pd, substations):
     )
     six_months = pd.Timestamp(AS_OF) + pd.DateOffset(months=6)
     ends_soon = per_substation["end_date"] <= six_months
+    pauses_ending = pauses_joined["end_date"].between(pd.Timestamp(AS_OF), six_months)
+    print(
+        f"Pauses in effect with a known end date by {six_months.date()}: {pauses_ending.sum()} of {len(pauses_joined)}"
+    )
     share_inside = len(per_substation) / len(substations)
     print(
         f"{len(per_substation)} of {len(substations)} 230 kV+ substations ({share_inside:.1%}) sit inside a paused unit"
