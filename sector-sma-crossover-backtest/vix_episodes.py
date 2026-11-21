@@ -128,17 +128,19 @@ def _(mo):
 @app.cell
 def _(hysteresis_gate, pd, prices):
     vix5 = prices["^VIX"].rolling(5).mean()
+    vix10 = prices["^VIX"].rolling(10).mean()
     gate5 = hysteresis_gate(vix5, 25, 25)
+    gate10 = hysteresis_gate(vix10, 25, 25)
     gate1 = hysteresis_gate(prices["^VIX"], 25, 25)
     first_valid = vix5.first_valid_index()
     assert first_valid is not None
     start_day = pd.Timestamp(first_valid)
     spy_ret = prices["SPY"].pct_change()
-    return gate1, gate5, spy_ret, start_day, vix5
+    return gate1, gate10, gate5, spy_ret, start_day, vix10, vix5
 
 
 @app.cell
-def _(gate1, gate5, np, out_dir, pd, spy_ret, start_day):
+def _(gate1, gate10, gate5, np, out_dir, pd, spy_ret, start_day):
     def run_rule(gate: pd.Series) -> pd.Series:
         pos = gate.fillna(1.0)
         cost = pos.diff().abs().fillna(0.0) * 5 / 10_000
@@ -148,6 +150,7 @@ def _(gate1, gate5, np, out_dir, pd, spy_ret, start_day):
         {
             "SPY buy & hold": spy_ret,
             "Exit on 5-day avg VIX > 25": run_rule(gate5),
+            "Exit on 10-day avg VIX > 25": run_rule(gate10),
             "Exit on 1-day VIX > 25": run_rule(gate1),
         }
     ).loc[start_day:]
@@ -181,13 +184,16 @@ def _(gate1, gate5, np, out_dir, pd, spy_ret, start_day):
             f"\n=== {_label}: {_part.index[0].date()} to {_part.index[-1].date()} ==="
         )
         print(_table.to_string())
-    invested = pd.DataFrame({"5-day": gate5, "1-day": gate1}).loc[lines.index]
+    invested = pd.DataFrame({"10-day": gate10, "5-day": gate5, "1-day": gate1}).loc[
+        lines.index
+    ]
     switches = {
         k: int(((invested[k].shift(1) == 1) & (invested[k] == 0)).sum())
         for k in invested.columns
     }
     print(
-        f"\nDays in cash: 5-day {100 * (1 - invested['5-day'].mean()):.1f}%, "
+        f"\nDays in cash: 10-day {100 * (1 - invested['10-day'].mean()):.1f}%, "
+        f"5-day {100 * (1 - invested['5-day'].mean()):.1f}%, "
         f"1-day {100 * (1 - invested['1-day'].mean()):.1f}%; exits: {switches}"
     )
     return (lines,)
@@ -208,35 +214,37 @@ def _(lines, out_dir, pd):
 
 
 @app.cell
-def _(out_dir, pd, prices, vix5):
+def _(out_dir, pd, prices, vix10, vix5):
     spy_px = prices["SPY"]
-    _above5 = vix5 > 25
-    _quiet5 = ~_above5.shift(1, fill_value=False).rolling(20).max().fillna(1).astype(
-        bool
-    )
-    _rows5 = {}
-    for _day in prices.index[_above5 & _quiet5]:
-        _i = prices.index.get_loc(_day)
-        _close = spy_px.iloc[_i]
-        _next60 = spy_px.iloc[_i + 1 : _i + 61]
-        if len(_next60) < 60:
-            continue
-        _rows5[str(_day.date())] = {
-            "avg5_vix": round(float(vix5.iloc[_i]), 1),
-            "already_down_%": round(
-                100 * (_close / spy_px.iloc[max(0, _i - 252) : _i + 1].max() - 1), 1
-            ),
-            "further_drop_%": round(100 * (_next60.min() / _close - 1), 1),
-            "return_60d_%": round(100 * (spy_px.iloc[_i + 60] / _close - 1), 1),
-        }
-    ep5 = pd.DataFrame(_rows5).T
-    ep5.to_csv(out_dir / "vix_episodes_5day.csv")
-    print(f"\n{len(ep5)} episodes with the 5-day average crossing above 25")
-    print(ep5.describe().loc[["50%", "min", "max"]].round(1).to_string())
-    for _limit in (5, 10, 20):
-        print(
-            f"further drop of {_limit}% or more: {100 * (ep5['further_drop_%'] <= -_limit).mean():.0f}%"
+    for _window, _avg in ((5, vix5), (10, vix10)):
+        _above = _avg > 25
+        _quiet = ~_above.shift(1, fill_value=False).rolling(20).max().fillna(1).astype(
+            bool
         )
+        _rows = {}
+        for _day in prices.index[_above & _quiet]:
+            _i = prices.index.get_loc(_day)
+            _close = spy_px.iloc[_i]
+            _next60 = spy_px.iloc[_i + 1 : _i + 61]
+            if len(_next60) < 60:
+                continue
+            _rows[str(_day.date())] = {
+                f"avg{_window}_vix": round(float(_avg.iloc[_i]), 1),
+                "already_down_%": round(
+                    100 * (_close / spy_px.iloc[max(0, _i - 252) : _i + 1].max() - 1), 1
+                ),
+                "further_drop_%": round(100 * (_next60.min() / _close - 1), 1),
+                "return_60d_%": round(100 * (spy_px.iloc[_i + 60] / _close - 1), 1),
+            }
+        _episodes = pd.DataFrame(_rows).T
+        _episodes.to_csv(out_dir / f"vix_episodes_{_window}day.csv")
+        print(
+            f"\n{len(_episodes)} episodes with the {_window}-day average crossing above 25"
+        )
+        print(_episodes.describe().loc[["50%", "min", "max"]].round(1).to_string())
+        for _limit in (5, 10, 20):
+            _share = 100 * (_episodes["further_drop_%"] <= -_limit).mean()
+            print(f"further drop of {_limit}% or more: {_share:.0f}%")
 
 
 @app.cell

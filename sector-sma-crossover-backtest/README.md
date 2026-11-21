@@ -42,7 +42,7 @@ earning T-bill returns. Max drawdown is peak to trough on daily closes.
 | Top 3 monthly + volatility level gate | 150.53 | 14.93 | -15.64 | -7.29 | 7.23 |
 | Sector buy and hold + volatility level gate | 144.09 | 12.66 | -13.66 | -8.37 | -6.36 |
 | Top 3 monthly + exit on 5-day avg VIX > 25 | 81.39 | 13.25 | -17.17 | -10.33 | -3.9 |
-| Sector buy and hold + exit on 5-day avg VIX > 25 | 59.98 | 11.12 | -21.06 | -11.22 | -17.04 |
+| Top 3 monthly + exit on 10-day avg VIX > 25 | 68.95 | 13.46 | -15.96 | -7.29 | -3.49 |
 | XLSR (fund) | 123.8 | 20.05 | -32.94 | -32.34 | -21.91 |
 | PTLC (fund) | 92.36 | 14.19 | -26.63 | -22.79 | -9.22 |
 | TRND (fund) | 51.78 | 11.34 | -17.88 | -16.38 | -15.85 |
@@ -75,11 +75,7 @@ Threshold sensitivity, since 2019-07 (return %, max drawdown %, Sharpe, % of day
 
 | Top 3 monthly, gate and threshold | Return | Max drawdown | Sharpe | Days in cash |
 |---|---|---|---|---|
-| SPY 20-day vol, exit above 15% | 65.44 | -11.32 | 0.68 | 40.09 |
-| SPY 20-day vol, exit above 20% | 98.39 | -14.11 | 0.76 | 21.07 |
 | SPY 20-day vol, exit above 25% | 150.53 | -15.64 | 0.91 | 10.88 |
-| SPY 20-day vol, exit above 30% | 134.84 | -19.71 | 0.81 | 5.33 |
-| SPY 20-day vol, exit above 35% | 170.22 | -15.45 | 0.9 | 3.45 |
 | SPY vol, no gate | 164.86 | -31.52 | 0.77 | 0.0 |
 | VIX 5-day, exit above 15 | 41.15 | -7.62 | 0.98 | 80.66 |
 | VIX 5-day, exit above 20 | 24.83 | -15.7 | 0.34 | 38.85 |
@@ -87,28 +83,33 @@ Threshold sensitivity, since 2019-07 (return %, max drawdown %, Sharpe, % of day
 | VIX 5-day, exit above 30 | 98.44 | -20.53 | 0.69 | 7.92 |
 | VIX 5-day, exit above 35 | 138.14 | -18.02 | 0.8 | 2.8 |
 
-Results move a lot with the threshold (exits above 15% or 20% gave up 40 to 60% of the return), and 29 days
-sat within half a point of the 25% line, so small data revisions can flip exits. Gates act after prices
-have already fallen: in the Covid crash the level gate first exited on 2020-03-03 after SPY was down
-about 8.6%.
+Results move a lot with the threshold, and 29 days sat within half a point of the 25% line, so small data
+revisions can flip exits. Gates act after prices fall: in the Covid crash the level gate first exited on
+2020-03-03 after SPY was down about 8.6%.
 
 ## How far did SPY fall after the VIX crossed 25? (`vix_episodes.py`)
 
-48 episodes since 1993 (first close above 25 after 20 quiet days). Median further drop in the next 60
-trading days: -6.1%. A further drop of 5% or more happened in 60% of episodes, 10% or more
-in 29%, 20% or more in 6% (2002, 2008, 2020). SPY was higher after 60 days in 58%.
-The worst were 2008-09-09 (further -38.4%) and 2020-02-24 (-30.4%). Per-episode table: `outputs/vix_episodes.csv`.
+48 episodes since 1993 (first close above 25 after 20 quiet days). Median further drop in the next 60 trading days:
+-6.1%; 5% or more in 60% of episodes, 10% or more in 29%, 20% or more in 6% (2002, 2008, 2020).
+SPY was higher after 60 days in 58%. Worst: 2008-09-09 (further -38.4%) and 2020-02-24 (-30.4%): `outputs/vix_episodes.csv`.
 
-## Exit when the 5-day average VIX close is above 25 (`vix_episodes.py`, `volatility_exit.py`)
+## Exit when the 5- or 10-day average VIX close is above 25 (`vix_episodes.py`, `volatility_exit.py`)
 
-SPY rule, 1993 to 2026, cash at 0% (no T-bill history), 5 bps per switch. Return %, max drawdown %:
-all years 538.22 / -51.92 against 2805.88 / -55.19 for buy and hold; 2007-09
--29.08 / -29.74 against -54.77 / -55.19; Covid -11.69 / -12.11 against
--33.4 / -33.72; 2022 -23.33 / -23.77 against -23.83 / -24.5.
-It spent about 18% of days in cash with 69 exits since 1993. The 5-day average crossed 25 in 37 episodes;
-the median further 60-day drop was -5.4%, and 8% fell 20% or more. In the sector strategies the same rule gave up
-about half or more of the return since 2019-07 (table above), and 2021, 2022 and 2025 were years it lost to no gate.
-Year by year: `outputs/vix_rule_yearly.csv`, `outputs/volatility_yearly.csv`.
+SPY rule, 1993 to 2026, cash at 0% (no T-bill history), 5 bps per switch; hold while the average VIX close is at or
+below 25. Return % / max drawdown %:
+
+| Window | Buy and hold | 5-day avg | 10-day avg | 1-day |
+|---|---|---|---|---|
+| All years | 2805.88 / -55.19 | 538.22 / -51.92 | 625.74 / -44.42 | 554.31 / -50.91 |
+| 2007-09 | -54.77 / -55.19 | -29.08 / -29.74 | -33.5 / -35.18 | -30.18 / -32.07 |
+| Covid crash | -33.4 / -33.72 | -11.69 / -12.11 | -8.25 / -12.44 | -4.3 / -4.75 |
+| 2022 bear | -23.83 / -24.5 | -23.33 / -23.77 | -22.82 / -23.26 | -18.41 / -20.72 |
+| Since 2019-07 | 166.01 / -33.72 | 75.0 / -28.06 | 68.88 / -27.64 | 80.63 / -23.03 |
+
+Days in cash are about 18% for all three; exits since 1993: 69 (5-day), 47 (10-day), 163 (1-day). The 5-day average
+crossed 25 in 37 episodes (median further 60-day drop -5.4%, 8% fell 20% or more); the 10-day in 31 (-5.3%, 6%).
+In the sector strategies since 2019-07 both gates gave up about half or more of the return (table above), and
+2021, 2022 and 2025 were years they lost to no gate. Years: `outputs/vix_rule_yearly.csv`, `outputs/volatility_yearly.csv`.
 
 ### Separate re-entry level
 
@@ -123,11 +124,10 @@ SPY, 1993 to 2026, cash at 0% (buy and hold: 2805.88% return, -55.19% drawdown):
 | 18 | 380.01 | -40.08 | -18.37 | -7.44 | 35.9 | 22 |
 | 15 | 486.46 | -22.97 | 0.0 | 0.0 | 48.9 | 10 |
 
-A lower re-entry level cuts exposure to crashes but keeps the portfolio out for years: at 15 it was in cash for
-all of 1998 to 2003 and all of 2021 to 2022. Its best all-years result comes from avoiding two bear markets, not
-from timing rebounds. On the sector strategies since 2019-07 (Top 3 monthly, no gate 164.9% return), re-entry at
-25, 22, 20, 18 and 15 gave 81.39%, 53.23%, 28.73%, 49.33% and 19.44%.
-Results are not monotonic in the level (`outputs/vix_reentry_*.csv`, `outputs/volatility_reentry.csv`).
+A lower re-entry level cuts crash exposure but keeps the portfolio out for years: at 15 it was in cash for all of
+1998 to 2003 and 2021 to 2022, so its all-years result comes from skipping two bear markets, not timing rebounds.
+Top 3 monthly since 2019-07 (no gate 164.9%): re-entry at 25, 22, 20, 18, 15 gave 81.39%, 53.23%,
+28.73%, 49.33%, 19.44%; not monotonic (`outputs/vix_reentry_*.csv`, `outputs/volatility_reentry.csv`).
 
 ## What didn't work / failure cases
 

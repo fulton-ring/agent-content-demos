@@ -86,7 +86,7 @@ def _(mo):
 
 
 @app.cell
-def _(prices, sectors):
+def _(hysteresis_gate, prices, sectors):
     daily = prices.pct_change()
     ann = 252**0.5
     spy_vol = daily["SPY"].rolling(20).std() * ann
@@ -97,9 +97,8 @@ def _(prices, sectors):
         .shift(1)
         .fillna(1.0)
     )
-    gate_vix5 = (
-        (prices["^VIX"].rolling(5).mean() <= 25).astype(float).shift(1).fillna(1.0)
-    )
+    gate_vix5 = hysteresis_gate(prices["^VIX"].rolling(5).mean(), 25, 25)
+    gate_vix10 = hysteresis_gate(prices["^VIX"].rolling(10).mean(), 25, 25)
     own_vol = daily[sectors].rolling(20).std() * ann
     gate_own = (
         (own_vol <= 1.5 * own_vol.rolling(120).mean())
@@ -107,7 +106,7 @@ def _(prices, sectors):
         .shift(1)
         .fillna(1.0)
     )
-    return daily, gate_level, gate_own, gate_spike, gate_vix5, spy_vol
+    return daily, gate_level, gate_own, gate_spike, gate_vix10, gate_vix5, spy_vol
 
 
 @app.cell
@@ -117,6 +116,7 @@ def _(
     gate_level,
     gate_own,
     gate_spike,
+    gate_vix10,
     gate_vix5,
     pd,
     prices,
@@ -135,6 +135,7 @@ def _(
             "level gate": _w.mul(gate_level, axis=0),
             "spike gate": _w.mul(gate_spike, axis=0),
             "VIX 5-day gate": _w.mul(gate_vix5, axis=0),
+            "VIX 10-day gate": _w.mul(gate_vix10, axis=0),
             "own spike gate": _w * gate_own,
         }
         for _gate, _gw in gated.items():
@@ -164,6 +165,7 @@ def _(
     gate_level,
     gate_own,
     gate_spike,
+    gate_vix10,
     gate_vix5,
     np,
     out_dir,
@@ -196,7 +198,12 @@ def _(
         print(_table.to_string())
 
     in_window = gate_level.index >= study_start
-    market_gates = {"level": gate_level, "spike": gate_spike, "VIX 5-day": gate_vix5}
+    market_gates = {
+        "level": gate_level,
+        "spike": gate_spike,
+        "VIX 5-day": gate_vix5,
+        "VIX 10-day": gate_vix10,
+    }
     summary = {}
     for _gname, _gate in market_gates.items():
         _g = _gate[in_window]
@@ -226,7 +233,7 @@ def _(mo):
 
 
 @app.cell
-def _(daily, gate_level, gate_spike, gate_vix5, pd):
+def _(daily, gate_level, gate_spike, gate_vix10, gate_vix5, pd):
     peak = pd.Timestamp("2020-02-19")
     trough = pd.Timestamp("2020-03-23")
     rows = {}
@@ -234,6 +241,7 @@ def _(daily, gate_level, gate_spike, gate_vix5, pd):
         "level": gate_level,
         "spike": gate_spike,
         "VIX 5-day": gate_vix5,
+        "VIX 10-day": gate_vix10,
     }.items():
         _after = _gate[(_gate.index > peak) & (_gate.index <= trough)]
         _first = _after[_after == 0].index
@@ -326,7 +334,7 @@ def _(end, frame, out_dir, pd, study_start):
     _pairs = [
         c
         for c in frame.columns
-        if c.endswith(("no gate", "level gate", "VIX 5-day gate"))
+        if c.endswith(("no gate", "level gate", "VIX 5-day gate", "VIX 10-day gate"))
     ]
     _years = {}
     for _year in range(study_start.year, end.year + 1):
