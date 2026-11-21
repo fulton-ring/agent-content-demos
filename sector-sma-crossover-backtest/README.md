@@ -85,6 +85,13 @@ sat within half a point of the 25% line, so small data revisions can flip exits.
 have already fallen: in the Covid crash the level gate first exited on 2020-03-03 after SPY was down
 about 8.6%.
 
+## How far did SPY fall after the VIX crossed 25? (`vix_episodes.py`)
+
+48 episodes since 1993 (first close above 25 after 20 quiet days). Median further drop in the next 60
+trading days: -6.1%. A further drop of 5% or more happened in 60% of episodes, 10% or more
+in 29%, 20% or more in 6% (2002, 2008, 2020). SPY was higher after 60 days in 58%.
+The worst were 2008-09-09 (further -38.4%) and 2020-02-24 (-30.4%). Per-episode table: `outputs/vix_episodes.csv`.
+
 ## What didn't work / failure cases
 
 - The crossover trailed buy and hold in the one-year window, with lower volatility and drawdown, partly
