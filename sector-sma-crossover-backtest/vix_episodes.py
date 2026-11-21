@@ -9,10 +9,11 @@ def _():
     from pathlib import Path
 
     import marimo as mo
+    import numpy as np
     import pandas as pd
     import yfinance as yf
 
-    return Path, mo, os, pd, yf
+    return Path, mo, np, os, pd, yf
 
 
 @app.cell
@@ -107,6 +108,133 @@ def _(episodes, out_dir, pd):
     print(
         f"SPY higher after 60 days: {100 * (episodes['return_60d_%'] > 0).mean():.0f}% of episodes"
     )
+
+
+@app.cell
+def _(mo):
+    mo.md("""
+    ## Rule: exit when the 5-day average VIX close is above 25
+
+    SPY is held while the 5-day average of the VIX close is at or below 25, otherwise cash (0%
+    return; no T-bill history is used so the test can go back to 1993). The reading at the close
+    applies from the next day. "1-day" is the same rule on the single-day close, for comparison.
+    Each switch costs 5 bps. Episodes below use the 5-day average crossing above 25 after 20 days
+    at or below it, with the same measures as above.
+    """)
+
+
+@app.cell
+def _(pd, prices):
+    vix5 = prices["^VIX"].rolling(5).mean()
+    gate5 = (vix5 <= 25).astype(float).shift(1)
+    gate1 = (prices["^VIX"] <= 25).astype(float).shift(1)
+    first_valid = gate5.first_valid_index()
+    assert first_valid is not None
+    start_day = pd.Timestamp(first_valid)
+    spy_ret = prices["SPY"].pct_change()
+    return gate1, gate5, spy_ret, start_day, vix5
+
+
+@app.cell
+def _(gate1, gate5, np, out_dir, pd, spy_ret, start_day):
+    def run_rule(gate: pd.Series) -> pd.Series:
+        pos = gate.fillna(1.0)
+        cost = pos.diff().abs().fillna(0.0) * 5 / 10_000
+        return spy_ret * pos - cost
+
+    lines = pd.DataFrame(
+        {
+            "SPY buy & hold": spy_ret,
+            "Exit on 5-day avg VIX > 25": run_rule(gate5),
+            "Exit on 1-day VIX > 25": run_rule(gate1),
+        }
+    ).loc[start_day:]
+    lines = lines.iloc[1:]
+
+    def stats(r: pd.Series) -> dict[str, float]:
+        equity = (1 + r).cumprod()
+        return {
+            "return_%": 100 * (equity.iloc[-1] - 1),
+            "ann_vol_%": 100 * r.std() * np.sqrt(252),
+            "sharpe": r.mean() / r.std() * np.sqrt(252),
+            "max_drawdown_%": 100 * (equity / equity.cummax() - 1).min(),
+        }
+
+    windows = {
+        "all years": (lines.index[0], lines.index[-1]),
+        "dot-com 2000-2002": (pd.Timestamp("2000-03-24"), pd.Timestamp("2002-10-09")),
+        "financial crisis 2007-2009": (
+            pd.Timestamp("2007-10-09"),
+            pd.Timestamp("2009-03-09"),
+        ),
+        "Covid crash": (pd.Timestamp("2020-02-19"), pd.Timestamp("2020-03-23")),
+        "2022 bear": (pd.Timestamp("2022-01-03"), pd.Timestamp("2022-10-14")),
+        "since 2019-07": (pd.Timestamp("2019-07-04"), lines.index[-1]),
+    }
+    for _label, (_lo, _hi) in windows.items():
+        _part = lines[(lines.index >= _lo) & (lines.index <= _hi)]
+        _table = pd.DataFrame({c: stats(_part[c]) for c in lines.columns}).T.round(2)
+        _table.to_csv(out_dir / f"vix_rule_{_label.replace(' ', '_')}.csv")
+        print(
+            f"\n=== {_label}: {_part.index[0].date()} to {_part.index[-1].date()} ==="
+        )
+        print(_table.to_string())
+    invested = pd.DataFrame({"5-day": gate5, "1-day": gate1}).loc[lines.index]
+    switches = {
+        k: int(((invested[k].shift(1) == 1) & (invested[k] == 0)).sum())
+        for k in invested.columns
+    }
+    print(
+        f"\nDays in cash: 5-day {100 * (1 - invested['5-day'].mean()):.1f}%, "
+        f"1-day {100 * (1 - invested['1-day'].mean()):.1f}%; exits: {switches}"
+    )
+    return (lines,)
+
+
+@app.cell
+def _(lines, out_dir, pd):
+    years = {}
+    for _year, _part in lines.groupby(lines.index.year):
+        _equity = (1 + _part).cumprod()
+        _ret = 100 * (_equity.iloc[-1] - 1)
+        _dd = 100 * (_equity / _equity.cummax() - 1).min()
+        years[str(_year)] = {c: f"{_ret[c]:.1f} / {_dd[c]:.1f}" for c in lines.columns}
+    yearly_table = pd.DataFrame(years).T
+    yearly_table.to_csv(out_dir / "vix_rule_yearly.csv")
+    print("\nReturn % / max drawdown % by calendar year")
+    print(yearly_table.to_string())
+
+
+@app.cell
+def _(out_dir, pd, prices, vix5):
+    spy_px = prices["SPY"]
+    _above5 = vix5 > 25
+    _quiet5 = ~_above5.shift(1, fill_value=False).rolling(20).max().fillna(1).astype(
+        bool
+    )
+    _rows5 = {}
+    for _day in prices.index[_above5 & _quiet5]:
+        _i = prices.index.get_loc(_day)
+        _close = spy_px.iloc[_i]
+        _next60 = spy_px.iloc[_i + 1 : _i + 61]
+        if len(_next60) < 60:
+            continue
+        _rows5[str(_day.date())] = {
+            "avg5_vix": round(float(vix5.iloc[_i]), 1),
+            "already_down_%": round(
+                100 * (_close / spy_px.iloc[max(0, _i - 252) : _i + 1].max() - 1), 1
+            ),
+            "further_drop_%": round(100 * (_next60.min() / _close - 1), 1),
+            "return_60d_%": round(100 * (spy_px.iloc[_i + 60] / _close - 1), 1),
+        }
+    ep5 = pd.DataFrame(_rows5).T
+    ep5.to_csv(out_dir / "vix_episodes_5day.csv")
+    print(f"\n{len(ep5)} episodes with the 5-day average crossing above 25")
+    print(ep5.describe().loc[["50%", "min", "max"]].round(1).to_string())
+    for _limit in (5, 10, 20):
+        print(
+            f"further drop of {_limit}% or more: {100 * (ep5['further_drop_%'] <= -_limit).mean():.0f}%"
+        )
 
 
 @app.cell

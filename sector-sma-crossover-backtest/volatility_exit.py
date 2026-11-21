@@ -31,6 +31,7 @@ def _(mo):
     |---|---|---|
     | Level | SPY 20-day realized volatility (annualized) is above 25% | it is at or below 25% |
     | Spike | SPY 20-day volatility is above 1.5 times its own 120-day average | it is at or below that |
+    | VIX 5-day | the 5-day average of the VIX close is above 25 | it is at or below 25 |
     | Own spike | an ETF's own 20-day volatility is above 1.5 times its 120-day average (per ETF) | it is at or below that |
 
     Each gate is read at the close and applied from the next day. Trading cost is 5 bps per unit of
@@ -55,13 +56,13 @@ def _(Path, os, pd, yf):
         "XLC",
     ]
     raw = yf.download(
-        [*sectors, "SPY", "BIL"],
+        [*sectors, "SPY", "BIL", "^VIX"],
         start="2017-01-03",
         end=end + pd.Timedelta(days=1),
         auto_adjust=True,
         progress=False,
     )
-    prices = raw["Close"]
+    prices = raw["Close"].dropna(subset=[*sectors, "SPY", "BIL"])
     assert prices.index[-1] >= end - pd.Timedelta(days=4), "data is stale"
     study_start = pd.Timestamp("2019-07-04")
     assert prices.loc[study_start:].notna().all().all(), "missing data in study window"
@@ -95,6 +96,9 @@ def _(prices, sectors):
         .shift(1)
         .fillna(1.0)
     )
+    gate_vix5 = (
+        (prices["^VIX"].rolling(5).mean() <= 25).astype(float).shift(1).fillna(1.0)
+    )
     own_vol = daily[sectors].rolling(20).std() * ann
     gate_own = (
         (own_vol <= 1.5 * own_vol.rolling(120).mean())
@@ -102,11 +106,21 @@ def _(prices, sectors):
         .shift(1)
         .fillna(1.0)
     )
-    return daily, gate_level, gate_own, gate_spike, spy_vol
+    return daily, gate_level, gate_own, gate_spike, gate_vix5, spy_vol
 
 
 @app.cell
-def _(build_weights, daily, gate_level, gate_own, gate_spike, pd, prices, sectors):
+def _(
+    build_weights,
+    daily,
+    gate_level,
+    gate_own,
+    gate_spike,
+    gate_vix5,
+    pd,
+    prices,
+    sectors,
+):
     base = build_weights(prices.drop(columns=["BIL"]), sectors)
     bases = {
         "Buy & hold": base["Buy & hold"],
@@ -119,6 +133,7 @@ def _(build_weights, daily, gate_level, gate_own, gate_spike, pd, prices, sector
             "no gate": _w,
             "level gate": _w.mul(gate_level, axis=0),
             "spike gate": _w.mul(gate_spike, axis=0),
+            "VIX 5-day gate": _w.mul(gate_vix5, axis=0),
             "own spike gate": _w * gate_own,
         }
         for _gate, _gw in gated.items():
@@ -142,7 +157,18 @@ def _(mo):
 
 
 @app.cell
-def _(end, frame, gate_level, gate_own, gate_spike, np, out_dir, pd, study_start):
+def _(
+    end,
+    frame,
+    gate_level,
+    gate_own,
+    gate_spike,
+    gate_vix5,
+    np,
+    out_dir,
+    pd,
+    study_start,
+):
     def metrics(r: pd.Series) -> dict[str, float]:
         equity = (1 + r).cumprod()
         return {
@@ -169,7 +195,7 @@ def _(end, frame, gate_level, gate_own, gate_spike, np, out_dir, pd, study_start
         print(_table.to_string())
 
     in_window = gate_level.index >= study_start
-    market_gates = {"level": gate_level, "spike": gate_spike}
+    market_gates = {"level": gate_level, "spike": gate_spike, "VIX 5-day": gate_vix5}
     summary = {}
     for _gname, _gate in market_gates.items():
         _g = _gate[in_window]
@@ -199,11 +225,15 @@ def _(mo):
 
 
 @app.cell
-def _(daily, gate_level, gate_spike, pd):
+def _(daily, gate_level, gate_spike, gate_vix5, pd):
     peak = pd.Timestamp("2020-02-19")
     trough = pd.Timestamp("2020-03-23")
     rows = {}
-    for _gname, _gate in {"level": gate_level, "spike": gate_spike}.items():
+    for _gname, _gate in {
+        "level": gate_level,
+        "spike": gate_spike,
+        "VIX 5-day": gate_vix5,
+    }.items():
         _after = _gate[(_gate.index > peak) & (_gate.index <= trough)]
         _first = _after[_after == 0].index
         if len(_first) == 0:
@@ -231,37 +261,50 @@ def _(daily, gate_level, gate_spike, pd):
 @app.cell
 def _(mo):
     mo.md("""
-    ## How sensitive is the level gate to its threshold?
+    ## How sensitive are the gates to their thresholds?
 
-    The 25% level was picked once. This shows what other round thresholds would have done, to see
+    The 25 level was picked once, for both the SPY volatility gate and the VIX 5-day gate. This shows what other round thresholds would have done, to see
     whether the result depends on that one choice. Since the study start, with 5 bps costs.
     """)
 
 
 @app.cell
-def _(base, daily, np, out_dir, pd, sectors, spy_vol, study_start):
+def _(base, daily, np, out_dir, pd, prices, sectors, spy_vol, study_start):
+    _vix5 = prices["^VIX"].rolling(5).mean()
+    _sources = {
+        "SPY vol": (spy_vol, [0.15, 0.20, 0.25, 0.30, 0.35], 100),
+        "VIX 5-day": (_vix5, [15, 20, 25, 30, 35], 1),
+    }
     _rows = {}
     for _name in ("Buy & hold", "Top 3 rotation"):
-        for _limit in (0.15, 0.20, 0.25, 0.30, 0.35, 1.0):
-            _gate = (spy_vol <= _limit).astype(float).shift(1).fillna(1.0)
-            _gw = base[_name].mul(_gate, axis=0)
-            _cost = _gw.diff().abs().fillna(_gw.abs()).sum(axis=1) * 5 / 10_000
-            _r = (
-                (_gw * daily[sectors]).sum(axis=1)
-                + (1 - _gw.sum(axis=1)) * daily["BIL"]
-                - _cost
-            )
-            _r = _r[_r.index >= study_start]
-            _g = _gate[_gate.index >= study_start]
-            _equity = (1 + _r).cumprod()
-            _label = "no gate" if _limit == 1.0 else f"exit above {int(_limit * 100)}%"
-            _rows[f"{_name}, {_label}"] = {
-                "return_%": 100 * (_equity.iloc[-1] - 1),
-                "max_drawdown_%": 100 * (_equity / _equity.cummax() - 1).min(),
-                "sharpe": _r.mean() / _r.std() * np.sqrt(252),
-                "days_in_cash_%": 100 * (1 - _g.mean()),
-                "exits": int(((_g.shift(1) == 1) & (_g == 0)).sum()),
-            }
+        for _kind, (_series, _limits, _scale) in _sources.items():
+            for _limit in [*_limits, None]:
+                if _limit is None:
+                    _gate = pd.Series(1.0, index=_series.index)
+                else:
+                    _gate = (_series <= _limit).astype(float).shift(1).fillna(1.0)
+                _gw = base[_name].mul(_gate, axis=0)
+                _cost = _gw.diff().abs().fillna(_gw.abs()).sum(axis=1) * 5 / 10_000
+                _r = (
+                    (_gw * daily[sectors]).sum(axis=1)
+                    + (1 - _gw.sum(axis=1)) * daily["BIL"]
+                    - _cost
+                )
+                _r = _r[_r.index >= study_start]
+                _g = _gate[_gate.index >= study_start]
+                _equity = (1 + _r).cumprod()
+                _label = (
+                    f"{_kind}, no gate"
+                    if _limit is None
+                    else f"{_kind}, exit above {int(_limit * _scale)}{'%' if _scale == 100 else ''}"
+                )
+                _rows[f"{_name}, {_label}"] = {
+                    "return_%": 100 * (_equity.iloc[-1] - 1),
+                    "max_drawdown_%": 100 * (_equity / _equity.cummax() - 1).min(),
+                    "sharpe": _r.mean() / _r.std() * np.sqrt(252),
+                    "days_in_cash_%": 100 * (1 - _g.mean()),
+                    "exits": int(((_g.shift(1) == 1) & (_g == 0)).sum()),
+                }
     _sensitivity = pd.DataFrame(_rows).T.round(2)
     _sensitivity.to_csv(out_dir / "volatility_threshold_sensitivity.csv")
     print(_sensitivity.to_string())
@@ -279,7 +322,11 @@ def _(mo):
 
 @app.cell
 def _(end, frame, out_dir, pd, study_start):
-    _pairs = [c for c in frame.columns if c.endswith(("no gate", "level gate"))]
+    _pairs = [
+        c
+        for c in frame.columns
+        if c.endswith(("no gate", "level gate", "VIX 5-day gate"))
+    ]
     _years = {}
     for _year in range(study_start.year, end.year + 1):
         _lo = max(study_start, pd.Timestamp(year=_year, month=1, day=1))
