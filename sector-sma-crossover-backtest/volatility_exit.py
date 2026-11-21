@@ -285,7 +285,7 @@ def _(base, daily, np, out_dir, pd, prices, sectors, spy_vol, study_start):
         "VIX 5-day": (_vix5, [15, 20, 25, 30, 35], 1),
     }
     _rows = {}
-    for _name in ("Buy & hold", "Top 3 rotation"):
+    for _name in ("Buy & hold", "Top 3 rotation", "Top 3 daily"):
         for _kind, (_series, _limits, _scale) in _sources.items():
             for _limit in [*_limits, None]:
                 if _limit is None:
@@ -374,7 +374,7 @@ def _(base, daily, hysteresis_gate, np, out_dir, pd, prices, sectors, study_star
         "2022 bear": (pd.Timestamp("2022-01-03"), pd.Timestamp("2022-10-14")),
     }
     _out = {}
-    for _name in ("Buy & hold", "Top 3 rotation"):
+    for _name in ("Buy & hold", "Top 3 rotation", "Top 3 daily"):
         for _level in (None, 25, 22, 20, 18, 15):
             _gate = (
                 pd.Series(1.0, index=_vix5.index)
