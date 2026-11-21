@@ -34,13 +34,19 @@ def _(mo):
         r"""
     ## First: does this already exist, and may we republish the pages?
 
-    See the README's *Prior art and reuse* section for the sources. In short: olmOCR-Bench's 1,403 PDFs come from
-    arXiv, Internet Archive books, Library of Congress letters and olmOCR's own web crawl; none of its categories is
-    US agency records, and no public OCR benchmark we found is built from FEMA or NRC documents. The closest
-    analogue is KDoc-OCRBench, built the same way from Korean public-sector PDFs. FEMA studies are federal works
-    (public domain, 17 U.S.C. 105). Most NUREG/CR reports were written by contractors, so they aren't automatically
-    public domain; OSTI marks them as government-sponsored and freely downloadable but states no license. That is why
-    run time downloads the PDFs instead of committing them, and why publishing is a founder decision.
+    **No benchmark like it exists that we could find.** olmOCR-Bench's 1,403 PDFs come from arXiv, Internet Archive
+    books, AI2's own web crawl and, for "old scans", Library of Congress letters (19th-century correspondence, not
+    agency reports). OmniDocBench, READoc, CC-OCR, FUNSD/RVL-CDIP and DocVQA (tobacco-industry documents) hold no US
+    agency records. The closest are KDoc-OCRBench-V2 (same olmOCR format, 849 *Korean* public-sector pages) and
+    LlamaIndex's ExtractBench (49 US government forms among 370 documents, but schema extraction, not OCR tests). No
+    Hugging Face dataset mentions FEMA or NUREG.
+
+    **Reuse.** FEMA's site says "Most material on FEMA.gov is free of copyright"; the Map Service Center has no terms
+    of its own. NUREG/CR reports were written by contractors, so 17 U.S.C. 105 doesn't make them public domain, and
+    OSTI says to treat unmarked items "as if they are protected by copyright"; DOE policy, though, gives contractor
+    reports without a copyright claim "unlimited distribution", and none of our ten carries a notice (one,
+    NUREG/CR-1724, holds conference papers with contractor licence notices). So the PDFs are downloaded at run time,
+    not committed, and only short numbers and phrases appear in the tests. Sources are in the README.
     """
     )
     return
@@ -729,11 +735,17 @@ def _(mo):
         r"""
     ## What didn't work, and what this doesn't show
 
-    See the README for the discussion with the run's numbers. The structural limits, known before scoring:
-
-    - **18 pages.** olmOCR-Bench has 1,403 PDFs and KDoc-OCRBench 849. This is a seed set, not a benchmark yet.
+    - **18 pages.** olmOCR-Bench has 1,403 PDFs and KDoc-OCRBench-V2 849. This is a seed set, not a benchmark yet.
+    - **The key and the page disagreed once.** 39151CV001C prints six discharge columns; the source key holds four,
+      so our first neighbour tests there were wrong and every model "failed" 43% of that page. The tests now pair
+      only columns that are side by side on the page. A person check would catch more errors of this kind.
+    - **The NRC key's number pattern** joins "December 12,1974" into "12,1974"; such numbers are split at the comma.
     - **NRC tests check numbers only.** The NRC key has no positions, so a number found in the wrong table cell still
-      passes, and a three-character number can pass inside a longer one ("185" inside "1850").
+      passes, and a three-character number can pass inside a longer one ("185" inside "1850"). Three of 5063304's
+      tests are axis labels on a chart, which every vision model left out.
+    - **The text layer and Tesseract fail table tests by design**: olmOCR's table tests need a Markdown or HTML
+      table, and plain text has none, even when every number is there in order.
+    - **Each pipeline ran once.** Model outputs vary from run to run; olmOCR supports repeats, which we didn't use.
     - **The tests are AI-made until a person checks them.**
     """
     )
