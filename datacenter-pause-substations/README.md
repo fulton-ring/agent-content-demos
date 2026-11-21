@@ -52,11 +52,14 @@ state is within 25 km:
 
 The five unjoined are in `outputs/unjoined_records.csv`: two tribal nations and a utility authority (no Census
 unit), Louisville Metro (a consolidated government with no matching place name), and Shawnee Township (Allen
-County, OH), whose point is 100 km away in another county. The 900 joined records cover **899 units**.
+County, OH), whose point is about 200 km away in another county. The 900 joined records cover **899 units**.
 
 **Calyx cross-check.** Of Calyx's 399 distinct place names (403 places in 39 states), **329 (82%)** match a
-Bommarito pause in effect by state and name. So Calyx confirms 329 of Bommarito's 882 distinct places. The
-70 Calyx places without a match are mostly name forms our matcher misses (we didn't hand-reconcile them).
+Bommarito pause in effect by state and name, so Calyx confirms 329 of Bommarito's 882 distinct places. A
+one-off check outside the notebook sorted the 59 Calyx rows with no match: 7 are in Bommarito under another
+status, 2 under another sector, 2 under another name form (Indianapolis, Lexington-Fayette), and the other
+48 aren't in this release under their name; the ones we spot-checked (Oakland, San Diego, Boise, Salt Lake
+City) aren't in it at all. So Bommarito misses some places Calyx has read.
 
 ## Results (from one clean `./run.sh`)
 
@@ -75,11 +78,15 @@ strata (`outputs/comparison.csv`).
 | **Local (place + town/township)** | **114 of 583 (19.6%)** | **9.7%** | 5.0% of 26,606 | 4.66, < 0.0001 | **2.48 (1.96–3.15), < 0.0001** |
 
 **Within 5 miles of one:** local 60.5% vs 49.6% comparable (OR 1.71, 1.42–2.07); counties 73.4% vs 73.7%
-(OR 0.93, p = 0.75). On OSM-confirmed substations only, every figure moves by 0.1 point or less.
+(OR 0.93, p = 0.75). On OSM-confirmed substations only, shares move by 0.1 point or less and odds ratios by
+0.02 or less.
 
 Paused counties look exposed in the raw comparison (57.6% vs 51.1%) only because they are bigger: against
 counties of the same population in the same state, the gap disappears. The local gap shrinks from 4.0× raw
 odds to 2.5× after matching on size, but holds.
+
+**Pauses ending soon:** 170 of the 905 pauses have a known end date by 2027-05-21 (six months from
+the run date).
 
 **Substations inside paused units:** 997 of 6,469 (15.4%): 776 in a paused county, 246 in a paused city, town
 or township. For 374 of them every covering pause has a known end date, and **221 sit only under pauses that end
