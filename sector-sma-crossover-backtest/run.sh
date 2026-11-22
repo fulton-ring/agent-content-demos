@@ -8,3 +8,4 @@ uv run real_products.py
 uv run volatility_exit.py
 uv run vix_episodes.py
 uv run per_etf_volatility.py
+uv run broad_market.py

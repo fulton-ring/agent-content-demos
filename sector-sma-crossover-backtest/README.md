@@ -12,7 +12,7 @@ average, otherwise cash; capital is split equally. Follow-ups, one notebook each
 - `real_products.py`: our rules against XLSR, Pacer Trendpilot (PTLC, TRND), MTUM and SPY.
 - `volatility_exit.py`: volatility gates, VIX 5/10-day exits, re-entry levels, market-direction filters.
 - `vix_episodes.py`: what SPY did after the VIX crossed 25, and the VIX rules on SPY since 1993.
-- `per_etf_volatility.py`: top 3 daily with volatility tracked per ETF.
+- `per_etf_volatility.py`: top 3 daily with per-ETF volatility. `broad_market.py`: simple broad-market rules.
 - `strategies.py`, `gates.py`: position rules and the exit/re-entry gate shared by the notebooks.
 
 Signals are read at the close and applied the next day. All thresholds were set once, not tuned.
@@ -39,13 +39,8 @@ earning T-bill returns. Max drawdown is peak to trough on daily closes.
 | Equal-weight + SPY volatility level gate | 146.7 | 12.65 | -13.66 | -8.37 | -5.36 |
 | Top 3 daily | 202.63 | 19.79 | -32.39 | -32.27 | -2.43 |
 | Top 3 daily + SPY volatility level gate | 165.99 | 14.92 | -17.97 | -7.8 | 5.77 |
-| Top 3 daily + exit on 5-day avg VIX > 25 | 89.07 | 13.32 | -18.21 | -11.51 | -4.09 |
 | XLSR (fund) | 123.8 | 20.05 | -32.94 | -32.34 | -21.91 |
-| PTLC (fund) | 92.36 | 14.19 | -26.63 | -22.79 | -9.22 |
 | SPY | 166.01 | 19.6 | -33.72 | -33.4 | -23.83 |
-
-First backtest, one year to 2026-11-19, cash at 0%: SMA 10/50 basket 4.32%, equal-weight buy and
-hold 12.97%, SPY 9.62%. It beat its own sector's buy and hold in 1 of 11 ETFs (XLI).
 
 ## What the other tests found
 
@@ -64,13 +59,10 @@ return over five years. Threshold sensitivity (return %, max drawdown %, Sharpe,
 |---|---|---|---|---|
 | SPY 20-day vol, exit above 25% | 165.99 | -17.97 | 0.96 | 10.94 |
 | SPY vol, no gate | 202.63 | -32.39 | 0.86 | 0.0 |
-| VIX 5-day, exit above 15 | 47.15 | -7.62 | 1.09 | 80.66 |
 | VIX 5-day, exit above 25 | 89.07 | -18.21 | 0.72 | 18.75 |
-| VIX 5-day, exit above 35 | 158.34 | -18.45 | 0.88 | 2.8 |
 
-Results move a lot with the threshold, and 29 days sat within half a point of the 25% line, so small data
-revisions can flip exits. Gates act after prices fall: in the Covid crash the level gate first exited on
-2020-03-03 after SPY was down about 8.6%.
+Results move with the threshold, and 29 days sat within half a point of the 25% line, so small data revisions can
+flip exits. Gates act after prices fall: in Covid the level gate first exited on 2020-03-03, after SPY was down 8.6%.
 
 ## Exit when the 5- or 10-day average VIX close is above 25 (`vix_episodes.py`, `volatility_exit.py`)
 
@@ -83,20 +75,16 @@ below 25. Return % / max drawdown %:
 | 2007-09 | -54.77 / -55.19 | -29.08 / -29.74 | -33.5 / -35.18 | -30.18 / -32.07 |
 | Covid crash | -33.4 / -33.72 | -11.69 / -12.11 | -8.25 / -12.44 | -4.3 / -4.75 |
 | 2022 bear | -23.83 / -24.5 | -23.33 / -23.77 | -22.82 / -23.26 | -18.41 / -20.72 |
-| Since 2019-07 | 166.01 / -33.72 | 75.0 / -28.06 | 68.88 / -27.64 | 80.63 / -23.03 |
 
-Days in cash are about 18% for all three; exits since 1993: 69 (5-day), 47 (10-day), 163 (1-day). The 5-day average
-crossed 25 in 37 episodes (median further 60-day drop -5.4%, 8% fell 20% or more); the 10-day in 31 (-5.3%, 6%).
-In the sector strategies since 2019-07 both gates gave up about half or more of the return (table above), and
-2021, 2022 and 2025 were years they lost to no gate. Years: `outputs/vix_rule_yearly.csv`, `outputs/volatility_yearly.csv`.
+About 18% of days in cash for all three; exits since 1993: 69 (5-day), 47 (10-day), 163 (1-day). The 5-day average crossed 25 in
+37 episodes (median further 60-day drop -5.4%, 8% fell 20%+); the 10-day in 31 (-5.3%, 6%). On the sector strategies since
+2019-07 both gates gave up half or more of the return; 2021, 2022 and 2025 were years they lost to no gate (`outputs/*yearly*.csv`).
 
 ### Separate re-entry level
 
 Exit at a 5-day average VIX above 25, re-enter only at or below 25, 22, 20, 18 or 15 (grid fixed in advance). SPY
-since 1993 (cash 0%): return 538.22%, 332.53%, 358.88%, 380.01%, 486.46%, max drawdown
--51.92%, -52.88%, -41.57%, -40.08%, -22.97%. At 15 it sat in cash for all of 1998 to 2003 and 2021 to 2022, so its result
-comes from skipping two bear markets, not timing rebounds. Top 3 daily since 2019-07 (no gate 202.6%): 89.07%, 64.04%,
-40.1%, 61.97%, 32.6%; not monotonic (`outputs/vix_reentry_*.csv`, `outputs/volatility_reentry.csv`).
+since 1993 (cash 0%): return 538.22%, 332.53%, 358.88%, 380.01%, 486.46%, max drawdown -51.92%, -52.88%, -41.57%, -40.08%, -22.97%. At 15 it sat in cash for all of 1998 to 2003 and 2021 to 2022, skipping two bear markets, not timing
+rebounds. Top 3 daily since 2019-07 (no gate 202.6%): 89.07%, 64.04%, 40.1%, 61.97%, 32.6%; not monotonic.
 
 ## Taking market direction into account (`volatility_exit.py`, `vix_episodes.py`)
 
@@ -104,14 +92,8 @@ The exit needs both a 5-day average VIX above 25 and a falling market (SPY below
 or down over 20 days); re-entry is either "back when either clears" or "back when VIX low". Of 37 episodes, 19 crossed
 with SPY below its 200-day: median further 60-day drop -9.4% against -4.7% otherwise
 (42.0% against 6.0% fell 10% or more). 33 of 37 were below the 50-day, too common to inform.
-Since 2019-07, %: return, max drawdown, Covid, 2022, % days in cash, exits.
-
-| Sector line | Return | Max drawdown | Covid | 2022 | Cash | Exits |
-|---|---|---|---|---|---|---|
-| Top 3 daily, no gate | 202.6 | -32.4 | -32.3 | -2.4 | 0.0 | 0.0 |
-| Top 3 daily, VIX 5-day alone | 89.1 | -18.2 | -11.5 | -4.1 | 18.8 | 17.0 |
-| + SPY below 200-day, back when either clears | 128.6 | -17.0 | -15.5 | -0.1 | 11.5 | 12.0 |
-
+Top 3 daily since 2019-07, return / max drawdown: no gate 202.6% / -32.4%; VIX alone 89.1% / -18.2%;
++ SPY below 200-day (either clears) 128.6% / -17.0%.
 SPY since 1993 (cash 0%): VIX alone 538.2% / -51.9%; with the 200-day filter 949.8% / -50.1% (either clears)
 and 1051.0% / -47.0% (VIX low), against 2805.9% / -55.2% buy and hold (`outputs/volatility_direction*.csv`, `vix_direction_spy.csv`).
 
@@ -124,12 +106,28 @@ Own spike = an ETF's 20-day volatility above 1.5 times its own 120-day average. 
 | Base | 202.6 | -32.4 | -32.3 | -2.4 | 100.0 |
 | Own spike, to cash | 174.2 | -17.2 | -6.8 | -2.5 | 92.0 |
 | Own spike, reallocate | 153.6 | -22.1 | -10.5 | -6.6 | 96.8 |
-| Own spike + own trend, reallocate | 133.1 | -21.5 | -20.8 | -7.1 | 98.4 |
 | Volatility-adjusted ranking | 199.1 | -30.2 | -30.2 | -4.4 | 100.0 |
-| Inverse-volatility weights | 177.0 | -31.6 | -31.6 | -8.7 | 100.0 |
 
 Dropping a spiking ETF to cash kept the protection; refilling its slot with the next-best ETF gave much of it back (all sectors
 fall together). Volatility-adjusted ranking and inverse-volatility weights barely changed the Covid drawdown.
+
+## Simple broad-market strategies (`broad_market.py`)
+
+Seven rules on liquid ETFs (SPY, EFA, AGG, TLT, GLD, VNQ, DBC, T-bills as cash; 5 bps costs; rules in the notebook). Sharpe is
+against T-bills; since 2007-10 unless marked.
+
+| Strategy | CAGR % | Sharpe | Max drawdown % | Sharpe since 2019-07 | 2007-09 % | 2022 bear % |
+|---|---|---|---|---|---|---|
+| SPY buy & hold | 10.33 | 0.53 | -55.19 | 0.64 | -54.77 | -23.83 |
+| 60/40 SPY/AGG | 7.81 | 0.57 | -34.7 | 0.55 | -34.39 | -20.26 |
+| SPY/TLT/GLD thirds | 8.23 | 0.7 | -22.74 | 0.55 | -6.63 | -22.06 |
+| SPY 200-day | 8.47 | 0.64 | -21.02 | 0.68 | -11.89 | -12.5 |
+| Faber 5-asset | 4.86 | 0.45 | -17.54 | 0.51 | -5.94 | -4.02 |
+| Dual momentum | 7.88 | 0.48 | -33.72 | 0.4 | 7.17 | -19.51 |
+| Vol-targeted SPY | 7.76 | 0.64 | -24.3 | 0.67 | -23.78 | -11.95 |
+
+Nothing beat SPY on return. The 200-day and volatility-target rules lifted Sharpe by cutting drawdowns; the bond and gold mixes
+benefited from bonds (strong to 2020, weak in 2022). Gains did not hold in every window (`outputs/broad_*.csv`, `broad_yearly.csv`).
 
 ## What didn't work / failure cases
 
