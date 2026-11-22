@@ -76,8 +76,9 @@ There are no keys, no paid services and nothing to download: cost $0.
 | API or machine channel | 0 | | 51 | 0 |
 
 - **Coverage:** 51 portals surveyed: 22 read fully, 24 partly (form behind a login, script or bot check), 5
-  blocked (AK, AZ, CO, ME, VT). With a plain script, 8 records pages refused or failed and 6 JustFOIA forms
-  refused or answered with a bot challenge (`results/fetch.csv`).
+  blocked (AK, AZ, CO, ME, VT). With a plain script, 7 to 8 records pages refused or failed (the count varies by
+  run and network) and all 6 JustFOIA forms in the sample refused or answered with a bot challenge
+  (`results/fetch.csv`).
 - **Residency by law:** AL, AR, DE, KY, NH, NJ, TN and VA limit requests to their own residents or citizens by the
   statute's text. New Jersey's courts have let out-of-state requesters sue anyway. Pennsylvania limits requests to
   legal residents of the United States and is coded `us_only`.
