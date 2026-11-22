@@ -55,3 +55,23 @@ def build_weights(prices: pd.DataFrame, tickers: list[str]) -> dict[str, pd.Data
         "SPY filter, momentum": equal.mul(spy_mom_ok, axis=0),
     }
     return {k: v.astype(float).shift(1).fillna(0.0) for k, v in raw.items()}
+
+
+def ranked_weights(
+    score: pd.DataFrame,
+    eligible: pd.DataFrame,
+    top_n: int = 3,
+    weight_by: pd.DataFrame | None = None,
+) -> pd.DataFrame:
+    """Weights decided at each close: the `top_n` best-scoring eligible ETFs.
+
+    Equal weights of 1/top_n each (so fewer picks leave cash), or proportional to `weight_by`
+    when given, summing to 1 across the picks. Apply with a one-day delay.
+    """
+    assert score.shape == eligible.shape, "score and eligible must align"
+    masked = score.where(eligible)
+    selected = (masked.rank(axis=1, ascending=False) <= top_n) & masked.notna()
+    if weight_by is None:
+        return selected.astype(float) / top_n
+    raw = selected * weight_by
+    return raw.div(raw.sum(axis=1), axis=0).fillna(0.0)

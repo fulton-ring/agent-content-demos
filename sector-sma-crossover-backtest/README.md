@@ -8,10 +8,11 @@ average, otherwise cash; capital is split equally. Follow-ups, one notebook each
 
 - `backtest.py`: the one-year SMA backtest (2025-11-19 to 2026-11-19).
 - `position_sizing.py`: scaling in and out, Fibonacci tranches, trend-strength and volatility sizing.
-- `rotation_momentum.py`: momentum instead of price, top 3 rotation (monthly, weekly, daily),
-  momentum-weighted baskets, dual momentum, SPY market filters, 10 country ETFs, calendar years.
+- `rotation_momentum.py`: momentum, top 3 rotation, dual momentum, SPY filters, 10 country ETFs, years.
 - `real_products.py`: our rules against XLSR, Pacer Trendpilot (PTLC, TRND), MTUM and SPY.
-- `volatility_exit.py`: exiting to cash when volatility is unstable, threshold sensitivity, years.
+- `volatility_exit.py`: volatility gates, VIX 5/10-day exits, re-entry levels, market-direction filters.
+- `vix_episodes.py`: what SPY did after the VIX crossed 25, and the VIX rules on SPY since 1993.
+- `per_etf_volatility.py`: top 3 daily with volatility tracked per ETF.
 - `strategies.py`, `gates.py`: position rules and the exit/re-entry gate shared by the notebooks.
 
 Signals are read at the close and applied the next day. All thresholds were set once, not tuned.
@@ -35,10 +36,9 @@ earning T-bill returns. Max drawdown is peak to trough on daily closes.
 | Line | Return | Ann. vol | Max drawdown | Covid crash | 2022 bear |
 |---|---|---|---|---|---|
 | Equal-weight all sectors (no top 3) | 134.38 | 18.43 | -36.34 | -36.21 | -18.13 |
-| Equal-weight + SPY volatility level gate | 144.09 | 12.66 | -13.66 | -8.37 | -6.36 |
-| Equal-weight + exit on 5-day avg VIX > 25 | 59.98 | 11.12 | -21.06 | -11.22 | -17.04 |
+| Equal-weight + SPY volatility level gate | 146.7 | 12.65 | -13.66 | -8.37 | -5.36 |
 | Top 3 daily | 202.63 | 19.79 | -32.39 | -32.27 | -2.43 |
-| Top 3 daily + SPY volatility level gate | 162.87 | 14.93 | -17.97 | -7.8 | 4.53 |
+| Top 3 daily + SPY volatility level gate | 165.99 | 14.92 | -17.97 | -7.8 | 5.77 |
 | Top 3 daily + exit on 5-day avg VIX > 25 | 89.07 | 13.32 | -18.21 | -11.51 | -4.09 |
 | XLSR (fund) | 123.8 | 20.05 | -32.94 | -32.34 | -21.91 |
 | PTLC (fund) | 92.36 | 14.19 | -26.63 | -22.79 | -9.22 |
@@ -49,14 +49,10 @@ hold 12.97%, SPY 9.62%. It beat its own sector's buy and hold in 1 of 11 ETFs (X
 
 ## What the other tests found
 
-- Sizing (`outputs/sizing_*.csv`): scale-in and Fibonacci variants moved one-year return by about 1 point
-  and showed no clear five-year gain. Volatility and trend-strength sizing mostly cut exposure.
-- Rotation: weekly and daily re-ranking beat monthly before and after 5 bps. Daily lost about
-  32 points to costs in sectors and 19 in countries (0% cash). On 10 country ETFs, rotation
-  did not beat buy and hold on drawdown. Calendar-year tables: `outputs/yearly_*` and
-  `outputs/products_yearly.csv`; no strategy was best in every year.
-- Dual momentum (cash for a negative-momentum pick) barely changed sectors; it did not avoid the Covid crash.
-- Funds: XLSR trailed SPY and our top 3. Top 3 rotation's 2% a year edge over the index is within luck over seven years.
+- Rotation: weekly and daily re-ranking beat monthly before and after 5 bps; daily lost about 32 points to
+  costs in sectors, 19 in countries. Country rotation did not beat buy and hold on drawdown. Yearly: `outputs/yearly_*`.
+- Dual momentum barely changed sectors and did not avoid Covid. XLSR trailed SPY and our top 3; top 3's 2% a year edge over
+  the index is within luck over seven years. After any VIX close above 25 (48 episodes), SPY's median further 60-day drop was -6.1%.
 
 ## Volatility exit (`volatility_exit.py`)
 
@@ -66,7 +62,7 @@ return over five years. Threshold sensitivity (return %, max drawdown %, Sharpe,
 
 | Top 3 daily, gate and threshold | Return | Max drawdown | Sharpe | Days in cash |
 |---|---|---|---|---|
-| SPY 20-day vol, exit above 25% | 162.87 | -17.97 | 0.95 | 10.88 |
+| SPY 20-day vol, exit above 25% | 165.99 | -17.97 | 0.96 | 10.94 |
 | SPY vol, no gate | 202.63 | -32.39 | 0.86 | 0.0 |
 | VIX 5-day, exit above 15 | 47.15 | -7.62 | 1.09 | 80.66 |
 | VIX 5-day, exit above 25 | 89.07 | -18.21 | 0.72 | 18.75 |
@@ -75,12 +71,6 @@ return over five years. Threshold sensitivity (return %, max drawdown %, Sharpe,
 Results move a lot with the threshold, and 29 days sat within half a point of the 25% line, so small data
 revisions can flip exits. Gates act after prices fall: in the Covid crash the level gate first exited on
 2020-03-03 after SPY was down about 8.6%.
-
-## How far did SPY fall after the VIX crossed 25? (`vix_episodes.py`)
-
-48 episodes since 1993 (first close above 25 after 20 quiet days). Median further drop in the next 60 trading days:
--6.1%; 5% or more in 60% of episodes, 10% or more in 29%, 20% or more in 6% (2002, 2008, 2020).
-SPY was higher after 60 days in 58%. Worst: 2008-09-09 (further -38.4%) and 2020-02-24 (-30.4%): `outputs/vix_episodes.csv`.
 
 ## Exit when the 5- or 10-day average VIX close is above 25 (`vix_episodes.py`, `volatility_exit.py`)
 
@@ -121,13 +111,25 @@ Since 2019-07, %: return, max drawdown, Covid, 2022, % days in cash, exits.
 | Top 3 daily, no gate | 202.6 | -32.4 | -32.3 | -2.4 | 0.0 | 0.0 |
 | Top 3 daily, VIX 5-day alone | 89.1 | -18.2 | -11.5 | -4.1 | 18.8 | 17.0 |
 | + SPY below 200-day, back when either clears | 128.6 | -17.0 | -15.5 | -0.1 | 11.5 | 12.0 |
-| + SPY below 200-day, back when VIX low | 111.6 | -17.2 | -11.5 | -3.5 | 14.4 | 10.0 |
-| Equal-weight, VIX 5-day alone | 60.0 | -21.1 | -11.2 | -17.0 | 18.8 | 17.0 |
-| Equal-weight + SPY below 200-day, either clears | 86.7 | -19.8 | -16.2 | -16.7 | 11.5 | 12.0 |
 
 SPY since 1993 (cash 0%): VIX alone 538.2% / -51.9%; with the 200-day filter 949.8% / -50.1% (either clears)
-and 1051.0% / -47.0% (VIX low), against 2805.9% / -55.2% buy and hold. Everything is in `outputs/volatility_direction*.csv`
-and `outputs/vix_direction_spy.csv`.
+and 1051.0% / -47.0% (VIX low), against 2805.9% / -55.2% buy and hold (`outputs/volatility_direction*.csv`, `vix_direction_spy.csv`).
+
+## Volatility per ETF inside Top 3 daily (`per_etf_volatility.py`)
+
+Own spike = an ETF's 20-day volatility above 1.5 times its own 120-day average. Since 2019-07, %: return, max drawdown, Covid, 2022, exposure.
+
+| Variant | Return | Max drawdown | Covid | 2022 | Exposure |
+|---|---|---|---|---|---|
+| Base | 202.6 | -32.4 | -32.3 | -2.4 | 100.0 |
+| Own spike, to cash | 174.2 | -17.2 | -6.8 | -2.5 | 92.0 |
+| Own spike, reallocate | 153.6 | -22.1 | -10.5 | -6.6 | 96.8 |
+| Own spike + own trend, reallocate | 133.1 | -21.5 | -20.8 | -7.1 | 98.4 |
+| Volatility-adjusted ranking | 199.1 | -30.2 | -30.2 | -4.4 | 100.0 |
+| Inverse-volatility weights | 177.0 | -31.6 | -31.6 | -8.7 | 100.0 |
+
+Dropping a spiking ETF to cash kept the protection; refilling its slot with the next-best ETF gave much of it back (all sectors
+fall together). Volatility-adjusted ranking and inverse-volatility weights barely changed the Covid drawdown.
 
 ## What didn't work / failure cases
 
@@ -138,11 +140,9 @@ and `outputs/vix_direction_spy.csv`.
 
 ## What it doesn't show
 
-- Seven years, one crash and one bear market. No out-of-sample test, so gate and rotation results
-  may not repeat.
-- Fund results are reported, not their holdings; fund fees are inside their returns, ours are not
-  (a 0.6% yearly fee would take roughly 9 to 11 points off our top lines over this window).
-- No taxes, spreads or slippage beyond 5 bps. Close-to-close fills.
+- Seven years, one crash and one bear market; no out-of-sample test, so gate and rotation results may not repeat.
+- Fund holdings are not reproduced; fund fees are inside their returns, ours are not (a 0.6% yearly fee would take about
+  9 to 11 points off our top lines). No taxes or spreads beyond 5 bps; close-to-close fills.
 
 ## What I looked at first
 

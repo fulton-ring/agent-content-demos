@@ -7,3 +7,4 @@ uv run rotation_momentum.py
 uv run real_products.py
 uv run volatility_exit.py
 uv run vix_episodes.py
+uv run per_etf_volatility.py
