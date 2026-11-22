@@ -13,9 +13,9 @@ def _():
     import pandas as pd
     import yfinance as yf
 
-    from gates import hysteresis_gate
+    from gates import conditional_gate, hysteresis_gate
 
-    return Path, hysteresis_gate, mo, np, os, pd, yf
+    return Path, conditional_gate, hysteresis_gate, mo, np, os, pd, yf
 
 
 @app.cell
@@ -235,8 +235,15 @@ def _(out_dir, pd, prices, vix10, vix5):
                 ),
                 "further_drop_%": round(100 * (_next60.min() / _close - 1), 1),
                 "return_60d_%": round(100 * (spy_px.iloc[_i + 60] / _close - 1), 1),
+                "below_50d": bool(
+                    _close < spy_px.iloc[max(0, _i - 49) : _i + 1].mean()
+                ),
+                "below_200d": bool(
+                    _close < spy_px.iloc[max(0, _i - 199) : _i + 1].mean()
+                ),
+                "neg_20d": bool(_close < spy_px.iloc[max(0, _i - 20)]),
             }
-        _episodes = pd.DataFrame(_rows).T
+        _episodes = pd.DataFrame(_rows).T.infer_objects()
         _episodes.to_csv(out_dir / f"vix_episodes_{_window}day.csv")
         print(
             f"\n{len(_episodes)} episodes with the {_window}-day average crossing above 25"
@@ -245,6 +252,104 @@ def _(out_dir, pd, prices, vix10, vix5):
         for _limit in (5, 10, 20):
             _share = 100 * (_episodes["further_drop_%"] <= -_limit).mean()
             print(f"further drop of {_limit}% or more: {_share:.0f}%")
+
+
+@app.cell
+def _(mo):
+    mo.md("""
+    ## Does direction at the crossing predict a further fall?
+
+    The 5-day average VIX episodes split by what SPY was doing on the crossing day: below its
+    50-day average, below its 200-day average, or down over the prior 20 trading days.
+    """)
+
+
+@app.cell
+def _(out_dir, pd):
+    episodes5 = pd.read_csv(out_dir / "vix_episodes_5day.csv", index_col=0)
+    split_rows = {}
+    for _flag, _label in (
+        ("below_50d", "below 50-day"),
+        ("below_200d", "below 200-day"),
+        ("neg_20d", "down over 20 days"),
+    ):
+        for _state in (True, False):
+            _group = episodes5[episodes5[_flag] == _state]
+            split_rows[f"{_label}: {'yes' if _state else 'no'}"] = {
+                "episodes": len(_group),
+                "median_further_drop_%": round(_group["further_drop_%"].median(), 1),
+                "share_drop_10%+": round(
+                    100 * (_group["further_drop_%"] <= -10).mean()
+                ),
+                "share_drop_20%+": round(
+                    100 * (_group["further_drop_%"] <= -20).mean()
+                ),
+                "median_return_60d_%": round(_group["return_60d_%"].median(), 1),
+            }
+    split = pd.DataFrame(split_rows).T
+    split.to_csv(out_dir / "vix_episodes_direction.csv")
+    print(split.to_string())
+
+
+@app.cell
+def _(mo):
+    mo.md("""
+    ## Direction-aware exit on SPY, 1993 to 2026
+
+    The exit needs both the 5-day average VIX above 25 and a falling market. "Back when either
+    clears" re-enters as soon as volatility drops to 25 or below, or direction turns up. "Back
+    when VIX low" waits for volatility at or below 25. Cash earns 0%, 5 bps per switch.
+    """)
+
+
+@app.cell
+def _(conditional_gate, np, out_dir, pd, prices, spy_ret, start_day, vix5):
+    _spy = prices["SPY"]
+    _high_vol = vix5 > 25
+    _directions = {
+        "below 50-day": _spy < _spy.rolling(50).mean(),
+        "below 200-day": _spy < _spy.rolling(200).mean(),
+        "20-day return below 0": _spy.pct_change(20) < 0,
+    }
+    _gates = {"VIX 5-day alone": conditional_gate(_high_vol, ~_high_vol)}
+    for _dname, _down in _directions.items():
+        _both = _high_vol & _down
+        _gates[f"+ {_dname}, either clears"] = conditional_gate(_both, ~_both)
+        _gates[f"+ {_dname}, VIX low"] = conditional_gate(_both, ~_high_vol)
+    _lines = {"SPY buy & hold": spy_ret}
+    for _gname, _gate in _gates.items():
+        _lines[_gname] = spy_ret * _gate - _gate.diff().abs().fillna(0.0) * 5 / 10_000
+    direction_frame = pd.DataFrame(_lines).loc[start_day:].iloc[1:]
+    _windows = {
+        "all years": (direction_frame.index[0], direction_frame.index[-1]),
+        "dot-com 2000-2002": (pd.Timestamp("2000-03-24"), pd.Timestamp("2002-10-09")),
+        "financial crisis 2007-2009": (
+            pd.Timestamp("2007-10-09"),
+            pd.Timestamp("2009-03-09"),
+        ),
+        "Covid crash": (pd.Timestamp("2020-02-19"), pd.Timestamp("2020-03-23")),
+        "2022 bear": (pd.Timestamp("2022-01-03"), pd.Timestamp("2022-10-14")),
+        "since 2019-07": (pd.Timestamp("2019-07-04"), direction_frame.index[-1]),
+    }
+    _table = {}
+    for _wname, (_lo, _hi) in _windows.items():
+        _part = direction_frame[
+            (direction_frame.index >= _lo) & (direction_frame.index <= _hi)
+        ]
+        _equity = (1 + _part).cumprod()
+        _drawdown = _equity / _equity.cummax() - 1
+        for _col in direction_frame.columns:
+            _table.setdefault(_col, {})[f"{_wname} return_%"] = round(
+                100 * (_equity[_col].iloc[-1] - 1), 1
+            )
+            _table[_col][f"{_wname} max_dd_%"] = round(100 * _drawdown[_col].min(), 1)
+    for _gname, _gate in _gates.items():
+        _g = _gate.loc[direction_frame.index]
+        _table[_gname]["days_in_cash_%"] = round(100 * (1 - _g.mean()), 1)
+        _table[_gname]["exits"] = int(((_g.shift(1) == 1) & (_g == 0)).sum())
+    direction_table = pd.DataFrame(_table).T
+    direction_table.to_csv(out_dir / "vix_direction_spy.csv")
+    print(direction_table.to_string())
 
 
 @app.cell

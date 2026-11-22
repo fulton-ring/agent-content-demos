@@ -13,10 +13,10 @@ def _():
     import pandas as pd
     import yfinance as yf
 
-    from gates import hysteresis_gate
+    from gates import conditional_gate, hysteresis_gate
     from strategies import build_weights
 
-    return Path, build_weights, hysteresis_gate, mo, np, os, pd, yf
+    return Path, build_weights, conditional_gate, hysteresis_gate, mo, np, os, pd, yf
 
 
 @app.cell
@@ -406,6 +406,93 @@ def _(base, daily, hysteresis_gate, np, out_dir, pd, prices, sectors, study_star
     _reentry = pd.DataFrame(_out).T.round(2)
     _reentry.to_csv(out_dir / "volatility_reentry.csv")
     print(_reentry.to_string())
+
+
+@app.cell
+def _(mo):
+    mo.md("""
+    ## Taking market direction into account
+
+    The VIX gate exits whenever the 5-day average VIX is above 25, even in a rising market. Here the
+    exit needs **both** high volatility and a falling market. Direction filters (fixed in advance):
+    SPY below its 50-day average, SPY below its 200-day average, or SPY's 20-day return below zero.
+
+    Two re-entry modes per filter: "either clears" (back in as soon as volatility falls to 25 or
+    below, or direction turns up) and "VIX low" (back in only when volatility is at or below 25,
+    as in the plain gate). BIL cash, 5 bps costs.
+    """)
+
+
+@app.cell
+def _(base, conditional_gate, daily, np, out_dir, pd, prices, sectors, study_start):
+    _spy = prices["SPY"]
+    _high_vol = prices["^VIX"].rolling(5).mean() > 25
+    _directions = {
+        "SPY below 50-day": _spy < _spy.rolling(50).mean(),
+        "SPY below 200-day": _spy < _spy.rolling(200).mean(),
+        "SPY 20-day return below 0": _spy.pct_change(20) < 0,
+    }
+    _gates = {"VIX 5-day alone": conditional_gate(_high_vol, ~_high_vol)}
+    for _dname, _down in _directions.items():
+        _both = _high_vol & _down
+        _gates[f"+ {_dname}, back when either clears"] = conditional_gate(_both, ~_both)
+        _gates[f"+ {_dname}, back when VIX low"] = conditional_gate(_both, ~_high_vol)
+    _windows = {
+        "since 2019-07": (study_start, prices.index[-1]),
+        "5 years": (prices.index[-1] - pd.DateOffset(years=5), prices.index[-1]),
+        "1 year": (prices.index[-1] - pd.DateOffset(years=1), prices.index[-1]),
+        "Covid crash": (pd.Timestamp("2020-02-19"), pd.Timestamp("2020-03-23")),
+        "2022 bear": (pd.Timestamp("2022-01-03"), pd.Timestamp("2022-10-14")),
+    }
+    _out = {}
+    direction_returns = {}
+    for _name in ("Buy & hold", "Top 3 daily"):
+        for _gname in ["no gate", *_gates]:
+            _gate = (
+                pd.Series(1.0, index=prices.index)
+                if _gname == "no gate"
+                else _gates[_gname]
+            )
+            _gw = base[_name].mul(_gate, axis=0)
+            _cost = _gw.diff().abs().fillna(_gw.abs()).sum(axis=1) * 5 / 10_000
+            _r = (
+                (_gw * daily[sectors]).sum(axis=1)
+                + (1 - _gw.sum(axis=1)) * daily["BIL"]
+                - _cost
+            )
+            direction_returns[f"{_name}, {_gname}"] = _r
+            _row = {}
+            for _wname, (_lo, _hi) in _windows.items():
+                _part = _r[(_r.index >= _lo) & (_r.index <= _hi)]
+                _equity = (1 + _part).cumprod()
+                _row[f"{_wname} return_%"] = 100 * (_equity.iloc[-1] - 1)
+                _row[f"{_wname} max_dd_%"] = (
+                    100 * (_equity / _equity.cummax() - 1).min()
+                )
+            _g = _gate[_gate.index >= study_start]
+            _row["days_in_cash_%"] = 100 * (1 - _g.mean())
+            _row["exits"] = int(((_g.shift(1) == 1) & (_g == 0)).sum())
+            _out[f"{_name}, {_gname}"] = _row
+    _direction = pd.DataFrame(_out).T.round(1)
+    _direction.to_csv(out_dir / "volatility_direction.csv")
+    print(_direction.to_string())
+    _years = {}
+    _frame = pd.DataFrame(direction_returns)
+    for _year, _part in _frame[_frame.index >= study_start].groupby(
+        _frame[_frame.index >= study_start].index.year
+    ):
+        _equity = (1 + _part).cumprod()
+        _ret = 100 * (_equity.iloc[-1] - 1)
+        _dd = 100 * (_equity / _equity.cummax() - 1).min()
+        _years[str(_year)] = {
+            c: f"{_ret[c]:.1f} / {_dd[c]:.1f}"
+            for c in _frame.columns
+            if c.startswith("Top 3 daily")
+        }
+    _yearly = pd.DataFrame(_years)
+    _yearly.to_csv(out_dir / "volatility_direction_yearly.csv")
+    print("\nTop 3 daily by calendar year, return % / max drawdown %")
+    print(_yearly.to_string())
 
 
 @app.cell
