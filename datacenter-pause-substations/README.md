@@ -52,11 +52,12 @@ state is within 25 km:
 
 The five unjoined are in `outputs/unjoined_records.csv`: two tribal nations and a utility authority (no Census
 unit), Louisville Metro (a consolidated government with no matching place name), and Shawnee Township (Allen
-County, OH), whose point is about 200 km away in another county. The 900 joined records cover **899 units**.
+County, OH), whose point is about 200 km away in another county. The 900 joined records cover **899 units**. Seven city and "Other" records (independent cities, Kentucky merged governments) join at county
+level, so the results below count 316 paused counties, not 310.
 
 **Calyx cross-check.** Of Calyx's 399 distinct place names (403 places in 39 states), **329 (82%)** match a
 Bommarito pause in effect by state and name, so Calyx confirms 329 of Bommarito's 882 distinct places. A
-one-off check outside the notebook sorted the 59 Calyx rows with no match: 7 are in Bommarito under another
+one-off manual check outside the notebook (not rerun by `run.sh`) sorted the 59 Calyx rows with no match: 7 are in Bommarito under another
 status, 2 under another sector, 2 under another name form (Indianapolis, Lexington-Fayette), and the other
 48 aren't in this release under their name; the ones we spot-checked (Oakland, San Diego, Boise, Salt Lake
 City) aren't in it at all. So Bommarito misses some places Calyx has read.
