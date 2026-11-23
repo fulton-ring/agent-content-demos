@@ -10,11 +10,13 @@ whether any of them, including "continuation" and "wait for support to break", h
 ./run.sh        # about a minute the first time (data download), a few seconds after
 ```
 
-This runs two [marimo](https://marimo.io) notebooks as scripts. Open one to read it with its
+This runs three [marimo](https://marimo.io) notebooks as scripts. Open one to read it with its
 output: `uv run marimo edit 2_backtest.py`.
 
 - `1_data.py`: downloads prices and splits for today's S&P 500 members and SPY (cached outside the repo).
-- `2_backtest.py`: scanner, strategies, results, robustness checks. Writes `results/`.
+- `2_backtest.py`: daily-bar scanner, six strategies, results, robustness checks. Writes `results/`.
+- `3_intraday.py`: the same idea on hourly bars for the last 2 years, compared with SPY.
+- `common.py`: the summary statistics both notebooks use.
 
 ## What the scanner and strategies are
 
@@ -58,11 +60,41 @@ thresholds are reported in full, not just the best.
 
 ![returns](results/returns.png)
 
+## Intraday test (hourly bars, last 2 years, vs SPY)
+
+Yahoo's free intraday history is only 2 years of hourly bars (5-minute bars: 60 days), so this is
+**not** a 5-year test. After the first hour (9:30-10:30) the scanner flags stocks whose
+previous close was $1-$20, with first-hour volume at least 2x normal and a gain of at least 2%.
+That gave 70 events. Every trade is closed by the end of the day. `results/intraday_*.csv`.
+
+| Strategy | Trades | Win rate | Mean per trade | 95% interval | Account over 2 years |
+|---|---|---|---|---|---|
+| I1 continuation (long 10:30) | 70 | 39% | -0.21% | -0.7% to +0.3% | -9.9% |
+| I2 opening-range breakout | 40 | 38% | -0.32% | -0.9% to +0.3% | -12.6% |
+| I3 fade (short 10:30) | 70 | 23% | -0.50% | -0.8% to -0.2% | -26.9% |
+| I4 support break (short) | 15 | 13% | -1.44% | -2.7% to -0.5% | -14.4% |
+| I5 pullback | 15 | 53% | -0.11% | -1.0% to +0.9% | +0.7% |
+| **SPY buy and hold** | | | | | **+20.5%** (worst drop -18.9%) |
+
+"Account" splits the whole account equally across each day's trades and holds cash otherwise.
+That is aggressive sizing, used only to make the totals comparable with owning SPY.
+
+- None of the five beat SPY, and four lost money after 0.10% costs each way.
+- With stricter scanners (3x volume, 3%+ gain) continuation turned slightly positive
+  (+0.15% on 31 events), but that is too few events to read anything into
+  (`results/intraday_sensitivity_scanner.csv`).
+- **Yahoo's hourly data changes between downloads.** Two pulls on the same day gave 79 and 70
+  events. About 0.1-0.3% of bars had different volume or price. With this few events, expect
+  your numbers to differ slightly from the ones above.
+- Hourly bars can't show the order of the high and low inside the hour, so stops are assumed
+  to hit first. The 5-minute data (60 days) would hold only about 10 events at this scanner.
+
 ## Data
 
 - Prices, volume, splits: Yahoo Finance via `yfinance` (free, unofficial, can change without notice).
 - Members: [datasets/s-and-p-500-companies](https://github.com/datasets/s-and-p-500-companies) (current list, with "date added").
 - Yahoo shows old prices divided by later splits. The notebook multiplies splits back in to get the price as traded, so the $1-$20 filter is right. 134 splits in the data.
+- Hourly bars come from Yahoo too and are cached after the first run.
 - Nothing is committed except small result files. Prices are downloaded on each fresh run.
 
 ## What it doesn't show

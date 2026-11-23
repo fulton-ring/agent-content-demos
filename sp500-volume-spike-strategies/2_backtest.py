@@ -48,6 +48,8 @@ def _():
     import numpy as np
     import pandas as pd
 
+    from common import summarize
+
     CACHE = Path(
         os.environ.get("SPIKES_CACHE", Path.home() / ".cache" / "sp500-volume-spike-strategies")
     )
@@ -70,11 +72,9 @@ def _():
     HOLDS = (3, 5, 10)
     STOPS = (0.05, 0.08, None)
     CONTROL_SAMPLE = 20_000
-    BOOTSTRAPS = 2000
     return (
         BAND_HI,
         BAND_LO,
-        BOOTSTRAPS,
         BOX_DAYS,
         BOX_MAX_RANGE,
         CACHE,
@@ -92,6 +92,7 @@ def _():
         SEED,
         STOPS,
         VOL_WINDOW,
+        summarize,
         WATCH_DAYS,
         np,
         pd,
@@ -317,34 +318,6 @@ def _(
         return _t
 
     return find_entry, run_trades, simulate
-
-
-@app.cell
-def _(BOOTSTRAPS, SEED, np, pd):
-    def summarize(trades: pd.DataFrame, column: str = "ret") -> dict[str, float]:
-        """Headline numbers. The 95% interval resamples whole months, because events cluster."""
-        x = trades[column].to_numpy()
-        n = len(x)
-        if n < 5:
-            return {"n": n}
-        wins, losses = x[x > 0].sum(), -x[x < 0].sum()
-        month = trades["entry_date"].dt.to_period("M").astype(str).to_numpy()
-        _, inverse = np.unique(month, return_inverse=True)
-        sums = np.bincount(inverse, weights=x)
-        counts = np.bincount(inverse).astype(float)
-        draws = np.random.default_rng(SEED).integers(0, len(sums), size=(BOOTSTRAPS, len(sums)))
-        boot = sums[draws].sum(axis=1) / counts[draws].sum(axis=1)
-        return {
-            "n": n,
-            "win_rate": float((x > 0).mean()),
-            "mean": float(x.mean()),
-            "median": float(np.median(x)),
-            "profit_factor": float(wins / losses) if losses > 0 else float("inf"),
-            "ci_low": float(np.percentile(boot, 2.5)),
-            "ci_high": float(np.percentile(boot, 97.5)),
-        }
-
-    return (summarize,)
 
 
 @app.cell
