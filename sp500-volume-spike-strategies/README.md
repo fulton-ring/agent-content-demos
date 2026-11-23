@@ -21,7 +21,7 @@ output: `uv run marimo edit 2_backtest.py`.
 ## What the scanner and strategies are
 
 Scanner (day 0, at the close): price between $1 and $20 **as traded that day**, up 5% or more,
-volume at least 3x the prior 20-day average. 133 events from 2016-11 to 2026-11.
+volume at least 3x the prior 20-day average. 131 events from 2016-11 to 2026-11.
 
 | | Strategy | Entry |
 |---|---|---|
@@ -40,21 +40,21 @@ thresholds are reported in full, not just the best.
 
 | Strategy | Trades | Win rate | Mean per trade | Mean without top 3 trades | 95% interval for the mean |
 |---|---|---|---|---|---|
-| A continuation | 133 | 43% | +0.57% | -0.26% | -1.1% to +2.4% |
-| B confirmed continuation | 68 | 40% | +0.48% | -1.21% | -1.9% to +3.2% |
-| C fade (short) | 133 | 42% | -1.68% | -2.47% | -3.1% to -0.2% |
-| D buy pullback | 69 | 51% | +1.66% | +0.34% | -1.1% to +4.6% |
+| A continuation | 131 | 42% | +0.32% | -0.50% | -1.4% to +2.1% |
+| B confirmed continuation | 66 | 38% | -0.01% | -1.60% | -2.2% to +2.6% |
+| C fade (short) | 131 | 43% | -1.60% | -2.40% | -3.1% to -0.05% |
+| D buy pullback | 68 | 50% | +1.55% | +0.21% | -1.2% to +4.6% |
 | E support break (short) | 19 | 26% | -1.65% | -3.04% | -3.4% to +0.1% |
 | F resistance break | 21 | 33% | -1.21% | -2.53% | -3.2% to +1.0% |
-| Control: A's rules on random $1-$20 days | 19,983 | 50% | +0.40% | | +0.07% to +0.75% |
+| Control: A's rules on random $1-$20 days | 19,981 | 50% | +0.37% |  | +0.04% to +0.69% |
 
 - Five of the six intervals include zero. Only the fade (C) is clearly negative.
-- The scanner adds little to the control: A is +0.57% against +0.40% for random cheap stock-days.
+- The scanner adds nothing over the control: A is +0.32% against +0.37% for random cheap stock-days.
 - A's and D's averages come from a few big winners. The best A trade was Bloom Energy,
   +55%, in 2024, before it joined the index.
-- **Membership look-ahead:** 64 of 133 events were in stocks that joined the S&P 500 later.
-  Among stocks already in the index, A averaged -1.0% (69 trades) against +2.3% for the rest
-  (64 trades). D went from +3.5% to +0.2%. See `results/by_membership.csv`.
+- **Membership look-ahead:** 62 of 131 events were in stocks that joined the S&P 500 later.
+  Among stocks already in the index, A averaged -1.0% (69 trades) against +1.8% for the rest
+  (62 trades). D went from +3.3% to +0.2%. See `results/by_membership.csv`.
 - Results move a lot with the exit rule and scanner threshold (`results/sensitivity_*.csv`),
   and the first and second half of the period often disagree (`results/halves.csv`).
 
@@ -93,8 +93,10 @@ That is aggressive sizing, used only to make the totals comparable with owning S
 
 - Prices, volume, splits: Yahoo Finance via `yfinance` (free, unofficial, can change without notice).
 - Members: [datasets/s-and-p-500-companies](https://github.com/datasets/s-and-p-500-companies) (current list, with "date added").
-- Yahoo shows old prices divided by later splits. The notebook multiplies splits back in to get the price as traded, so the $1-$20 filter is right. 134 splits in the data.
-- Hourly bars come from Yahoo too and are cached after the first run.
+- Yahoo shows old prices divided by later splits. The notebook multiplies splits back in to get the price as traded, so the $1-$20 filter is right. 135 splits in the data.
+- Daily and hourly bars are cached after the first run, because Yahoo revises history slightly
+  between downloads (daily results moved a little between two pulls: A averaged +0.57%, then
+  +0.32%). Set `SPIKES_REFRESH=1` to download again.
 - Nothing is committed except small result files. Prices are downloaded on each fresh run.
 
 ## What it doesn't show

@@ -44,7 +44,7 @@ def _():
     BATCH = 100
     MAX_TRIES = 3
     CACHE.mkdir(parents=True, exist_ok=True)
-    return BATCH, CACHE, END, MAX_TRIES, MEMBERS_URL, START, io, pd, requests, yf
+    return BATCH, CACHE, END, MAX_TRIES, MEMBERS_URL, START, io, os, pd, requests, yf
 
 
 @app.cell
@@ -60,48 +60,54 @@ def _(MEMBERS_URL, io, pd, requests):
 
 
 @app.cell
-def _(BATCH, END, MAX_TRIES, START, pd, symbols, yf):
+def _(BATCH, CACHE, END, MAX_TRIES, START, os, pd, symbols, yf):
+    # Cached after the first run, because Yahoo revises history slightly between downloads.
+    # Set SPIKES_REFRESH=1 to download again.
     # Unadjusted prices (auto_adjust=False) with split events. Yahoo already divides old prices
     # by later splits, so the "as traded" price is rebuilt from the split column in notebook 2.
-    frames: list[pd.DataFrame] = []
-    for _start in range(0, len(symbols), BATCH):
-        _batch = symbols[_start : _start + BATCH]
-        _raw = pd.DataFrame()
-        for _try in range(MAX_TRIES):
-            _raw = yf.download(
-                _batch,
-                start=START,
-                end=END,
-                interval="1d",
-                auto_adjust=False,
-                actions=True,
-                progress=False,
-                threads=True,
-            )
-            if not _raw.empty:
-                break
-        assert not _raw.empty, f"Yahoo returned nothing for batch starting at {_start}"
-        for _symbol in _batch:
-            if _symbol not in _raw["Close"].columns:
-                continue
-            _one = _raw.xs(_symbol, axis=1, level="Ticker").dropna(subset=["Close"])
-            if _one.empty:
-                continue
-            frames.append(
-                pd.DataFrame(
-                    {
-                        "ticker": _symbol,
-                        "date": _one.index,
-                        "open": _one["Open"].to_numpy(),
-                        "high": _one["High"].to_numpy(),
-                        "low": _one["Low"].to_numpy(),
-                        "close": _one["Close"].to_numpy(),
-                        "volume": _one["Volume"].to_numpy(),
-                        "split": _one["Stock Splits"].fillna(0.0).to_numpy(),
-                    }
+    _cached = CACHE / "prices.parquet"
+    if _cached.exists() and not os.environ.get("SPIKES_REFRESH"):
+        prices = pd.read_parquet(_cached)
+    else:
+        frames: list[pd.DataFrame] = []
+        for _start in range(0, len(symbols), BATCH):
+            _batch = symbols[_start : _start + BATCH]
+            _raw = pd.DataFrame()
+            for _try in range(MAX_TRIES):
+                _raw = yf.download(
+                    _batch,
+                    start=START,
+                    end=END,
+                    interval="1d",
+                    auto_adjust=False,
+                    actions=True,
+                    progress=False,
+                    threads=True,
                 )
-            )
-    prices = pd.concat(frames, ignore_index=True)
+                if not _raw.empty:
+                    break
+            assert not _raw.empty, f"Yahoo returned nothing for batch starting at {_start}"
+            for _symbol in _batch:
+                if _symbol not in _raw["Close"].columns:
+                    continue
+                _one = _raw.xs(_symbol, axis=1, level="Ticker").dropna(subset=["Close"])
+                if _one.empty:
+                    continue
+                frames.append(
+                    pd.DataFrame(
+                        {
+                            "ticker": _symbol,
+                            "date": _one.index,
+                            "open": _one["Open"].to_numpy(),
+                            "high": _one["High"].to_numpy(),
+                            "low": _one["Low"].to_numpy(),
+                            "close": _one["Close"].to_numpy(),
+                            "volume": _one["Volume"].to_numpy(),
+                            "split": _one["Stock Splits"].fillna(0.0).to_numpy(),
+                        }
+                    )
+                )
+        prices = pd.concat(frames, ignore_index=True)
     return (prices,)
 
 
