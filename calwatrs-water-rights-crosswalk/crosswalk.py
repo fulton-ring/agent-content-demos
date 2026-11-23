@@ -235,8 +235,9 @@ def _(holder, holder_overall, mo):
     rights have an active owner added after eWRIMS's last update, so for those the old file
     is simply out of date.
 
-    The {len(_lost):,} named-holder rights with no active CalWATRS owner are mostly ended
-    rights: {", ".join(f"{k} {v:,}" for k, v in holder_lost_by_status.head(4).items())}.
+    Of the {len(_lost):,} named-holder rights with no active CalWATRS owner,
+    {_lost["status"].isin(["Closed", "Inactive"]).mean():.0%} are closed or inactive in
+    eWRIMS: {", ".join(f"{k} {v:,}" for k, v in holder_lost_by_status.head(4).items())}.
     """)
     return (holder_lost_by_status,)
 
@@ -718,10 +719,12 @@ def _(ewrims_lookup_scores, mo, wade_lookup_scores):
     lookup gets only
     {_w.loc["status", "WaDE lookup, rights not in WaDE (out-of-sample)"]:.0%} right. Those
     rights are mostly inactive, revoked, cancelled or rejected, which WSWC's filter kept out
-    of WaDE, so the lookup has no entry for
-    {_w.loc["status", "WaDE lookup, not in WaDE, key WaDE never saw"]:.0%} of them. For those
-    statuses CalWATRS kept the eWRIMS word, so falling back to the CalWATRS word when the
-    lookup has no entry lifts it to
+    of WaDE. For {_w.loc["status", "WaDE lookup, not in WaDE, key WaDE never saw"]:.0%} of
+    them the lookup has no entry. For most of the rest it has the wrong one: a few WaDE
+    rights went from "Claimed" to CalWATRS "Inactive", or from "Licensed" to "Revoked",
+    after WaDE froze, so the lookup learned *Inactive → Claimed* and *Revoked → Licensed*.
+    It mistook status changes for renamings. Falling back to the CalWATRS word when the
+    lookup has no entry only lifts it to
     {_w.loc["status", "WaDE lookup else CalWATRS word, not in WaDE"]:.0%}.
     Learned on the whole eWRIMS file, the same method reaches
     {_e.loc["status", "agree (in-sample)"]:.0%} for status and
@@ -869,8 +872,8 @@ def _(
       {holder_overall.loc["same party", "where eWRIMS named a holder"]:.1%}.
     - **Fields:** {len(field_scores) + 1} of {len(field_scores) + len(unmapped) + 1} eWRIMS
       columns have a CalWATRS equivalent; {len(unmapped)} don't.
-    - **Vocabulary:** status and type need a lookup; the WaDE one doesn't transfer to
-      rights it never saw.
+    - **Vocabulary:** status and type need a lookup. WaDE's type lookup transfers; its
+      status lookup doesn't, because it learned status changes as renamings.
     - **Freshness:** the old file's "last updated" is {staleness_days} days newer than its
       data.
 
