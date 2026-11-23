@@ -44,7 +44,7 @@ WaDE's type lookup transfers to new rights; its status lookup doesn't. The right
 
 **"Last updated."** The portal shows 2026-11-12 for the eWRIMS list. That date is the last edit to the dataset's description. The CSV was uploaded 2026-10-01, its file name says 2025-08-05, and the newest record change inside it is **2025-06-06**: 524 days earlier than the portal date. The CalWATRS tables are current: both were uploaded 2026-11-23, with records dated 2026-11-19 and 2026-11-20.
 
-**Run time and cost.** About 20 s for the archive and 65 s for the notebook. $0: public data, no model, no paid service.
+**Run time and cost.** About 20–25 s for the archive and 65–70 s for the notebook (22 s and 69 s in the clean run). $0: public data, no model, no paid service.
 
 ## How to run
 
