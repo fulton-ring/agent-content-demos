@@ -33,11 +33,11 @@ DATASETS = {
 }
 
 
-def get(url: str, **kwargs: object) -> requests.Response:
+def get(url: str, params: dict[str, str] | None = None) -> requests.Response:
     """GET with a bounded number of retries and exponential backoff."""
     for attempt in range(1, MAX_TRIES + 1):
         try:
-            r = requests.get(url, timeout=300, **kwargs)  # type: ignore[arg-type]
+            r = requests.get(url, params=params, timeout=300)
             r.raise_for_status()
             return r
         except requests.RequestException:
@@ -103,7 +103,7 @@ ewrims = pd.read_csv(ewrims_csv, dtype=str, encoding="utf-8-sig", keep_default_n
 assert "APPLICATION_NUMBER" in ewrims.columns, "eWRIMS list changed shape"
 lat = pd.to_numeric(ewrims["LATITUDE"], errors="coerce")
 lon = pd.to_numeric(ewrims["LONGITUDE"], errors="coerce")
-archive = gpd.GeoDataFrame(ewrims, geometry=gpd.points_from_xy(lon, lat), crs=4269)
+archive = gpd.GeoDataFrame(ewrims.assign(geometry=gpd.GeoSeries.from_xy(lon, lat, crs=4269)))
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 parquet = OUT_DIR / "ewrims_water_rights_list.parquet"
 archive.to_parquet(parquet)

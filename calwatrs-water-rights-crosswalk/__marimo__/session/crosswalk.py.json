@@ -1,0 +1,452 @@
+{
+  "version": "1",
+  "metadata": {
+    "marimo_version": "0.25.2",
+    "script_metadata_hash": null
+  },
+  "cells": [
+    {
+      "id": "Hbol",
+      "code_hash": "e7d10e993ac8f16737de6fb7cf50f197",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "MJUe",
+      "code_hash": "07a9a4c7d1c351325d9987de94247754",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/markdown": "<span class=\"markdown prose dark:prose-invert contents\"><h1 id=\"does-californias-new-water-rights-data-still-say-who-holds-each-right\">Does California's new water rights data still say who holds each right?</h1>\n<span class=\"paragraph\">The State Water Resources Control Board is retiring its old water rights system, eWRIMS,\nfor a new one, CalWATRS. The old system's one-row-per-right file, the <strong>Water Rights\nLIST</strong>, is marked DISCONTINUED and \"will be removed in the near future\". The board says\n\"you won't find a one-to-one replacement for this file\". So far it has published two\nCalWATRS tables in its place: <strong>Participants</strong> (who is connected to each right) and\n<strong>Geospatial</strong> (each right's points of diversion, places of use and storage).</span>\n<span class=\"paragraph\"><strong>Question.</strong> If you join the two CalWATRS tables, do you still get the facts the old\nfile gave, above all who holds each right? Which fields are lost? And how stale is the\nold file really, given the portal says it was updated in November 2026?</span>\n<span class=\"paragraph\"><code>archive.py</code> ran first. It downloaded all three datasets and their data dictionaries\nand saved the eWRIMS list as GeoParquet with checksums (<code>outputs/archive_manifest.json</code>).\nThis notebook reads that archive.</span></span>"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "vblA",
+      "code_hash": "03a26534b31cfd2d5991d9b1a6c01fc9",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "application/json": "{\"ewrims_list\": {\"license\": \"Other (Public Domain)\", \"portal says updated\": \"2026-11-12\"}, \"calwatrs_participants\": {\"license\": \"Creative Commons Attribution\", \"portal says updated\": \"2026-11-23\"}, \"calwatrs_geospatial\": {\"license\": \"Creative Commons Attribution\", \"portal says updated\": \"2026-11-23\"}}"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "bkHC",
+      "code_hash": "90fe4e69f1ff658f7a52cc7fa7e95063",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/markdown": "<span class=\"markdown prose dark:prose-invert contents\"><h2 id=\"1-the-old-file\">1. The old file</h2>\n<span class=\"paragraph\">One row per right (a few IDs repeat; we keep the first). eWRIMS wrote the text <code>NA</code>\nfor an empty value, so <code>NA</code> and blanks are treated as missing throughout.</span></span>"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "lEQa",
+      "code_hash": "2842a4497c921f3a8c9803aaf56c4911",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "application/json": "{\"rights\": 69910, \"columns\": 160, \"with a primary owner\": \"80.3%\"}"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "PKri",
+      "code_hash": "be8dd9f13032b00bed777f9431457e83",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/markdown": "<span class=\"markdown prose dark:prose-invert contents\"><span class=\"paragraph\">Even the old file names a holder for only <strong>80.3%</strong> of its\n69,910 rights. Of the 13,775 without one,\n88% are type <strong>\"Not Determined\"</strong>\n(13,204 rows, 19% of the file). Those rows rarely have an owner\n(8.5%), a location\n(1.7%) or a use\n(0.2%). They read as placeholder records,\nso results below are shown both for all rights and without them.</span></span>"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "Xref",
+      "code_hash": "242db4e30e3c66f87b950d1aae0e94b3",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/markdown": "<span class=\"markdown prose dark:prose-invert contents\"><h2 id=\"2-the-strongest-evidence-against-does-participants-already-restore-the-holder\">2. The strongest evidence against: does Participants already restore the holder?</h2>\n<span class=\"paragraph\">The card expected the holder to be the big loss. The case against is the Participants\ntable, created 2026-02-06: one row per link between a person or organization and a\nright, with a relationship type (\"Primary owner\", \"Agent\", \"Non-primary owner\"\u2026) and an\nactive or inactive status. If it names a holder for nearly every right, the loss is\nsmall and this becomes a crosswalk how-to. So check it first.</span>\n<span class=\"paragraph\">Three tests per eWRIMS right:</span>\n<ul>\n<li><strong>Holder present</strong>: the right has at least one <em>active</em> \"Primary owner\" link.</li>\n<li><strong>Same party</strong>: the eWRIMS primary owner's party ID is one of the right's primary\n  owner links (active or not). CalWATRS keeps the old eWRIMS party ID inside\n  <code>PARTICIPANT_CONVERSIONPAPID</code> (<code>A000084|434716 | \u2026</code>), so this is an exact check, not\n  fuzzy name matching.</li>\n<li><strong>Same name</strong>: the active primary owner's name equals the eWRIMS name after\n  upper-casing and dropping punctuation. CalWATRS rewrote many names in mixed case and\n  added middle initials, so this undercounts.</li>\n</ul></span>"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "SFPL",
+      "code_hash": "320ebf3d29dd96eb62c957201c72c713",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "application/json": "[157283, 88]"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "BYtC",
+      "code_hash": "a8e2f65b9d0e02b61dc959879321b26a",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/html": "<marimo-ui-element object-id='BYtC-0' random-id='2d19e9e2-c66c-a378-3cbd-5d745674f67f'><marimo-table data-initial-value='[]' data-label='null' data-data='&quot;[{&#92;&quot;Index0&#92;&quot;:&#92;&quot;eWRIMS holder&#92;&quot;,&#92;&quot;all rights&#92;&quot;:0.803,&#92;&quot;without Not Determined&#92;&quot;:0.97,&#92;&quot;where eWRIMS named a holder&#92;&quot;:1.0},{&#92;&quot;Index0&#92;&quot;:&#92;&quot;in Participants&#92;&quot;,&#92;&quot;all rights&#92;&quot;:0.799,&#92;&quot;without Not Determined&#92;&quot;:0.984,&#92;&quot;where eWRIMS named a holder&#92;&quot;:0.978},{&#92;&quot;Index0&#92;&quot;:&#92;&quot;CalWATRS holder&#92;&quot;,&#92;&quot;all rights&#92;&quot;:0.776,&#92;&quot;without Not Determined&#92;&quot;:0.956,&#92;&quot;where eWRIMS named a holder&#92;&quot;:0.966},{&#92;&quot;Index0&#92;&quot;:&#92;&quot;same party&#92;&quot;,&#92;&quot;all rights&#92;&quot;:0.785,&#92;&quot;without Not Determined&#92;&quot;:0.968,&#92;&quot;where eWRIMS named a holder&#92;&quot;:0.978},{&#92;&quot;Index0&#92;&quot;:&#92;&quot;same name&#92;&quot;,&#92;&quot;all rights&#92;&quot;:0.499,&#92;&quot;without Not Determined&#92;&quot;:0.615,&#92;&quot;where eWRIMS named a holder&#92;&quot;:0.621},{&#92;&quot;Index0&#92;&quot;:&#92;&quot;owner changed since freeze&#92;&quot;,&#92;&quot;all rights&#92;&quot;:0.022,&#92;&quot;without Not Determined&#92;&quot;:0.027,&#92;&quot;where eWRIMS named a holder&#92;&quot;:0.027}]&quot;' data-total-rows='6' data-total-columns='3' data-max-columns='50' data-banner-text='&quot;&quot;' data-pagination='false' data-page-size='10' data-field-types='[[&quot;all rights&quot;,[&quot;number&quot;,&quot;float64&quot;]],[&quot;without Not Determined&quot;,[&quot;number&quot;,&quot;float64&quot;]],[&quot;where eWRIMS named a holder&quot;,[&quot;number&quot;,&quot;float64&quot;]]]' data-show-filters='true' data-show-download='true' data-show-search='true' data-show-column-summaries='false' data-show-data-types='true' data-show-page-size-selector='true' data-show-column-explorer='true' data-show-chart-builder='true' data-row-headers='[[&quot;Index0&quot;,[&quot;string&quot;,&quot;str&quot;]]]' data-hidden-columns='[]' data-has-stable-row-id='false' data-lazy='false' data-preload='false'></marimo-table></marimo-ui-element>"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "RGSE",
+      "code_hash": "ef8b1710c5b5c75e7b1375b92a3e1fc5",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/html": "<marimo-ui-element object-id='RGSE-0' random-id='e108b82f-6174-cb0c-d7eb-85af34e0970f'><marimo-table data-initial-value='[]' data-label='null' data-data='&quot;[{&#92;&quot;type&#92;&quot;:&#92;&quot;Statement of Div and Use&#92;&quot;,&#92;&quot;rights&#92;&quot;:24203,&#92;&quot;eWRIMS holder&#92;&quot;:0.989,&#92;&quot;in Participants&#92;&quot;:0.999,&#92;&quot;CalWATRS holder&#92;&quot;:0.972,&#92;&quot;same party&#92;&quot;:0.988,&#92;&quot;same name&#92;&quot;:0.655,&#92;&quot;owner changed since freeze&#92;&quot;:0.026},{&#92;&quot;type&#92;&quot;:&#92;&quot;Appropriative&#92;&quot;,&#92;&quot;rights&#92;&quot;:14922,&#92;&quot;eWRIMS holder&#92;&quot;:0.978,&#92;&quot;in Participants&#92;&quot;:1.0,&#92;&quot;CalWATRS holder&#92;&quot;:0.978,&#92;&quot;same party&#92;&quot;:0.978,&#92;&quot;same name&#92;&quot;:0.601,&#92;&quot;owner changed since freeze&#92;&quot;:0.04},{&#92;&quot;type&#92;&quot;:&#92;&quot;Not Determined&#92;&quot;,&#92;&quot;rights&#92;&quot;:13204,&#92;&quot;eWRIMS holder&#92;&quot;:0.085,&#92;&quot;in Participants&#92;&quot;:0.001,&#92;&quot;CalWATRS holder&#92;&quot;:0.001,&#92;&quot;same party&#92;&quot;:0.001,&#92;&quot;same name&#92;&quot;:0.0,&#92;&quot;owner changed since freeze&#92;&quot;:0.0},{&#92;&quot;type&#92;&quot;:&#92;&quot;Stockpond&#92;&quot;,&#92;&quot;rights&#92;&quot;:5860,&#92;&quot;eWRIMS holder&#92;&quot;:0.991,&#92;&quot;in Participants&#92;&quot;:0.999,&#92;&quot;CalWATRS holder&#92;&quot;:0.991,&#92;&quot;same party&#92;&quot;:0.989,&#92;&quot;same name&#92;&quot;:0.551,&#92;&quot;owner changed since freeze&#92;&quot;:0.021},{&#92;&quot;type&#92;&quot;:&#92;&quot;Groundwater Recordation&#92;&quot;,&#92;&quot;rights&#92;&quot;:5126,&#92;&quot;eWRIMS holder&#92;&quot;:0.93,&#92;&quot;in Participants&#92;&quot;:0.987,&#92;&quot;CalWATRS holder&#92;&quot;:0.876,&#92;&quot;same party&#92;&quot;:0.93,&#92;&quot;same name&#92;&quot;:0.768,&#92;&quot;owner changed since freeze&#92;&quot;:0.006},{&#92;&quot;type&#92;&quot;:&#92;&quot;Registration Domestic&#92;&quot;,&#92;&quot;rights&#92;&quot;:1731,&#92;&quot;eWRIMS holder&#92;&quot;:0.999,&#92;&quot;in Participants&#92;&quot;:0.998,&#92;&quot;CalWATRS holder&#92;&quot;:0.998,&#92;&quot;same party&#92;&quot;:0.997,&#92;&quot;same name&#92;&quot;:0.65,&#92;&quot;owner changed since freeze&#92;&quot;:0.03},{&#92;&quot;type&#92;&quot;:&#92;&quot;Federal Claims&#92;&quot;,&#92;&quot;rights&#92;&quot;:1546,&#92;&quot;eWRIMS holder&#92;&quot;:1.0,&#92;&quot;in Participants&#92;&quot;:1.0,&#92;&quot;CalWATRS holder&#92;&quot;:1.0,&#92;&quot;same party&#92;&quot;:1.0,&#92;&quot;same name&#92;&quot;:0.024,&#92;&quot;owner changed since freeze&#92;&quot;:0.0},{&#92;&quot;type&#92;&quot;:&#92;&quot;Non Jurisdictional&#92;&quot;,&#92;&quot;rights&#92;&quot;:894,&#92;&quot;eWRIMS holder&#92;&quot;:0.243,&#92;&quot;in Participants&#92;&quot;:0.248,&#92;&quot;CalWATRS holder&#92;&quot;:0.244,&#92;&quot;same party&#92;&quot;:0.244,&#92;&quot;same name&#92;&quot;:0.181,&#92;&quot;owner changed since freeze&#92;&quot;:0.0},{&#92;&quot;type&#92;&quot;:&#92;&quot;Registration Cannabis&#92;&quot;,&#92;&quot;rights&#92;&quot;:886,&#92;&quot;eWRIMS holder&#92;&quot;:1.0,&#92;&quot;in Participants&#92;&quot;:0.999,&#92;&quot;CalWATRS holder&#92;&quot;:0.999,&#92;&quot;same party&#92;&quot;:0.999,&#92;&quot;same name&#92;&quot;:0.807,&#92;&quot;owner changed since freeze&#92;&quot;:0.064},{&#92;&quot;type&#92;&quot;:&#92;&quot;Registration Livestock&#92;&quot;,&#92;&quot;rights&#92;&quot;:540,&#92;&quot;eWRIMS holder&#92;&quot;:1.0,&#92;&quot;in Participants&#92;&quot;:0.994,&#92;&quot;CalWATRS holder&#92;&quot;:0.994,&#92;&quot;same party&#92;&quot;:0.994,&#92;&quot;same name&#92;&quot;:0.796,&#92;&quot;owner changed since freeze&#92;&quot;:0.013}]&quot;' data-total-rows='18' data-total-columns='7' data-max-columns='50' data-banner-text='&quot;&quot;' data-pagination='true' data-page-size='10' data-field-types='[[&quot;rights&quot;,[&quot;integer&quot;,&quot;int64&quot;]],[&quot;eWRIMS holder&quot;,[&quot;number&quot;,&quot;float64&quot;]],[&quot;in Participants&quot;,[&quot;number&quot;,&quot;float64&quot;]],[&quot;CalWATRS holder&quot;,[&quot;number&quot;,&quot;float64&quot;]],[&quot;same party&quot;,[&quot;number&quot;,&quot;float64&quot;]],[&quot;same name&quot;,[&quot;number&quot;,&quot;float64&quot;]],[&quot;owner changed since freeze&quot;,[&quot;number&quot;,&quot;float64&quot;]]]' data-show-filters='true' data-show-download='true' data-show-search='true' data-show-column-summaries='true' data-show-data-types='true' data-show-page-size-selector='true' data-show-column-explorer='true' data-show-chart-builder='true' data-row-headers='[[&quot;type&quot;,[&quot;string&quot;,&quot;string&quot;]]]' data-hidden-columns='[]' data-has-stable-row-id='false' data-lazy='false' data-preload='false'></marimo-table></marimo-ui-element>"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "Kclp",
+      "code_hash": "de2b2204be01c94116cae93513573de3",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/html": "<marimo-ui-element object-id='Kclp-0' random-id='6c39d96b-6b67-5873-d05f-be6d1a1ca732'><marimo-table data-initial-value='[]' data-label='null' data-data='&quot;[{&#92;&quot;status&#92;&quot;:&#92;&quot;Claimed&#92;&quot;,&#92;&quot;rights&#92;&quot;:21479,&#92;&quot;eWRIMS holder&#92;&quot;:1.0,&#92;&quot;in Participants&#92;&quot;:1.0,&#92;&quot;CalWATRS holder&#92;&quot;:1.0,&#92;&quot;same party&#92;&quot;:1.0,&#92;&quot;same name&#92;&quot;:0.639,&#92;&quot;owner changed since freeze&#92;&quot;:0.03},{&#92;&quot;status&#92;&quot;:&#92;&quot;Licensed&#92;&quot;,&#92;&quot;rights&#92;&quot;:10477,&#92;&quot;eWRIMS holder&#92;&quot;:1.0,&#92;&quot;in Participants&#92;&quot;:1.0,&#92;&quot;CalWATRS holder&#92;&quot;:1.0,&#92;&quot;same party&#92;&quot;:1.0,&#92;&quot;same name&#92;&quot;:0.591,&#92;&quot;owner changed since freeze&#92;&quot;:0.051},{&#92;&quot;status&#92;&quot;:&#92;&quot;Active&#92;&quot;,&#92;&quot;rights&#92;&quot;:9952,&#92;&quot;eWRIMS holder&#92;&quot;:0.054,&#92;&quot;in Participants&#92;&quot;:0.022,&#92;&quot;CalWATRS holder&#92;&quot;:0.022,&#92;&quot;same party&#92;&quot;:0.022,&#92;&quot;same name&#92;&quot;:0.016,&#92;&quot;owner changed since freeze&#92;&quot;:0.0},{&#92;&quot;status&#92;&quot;:&#92;&quot;Inactive&#92;&quot;,&#92;&quot;rights&#92;&quot;:7560,&#92;&quot;eWRIMS holder&#92;&quot;:0.916,&#92;&quot;in Participants&#92;&quot;:0.987,&#92;&quot;CalWATRS holder&#92;&quot;:0.835,&#92;&quot;same party&#92;&quot;:0.916,&#92;&quot;same name&#92;&quot;:0.591,&#92;&quot;owner changed since freeze&#92;&quot;:0.002},{&#92;&quot;status&#92;&quot;:&#92;&quot;Certified&#92;&quot;,&#92;&quot;rights&#92;&quot;:5773,&#92;&quot;eWRIMS holder&#92;&quot;:0.999,&#92;&quot;in Participants&#92;&quot;:1.0,&#92;&quot;CalWATRS holder&#92;&quot;:0.999,&#92;&quot;same party&#92;&quot;:0.998,&#92;&quot;same name&#92;&quot;:0.523,&#92;&quot;owner changed since freeze&#92;&quot;:0.021},{&#92;&quot;status&#92;&quot;:&#92;&quot;Closed&#92;&quot;,&#92;&quot;rights&#92;&quot;:3867,&#92;&quot;eWRIMS holder&#92;&quot;:0.17,&#92;&quot;in Participants&#92;&quot;:0.0,&#92;&quot;CalWATRS holder&#92;&quot;:0.0,&#92;&quot;same party&#92;&quot;:0.0,&#92;&quot;same name&#92;&quot;:0.0,&#92;&quot;owner changed since freeze&#92;&quot;:0.0},{&#92;&quot;status&#92;&quot;:&#92;&quot;Revoked&#92;&quot;,&#92;&quot;rights&#92;&quot;:2461,&#92;&quot;eWRIMS holder&#92;&quot;:0.937,&#92;&quot;in Participants&#92;&quot;:1.0,&#92;&quot;CalWATRS holder&#92;&quot;:0.937,&#92;&quot;same party&#92;&quot;:0.937,&#92;&quot;same name&#92;&quot;:0.557,&#92;&quot;owner changed since freeze&#92;&quot;:0.001},{&#92;&quot;status&#92;&quot;:&#92;&quot;Registered&#92;&quot;,&#92;&quot;rights&#92;&quot;:2018,&#92;&quot;eWRIMS holder&#92;&quot;:1.0,&#92;&quot;in Participants&#92;&quot;:1.0,&#92;&quot;CalWATRS holder&#92;&quot;:1.0,&#92;&quot;same party&#92;&quot;:0.999,&#92;&quot;same name&#92;&quot;:0.684,&#92;&quot;owner changed since freeze&#92;&quot;:0.056},{&#92;&quot;status&#92;&quot;:&#92;&quot;Claimed - Local Oversight&#92;&quot;,&#92;&quot;rights&#92;&quot;:1852,&#92;&quot;eWRIMS holder&#92;&quot;:1.0,&#92;&quot;in Participants&#92;&quot;:1.0,&#92;&quot;CalWATRS holder&#92;&quot;:0.963,&#92;&quot;same party&#92;&quot;:1.0,&#92;&quot;same name&#92;&quot;:0.888,&#92;&quot;owner changed since freeze&#92;&quot;:0.0},{&#92;&quot;status&#92;&quot;:&#92;&quot;Permitted&#92;&quot;,&#92;&quot;rights&#92;&quot;:1461,&#92;&quot;eWRIMS holder&#92;&quot;:1.0,&#92;&quot;in Participants&#92;&quot;:1.0,&#92;&quot;CalWATRS holder&#92;&quot;:1.0,&#92;&quot;same party&#92;&quot;:1.0,&#92;&quot;same name&#92;&quot;:0.759,&#92;&quot;owner changed since freeze&#92;&quot;:0.034}]&quot;' data-total-rows='17' data-total-columns='7' data-max-columns='50' data-banner-text='&quot;&quot;' data-pagination='true' data-page-size='10' data-field-types='[[&quot;rights&quot;,[&quot;integer&quot;,&quot;int64&quot;]],[&quot;eWRIMS holder&quot;,[&quot;number&quot;,&quot;float64&quot;]],[&quot;in Participants&quot;,[&quot;number&quot;,&quot;float64&quot;]],[&quot;CalWATRS holder&quot;,[&quot;number&quot;,&quot;float64&quot;]],[&quot;same party&quot;,[&quot;number&quot;,&quot;float64&quot;]],[&quot;same name&quot;,[&quot;number&quot;,&quot;float64&quot;]],[&quot;owner changed since freeze&quot;,[&quot;number&quot;,&quot;float64&quot;]]]' data-show-filters='true' data-show-download='true' data-show-search='true' data-show-column-summaries='true' data-show-data-types='true' data-show-page-size-selector='true' data-show-column-explorer='true' data-show-chart-builder='true' data-row-headers='[[&quot;status&quot;,[&quot;string&quot;,&quot;string&quot;]]]' data-hidden-columns='[]' data-has-stable-row-id='false' data-lazy='false' data-preload='false'></marimo-table></marimo-ui-element>"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "emfo",
+      "code_hash": "97c0697a7f3a43dcc4d41df5334992f9",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/markdown": "<span class=\"markdown prose dark:prose-invert contents\"><span class=\"paragraph\"><strong>The evidence against mostly holds.</strong> Participants names an active primary owner for\n<strong>77.6%</strong> of all eWRIMS rights, and\n<strong>96.6%</strong> of the\n56,135 rights where eWRIMS named one. The holder is not lost; it moved to a\nsecond table that has to be joined on the right ID.</span>\n<span class=\"paragraph\">Where eWRIMS named a holder, <strong>97.8%</strong>\nof rights carry the same eWRIMS party into CalWATRS as a primary owner, and\n<strong>62.1%</strong> have an active owner whose\nname matches letter for letter. The gap between the two is mostly rewritten names, not\ndifferent holders. <strong>2.2%</strong> of\nrights have an active owner added after eWRIMS's last update, so for those the old file\nis simply out of date.</span>\n<span class=\"paragraph\">The 1,917 named-holder rights with no active CalWATRS owner are mostly ended\nrights: Closed 658, Inactive 612, Active 319, (blank) 133.</span></span>"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "Hstk",
+      "code_hash": "00301b52f7369577fcb855d15d732992",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/markdown": "<span class=\"markdown prose dark:prose-invert contents\"><h2 id=\"3-join-geospatial-and-participants-on-the-right-id\">3. Join Geospatial and Participants on the right ID</h2>\n<span class=\"paragraph\">Geospatial has one row per link between a right and a feature. eWRIMS listed one point\nof diversion per right (the most recently updated one) with its eWRIMS <code>POD_ID</code>, and\nCalWATRS keeps that ID as the first part of <code>GR_CONVERSION_ID</code> (<code>6598|Point of\nDiversion</code>). So point-of-diversion fields are compared on the very same point.</span></span>"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "nWHF",
+      "code_hash": "4d205b7227ed64684b1da64d9eae1ef4",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "application/json": "{\"in Participants\": \"text/plain+float:0.7985\", \"in Geospatial\": \"text/plain+float:0.7919\", \"in either\": \"text/plain+float:0.8\", \"in both\": \"text/plain+float:0.7905\", \"eWRIMS point of diversion found in Geospatial\": \"text/plain+float:0.9951\"}"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "iLit",
+      "code_hash": "d31fbcd47eda6fde0392436637ab94ff",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/markdown": "<span class=\"markdown prose dark:prose-invert contents\"><h2 id=\"4-the-field-crosswalk\">4. The field crosswalk</h2>\n<span class=\"paragraph\">Each eWRIMS column was read against the three data dictionaries and given the CalWATRS\ncolumn that means the same thing, if there is one. The table below is that judgment;\nevery eWRIMS column not listed has no CalWATRS equivalent.</span>\n<span class=\"paragraph\"><code>where</code> says which CalWATRS rows a value comes from: <strong>right</strong> (Participants,\nright-level columns, repeated on every row), <strong>owner</strong> or <strong>agent</strong> (active primary\nowner or agent links), <strong>pod</strong> (the Geospatial row for the same point of diversion) or\n<strong>feature</strong> (any Geospatial row for the right). <code>kind</code> says how values are compared:\ntext after upper-casing and dropping punctuation, dates by day, numbers to 6\nsignificant digits (a zero counts as empty: eWRIMS wrote 0 face value on every\nstatement), <code>member</code> if the eWRIMS value is one of a CalWATRS comma list. Status and\ntype (<code>vocab</code>) use new terms and are scored in section 5. <code>renamed</code> fields hold the same\nfact in new words or new IDs and aren't scored; <code>derived</code> fields are counts or copies\nyou can rebuild from the CalWATRS rows (number of points, uses, owners, petitions).\n<code>same_value</code> is the share agreeing among rights where both systems have a value.</span></span>"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "ZHCJ",
+      "code_hash": "ce8b05a08147a2237c94a4946d44064e",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "application/json": "[60, 4]"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "ROlb",
+      "code_hash": "e8d85e9216c6f022669e994f74e1c53e",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "qnkX",
+      "code_hash": "4d252cb240dca620f8587b92f7201fa8",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/html": "<marimo-ui-element object-id='qnkX-0' random-id='4acb5c90-75ad-ee6f-5dd6-ff513d29b2d8'><marimo-table data-initial-value='[]' data-label='null' data-data='&quot;[{&#92;&quot;ewrims_field&#92;&quot;:&#92;&quot;WATER_RIGHT_TYPE&#92;&quot;,&#92;&quot;calwatrs_table&#92;&quot;:&#92;&quot;Participants&#92;&quot;,&#92;&quot;calwatrs_field&#92;&quot;:&#92;&quot;WR_APP_CLAIM_TYPE&#92;&quot;,&#92;&quot;where&#92;&quot;:&#92;&quot;right&#92;&quot;,&#92;&quot;kind&#92;&quot;:&#92;&quot;vocab&#92;&quot;,&#92;&quot;ewrims_filled&#92;&quot;:55825,&#92;&quot;calwatrs_filled&#92;&quot;:0.905,&#92;&quot;same_value&#92;&quot;:NaN,&#92;&quot;verdict&#92;&quot;:&#92;&quot;carries over&#92;&quot;},{&#92;&quot;ewrims_field&#92;&quot;:&#92;&quot;WATER_RIGHT_STATUS&#92;&quot;,&#92;&quot;calwatrs_table&#92;&quot;:&#92;&quot;Participants&#92;&quot;,&#92;&quot;calwatrs_field&#92;&quot;:&#92;&quot;WR_APP_CLAIM_STATUS&#92;&quot;,&#92;&quot;where&#92;&quot;:&#92;&quot;right&#92;&quot;,&#92;&quot;kind&#92;&quot;:&#92;&quot;vocab&#92;&quot;,&#92;&quot;ewrims_filled&#92;&quot;:55825,&#92;&quot;calwatrs_filled&#92;&quot;:1.0,&#92;&quot;same_value&#92;&quot;:NaN,&#92;&quot;verdict&#92;&quot;:&#92;&quot;carries over&#92;&quot;},{&#92;&quot;ewrims_field&#92;&quot;:&#92;&quot;SUB_TYPE&#92;&quot;,&#92;&quot;calwatrs_table&#92;&quot;:&#92;&quot;Participants&#92;&quot;,&#92;&quot;calwatrs_field&#92;&quot;:&#92;&quot;CLAIM_PRIMARY_TYPE&#92;&quot;,&#92;&quot;where&#92;&quot;:&#92;&quot;right&#92;&quot;,&#92;&quot;kind&#92;&quot;:&#92;&quot;vocab&#92;&quot;,&#92;&quot;ewrims_filled&#92;&quot;:21217,&#92;&quot;calwatrs_filled&#92;&quot;:1.0,&#92;&quot;same_value&#92;&quot;:NaN,&#92;&quot;verdict&#92;&quot;:&#92;&quot;carries over&#92;&quot;},{&#92;&quot;ewrims_field&#92;&quot;:&#92;&quot;PRIORITY_DATE&#92;&quot;,&#92;&quot;calwatrs_table&#92;&quot;:&#92;&quot;Participants&#92;&quot;,&#92;&quot;calwatrs_field&#92;&quot;:&#92;&quot;WR_APP_CLAIM_PRIORITY_DATE&#92;&quot;,&#92;&quot;where&#92;&quot;:&#92;&quot;right&#92;&quot;,&#92;&quot;kind&#92;&quot;:&#92;&quot;date&#92;&quot;,&#92;&quot;ewrims_filled&#92;&quot;:3356,&#92;&quot;calwatrs_filled&#92;&quot;:1.0,&#92;&quot;same_value&#92;&quot;:1.0,&#92;&quot;verdict&#92;&quot;:&#92;&quot;carries over&#92;&quot;},{&#92;&quot;ewrims_field&#92;&quot;:&#92;&quot;RECEIPT_DATE&#92;&quot;,&#92;&quot;calwatrs_table&#92;&quot;:&#92;&quot;Participants&#92;&quot;,&#92;&quot;calwatrs_field&#92;&quot;:&#92;&quot;APP_APPLIEDDATE&#92;&quot;,&#92;&quot;where&#92;&quot;:&#92;&quot;right&#92;&quot;,&#92;&quot;kind&#92;&quot;:&#92;&quot;date&#92;&quot;,&#92;&quot;ewrims_filled&#92;&quot;:24236,&#92;&quot;calwatrs_filled&#92;&quot;:0.326,&#92;&quot;same_value&#92;&quot;:1.0,&#92;&quot;verdict&#92;&quot;:&#92;&quot;partly&#92;&quot;},{&#92;&quot;ewrims_field&#92;&quot;:&#92;&quot;APPLICATION_RECD_DATE&#92;&quot;,&#92;&quot;calwatrs_table&#92;&quot;:&#92;&quot;Participants&#92;&quot;,&#92;&quot;calwatrs_field&#92;&quot;:&#92;&quot;APP_APPLIEDDATE&#92;&quot;,&#92;&quot;where&#92;&quot;:&#92;&quot;right&#92;&quot;,&#92;&quot;kind&#92;&quot;:&#92;&quot;date&#92;&quot;,&#92;&quot;ewrims_filled&#92;&quot;:24236,&#92;&quot;calwatrs_filled&#92;&quot;:0.326,&#92;&quot;same_value&#92;&quot;:1.0,&#92;&quot;verdict&#92;&quot;:&#92;&quot;partly&#92;&quot;},{&#92;&quot;ewrims_field&#92;&quot;:&#92;&quot;APPLICATION_ACCEPTANCE_DATE&#92;&quot;,&#92;&quot;calwatrs_table&#92;&quot;:&#92;&quot;Participants&#92;&quot;,&#92;&quot;calwatrs_field&#92;&quot;:&#92;&quot;APP_ACEPTANCEDATE&#92;&quot;,&#92;&quot;where&#92;&quot;:&#92;&quot;right&#92;&quot;,&#92;&quot;kind&#92;&quot;:&#92;&quot;date&#92;&quot;,&#92;&quot;ewrims_filled&#92;&quot;:52696,&#92;&quot;calwatrs_filled&#92;&quot;:0.424,&#92;&quot;same_value&#92;&quot;:1.0,&#92;&quot;verdict&#92;&quot;:&#92;&quot;partly&#92;&quot;},{&#92;&quot;ewrims_field&#92;&quot;:&#92;&quot;REJECTION_DATE&#92;&quot;,&#92;&quot;calwatrs_table&#92;&quot;:&#92;&quot;Participants&#92;&quot;,&#92;&quot;calwatrs_field&#92;&quot;:&#92;&quot;WR_APP_CLAIM_REVOKE_REJECT_INACTIVATION_DATE&#92;&quot;,&#92;&quot;where&#92;&quot;:&#92;&quot;right&#92;&quot;,&#92;&quot;kind&#92;&quot;:&#92;&quot;date&#92;&quot;,&#92;&quot;ewrims_filled&#92;&quot;:586,&#92;&quot;calwatrs_filled&#92;&quot;:0.998,&#92;&quot;same_value&#92;&quot;:1.0,&#92;&quot;verdict&#92;&quot;:&#92;&quot;carries over&#92;&quot;},{&#92;&quot;ewrims_field&#92;&quot;:&#92;&quot;FACE_VALUE_AMOUNT&#92;&quot;,&#92;&quot;calwatrs_table&#92;&quot;:&#92;&quot;Participants&#92;&quot;,&#92;&quot;calwatrs_field&#92;&quot;:&#92;&quot;WR_APP_FACEVALUE&#92;&quot;,&#92;&quot;where&#92;&quot;:&#92;&quot;right&#92;&quot;,&#92;&quot;kind&#92;&quot;:&#92;&quot;number&#92;&quot;,&#92;&quot;ewrims_filled&#92;&quot;:21266,&#92;&quot;calwatrs_filled&#92;&quot;:0.921,&#92;&quot;same_value&#92;&quot;:0.999,&#92;&quot;verdict&#92;&quot;:&#92;&quot;carries over&#92;&quot;},{&#92;&quot;ewrims_field&#92;&quot;:&#92;&quot;FACE_VALUE_UNITS&#92;&quot;,&#92;&quot;calwatrs_table&#92;&quot;:&#92;&quot;Participants&#92;&quot;,&#92;&quot;calwatrs_field&#92;&quot;:&#92;&quot;WR_APP_FACEVALUEUNIT&#92;&quot;,&#92;&quot;where&#92;&quot;:&#92;&quot;right&#92;&quot;,&#92;&quot;kind&#92;&quot;:&#92;&quot;renamed&#92;&quot;,&#92;&quot;ewrims_filled&#92;&quot;:55825,&#92;&quot;calwatrs_filled&#92;&quot;:0.444,&#92;&quot;same_value&#92;&quot;:NaN,&#92;&quot;verdict&#92;&quot;:&#92;&quot;partly&#92;&quot;}]&quot;' data-total-rows='60' data-total-columns='9' data-max-columns='50' data-banner-text='&quot;&quot;' data-pagination='true' data-page-size='10' data-field-types='[[&quot;ewrims_field&quot;,[&quot;string&quot;,&quot;str&quot;]],[&quot;calwatrs_table&quot;,[&quot;string&quot;,&quot;str&quot;]],[&quot;calwatrs_field&quot;,[&quot;string&quot;,&quot;str&quot;]],[&quot;where&quot;,[&quot;string&quot;,&quot;str&quot;]],[&quot;kind&quot;,[&quot;string&quot;,&quot;str&quot;]],[&quot;ewrims_filled&quot;,[&quot;integer&quot;,&quot;int64&quot;]],[&quot;calwatrs_filled&quot;,[&quot;number&quot;,&quot;float64&quot;]],[&quot;same_value&quot;,[&quot;number&quot;,&quot;float64&quot;]],[&quot;verdict&quot;,[&quot;string&quot;,&quot;str&quot;]]]' data-show-filters='true' data-show-download='true' data-show-search='true' data-show-column-summaries='true' data-show-data-types='true' data-show-page-size-selector='true' data-show-column-explorer='true' data-show-chart-builder='true' data-row-headers='[]' data-hidden-columns='[]' data-has-stable-row-id='false' data-lazy='false' data-preload='false'></marimo-table></marimo-ui-element>"
+          }
+        }
+      ],
+      "console": [
+        {
+          "type": "stream",
+          "name": "stderr",
+          "text": "/tmp/marimo_1575/__marimo__cell_qnkX_.py:25: RuntimeWarning: Mean of empty slice\n  float(pd.MultiIndex.from_arrays([_key[_has_both], _ew]).isin(_pairs).mean()), 3\n/home/user/agent-content-demos/calwatrs-water-rights-crosswalk/.venv/lib/python3.13/site-packages/numpy/_core/_methods.py:142: RuntimeWarning: invalid value encountered in scalar divide\n  ret = ret.dtype.type(ret / rcount)\n",
+          "mimetype": "text/plain"
+        }
+      ]
+    },
+    {
+      "id": "TqIu",
+      "code_hash": "df5556c5a2f684e17c10581100bcedcd",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "application/json": "{\"eWRIMS columns\": 160, \"with a CalWATRS equivalent\": 61, \"no equivalent\": 99, \"no equivalent and filled for 5%+ of rights\": 71}"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "Vxnm",
+      "code_hash": "a4546ca6c560720b2e2589ac8c26df5b",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/html": "<marimo-ui-element object-id='Vxnm-0' random-id='0e444d9c-f9aa-2ec4-80e9-9413734abe89'><marimo-table data-initial-value='[]' data-label='null' data-data='&quot;[{&#92;&quot;GROUP&#92;&quot;:&#92;&quot;Uses and Seasons&#92;&quot;,&#92;&quot;carries over&#92;&quot;:0,&#92;&quot;no equivalent&#92;&quot;:24,&#92;&quot;not testable&#92;&quot;:0,&#92;&quot;partly&#92;&quot;:3},{&#92;&quot;GROUP&#92;&quot;:&#92;&quot;INFORMATION ABOUT THE APPLICATION&#92;&quot;,&#92;&quot;carries over&#92;&quot;:5,&#92;&quot;no equivalent&#92;&quot;:24,&#92;&quot;not testable&#92;&quot;:0,&#92;&quot;partly&#92;&quot;:11},{&#92;&quot;GROUP&#92;&quot;:&#92;&quot;POD GIS Maintained Data&#92;&quot;,&#92;&quot;carries over&#92;&quot;:16,&#92;&quot;no equivalent&#92;&quot;:14,&#92;&quot;not testable&#92;&quot;:0,&#92;&quot;partly&#92;&quot;:3},{&#92;&quot;GROUP&#92;&quot;:&#92;&quot;PERMIT / LICENSE&#92;&quot;,&#92;&quot;carries over&#92;&quot;:1,&#92;&quot;no equivalent&#92;&quot;:10,&#92;&quot;not testable&#92;&quot;:0,&#92;&quot;partly&#92;&quot;:1},{&#92;&quot;GROUP&#92;&quot;:&#92;&quot;PODs&#92;&quot;,&#92;&quot;carries over&#92;&quot;:7,&#92;&quot;no equivalent&#92;&quot;:9,&#92;&quot;not testable&#92;&quot;:0,&#92;&quot;partly&#92;&quot;:0},{&#92;&quot;GROUP&#92;&quot;:&#92;&quot;ENFORCEMENTS&#92;&quot;,&#92;&quot;carries over&#92;&quot;:0,&#92;&quot;no equivalent&#92;&quot;:5,&#92;&quot;not testable&#92;&quot;:0,&#92;&quot;partly&#92;&quot;:0},{&#92;&quot;GROUP&#92;&quot;:&#92;&quot;Application Info - Groundwater tab&#92;&quot;,&#92;&quot;carries over&#92;&quot;:0,&#92;&quot;no equivalent&#92;&quot;:4,&#92;&quot;not testable&#92;&quot;:0,&#92;&quot;partly&#92;&quot;:0},{&#92;&quot;GROUP&#92;&quot;:&#92;&quot;GENERAL INFORMATION&#92;&quot;,&#92;&quot;carries over&#92;&quot;:2,&#92;&quot;no equivalent&#92;&quot;:3,&#92;&quot;not testable&#92;&quot;:0,&#92;&quot;partly&#92;&quot;:0},{&#92;&quot;GROUP&#92;&quot;:&#92;&quot;PETITIONS&#92;&quot;,&#92;&quot;carries over&#92;&quot;:0,&#92;&quot;no equivalent&#92;&quot;:3,&#92;&quot;not testable&#92;&quot;:0,&#92;&quot;partly&#92;&quot;:4},{&#92;&quot;GROUP&#92;&quot;:&#92;&quot;STATUS&#92;&quot;,&#92;&quot;carries over&#92;&quot;:0,&#92;&quot;no equivalent&#92;&quot;:2,&#92;&quot;not testable&#92;&quot;:0,&#92;&quot;partly&#92;&quot;:0}]&quot;' data-total-rows='12' data-total-columns='4' data-max-columns='50' data-banner-text='&quot;&quot;' data-pagination='true' data-page-size='10' data-field-types='[[&quot;carries over&quot;,[&quot;integer&quot;,&quot;int64&quot;]],[&quot;no equivalent&quot;,[&quot;integer&quot;,&quot;int64&quot;]],[&quot;not testable&quot;,[&quot;integer&quot;,&quot;int64&quot;]],[&quot;partly&quot;,[&quot;integer&quot;,&quot;int64&quot;]]]' data-show-filters='true' data-show-download='true' data-show-search='true' data-show-column-summaries='true' data-show-data-types='true' data-show-page-size-selector='true' data-show-column-explorer='true' data-show-chart-builder='true' data-row-headers='[[&quot;GROUP&quot;,[&quot;string&quot;,&quot;str&quot;]]]' data-hidden-columns='[]' data-has-stable-row-id='false' data-lazy='false' data-preload='false'></marimo-table></marimo-ui-element>"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "DnEU",
+      "code_hash": "bb7e831fed175474735b83133662f012",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/html": "<marimo-ui-element object-id='DnEU-0' random-id='6ecb97fd-749e-10c4-893f-fc736c6a0581'><marimo-table data-initial-value='[]' data-label='null' data-data='&quot;[{&#92;&quot;ewrims_field&#92;&quot;:&#92;&quot;WR_WATER_RIGHT_ID&#92;&quot;,&#92;&quot;share_filled_in_ewrims&#92;&quot;:1.0},{&#92;&quot;ewrims_field&#92;&quot;:&#92;&quot;NUMBER_OF_PROTESTS&#92;&quot;,&#92;&quot;share_filled_in_ewrims&#92;&quot;:1.0},{&#92;&quot;ewrims_field&#92;&quot;:&#92;&quot;NUMBER_OF_ENFORCEMENT_CASE&#92;&quot;,&#92;&quot;share_filled_in_ewrims&#92;&quot;:1.0},{&#92;&quot;ewrims_field&#92;&quot;:&#92;&quot;UPDATE_DATETIME&#92;&quot;,&#92;&quot;share_filled_in_ewrims&#92;&quot;:0.996},{&#92;&quot;ewrims_field&#92;&quot;:&#92;&quot;EFFECTIVE_DATE&#92;&quot;,&#92;&quot;share_filled_in_ewrims&#92;&quot;:0.996},{&#92;&quot;ewrims_field&#92;&quot;:&#92;&quot;MAX_TAKEN_FROM_SOURCE&#92;&quot;,&#92;&quot;share_filled_in_ewrims&#92;&quot;:0.818},{&#92;&quot;ewrims_field&#92;&quot;:&#92;&quot;MAX_BENEFICIALLY_USED&#92;&quot;,&#92;&quot;share_filled_in_ewrims&#92;&quot;:0.806},{&#92;&quot;ewrims_field&#92;&quot;:&#92;&quot;POD_LAST_UPDATE_DATE&#92;&quot;,&#92;&quot;share_filled_in_ewrims&#92;&quot;:0.795},{&#92;&quot;ewrims_field&#92;&quot;:&#92;&quot;POD_NUMBER_GIS&#92;&quot;,&#92;&quot;share_filled_in_ewrims&#92;&quot;:0.795},{&#92;&quot;ewrims_field&#92;&quot;:&#92;&quot;POD_NUMBER&#92;&quot;,&#92;&quot;share_filled_in_ewrims&#92;&quot;:0.794}]&quot;' data-total-rows='71' data-total-columns='2' data-max-columns='50' data-banner-text='&quot;&quot;' data-pagination='true' data-page-size='10' data-field-types='[[&quot;ewrims_field&quot;,[&quot;string&quot;,&quot;str&quot;]],[&quot;share_filled_in_ewrims&quot;,[&quot;number&quot;,&quot;float64&quot;]]]' data-show-filters='true' data-show-download='true' data-show-search='true' data-show-column-summaries='true' data-show-data-types='true' data-show-page-size-selector='true' data-show-column-explorer='true' data-show-chart-builder='true' data-row-headers='[]' data-hidden-columns='[]' data-has-stable-row-id='false' data-lazy='false' data-preload='false'></marimo-table></marimo-ui-element>"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "ulZA",
+      "code_hash": "eda7bcfd994905465d78009f13d2c7c1",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "application/json": "{\"points compared\": 52300, \"within 10 m\": \"text/plain+float:0.999\", \"within 100 m\": \"text/plain+float:0.999\", \"median metres\": \"text/plain+float:0.0\"}"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "ecfG",
+      "code_hash": "20330847c5ed206754dde7c796d30a91",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/markdown": "<span class=\"markdown prose dark:prose-invert contents\"><span class=\"paragraph\"><strong>60 of 160 eWRIMS columns</strong> have\na CalWATRS equivalent (plus the right ID). <strong>99 have none</strong>, and\n71 of those were filled for at least 5% of rights. By the data\ndictionary's own sections, most losses are per-use detail (population, stock, use\nacreage, seasons), application amounts and fees (<code>MAX_DD_APPL</code>, <code>MAX_STORAGE</code>\u2026), GIS\nbookkeeping for the point (quad map, CalWater watershed, location method), licensing\nsteps, and every enforcement field. Permit, license and certificate numbers, the parcel\nnumber, the project summary and the status history date are gone too.</span>\n<span class=\"paragraph\">Point locations carry over: <strong>99.9%</strong> of eWRIMS points are\nwithin 10 m of the same point in CalWATRS. Of the scored fields, priority date agrees\nfor 100% of rights where both have it, face\nvalue for 100%, and the eWRIMS party\nID for 100%.</span></span>"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "Pvdt",
+      "code_hash": "22b163245664c1fb2247598d571af080",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/markdown": "<span class=\"markdown prose dark:prose-invert contents\"><h2 id=\"5-status-and-type-same-facts-new-words\">5. Status and type: same facts, new words</h2>\n<span class=\"paragraph\">CalWATRS renamed the status and type vocabulary. eWRIMS said a statement of diversion\nwas type \"Statement of Div and Use\", status \"Claimed\"; CalWATRS says type \"Riparian\",\nstatus \"Active\". The WaDE rebuild spike (<code>wade-water-rights-rebuild/</code>) met the same\nproblem and learned a lookup: for each CalWATRS combination, take the term most of its\nmatched rights carried in WaDE's last California table. WaDE's terms are eWRIMS terms\n(WaDE appends the statement sub-type to the type), so that lookup is a CalWATRS \u2192\neWRIMS translation.</span>\n<span class=\"paragraph\">Here we reuse it two ways:</span>\n<ol>\n<li><strong>WaDE's lookup as it was</strong>, rebuilt with the WaDE spike's own helpers (imported\n   from that folder, not edited) and the same keys: status on CalWATRS status + type,\n   type on CalWATRS type + subtype. We score it against the eWRIMS file. On rights that\n   were in WaDE that's in-sample; on the rest of eWRIMS (WaDE filtered out ended rights)\n   it's a genuine out-of-sample test.</li>\n<li><strong>The same method learned on the whole eWRIMS file</strong>, published as\n   <code>outputs/status_type_lookup.csv</code>. It's in-sample, so its score is a ceiling.</li>\n</ol></span>"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "ZBYS",
+      "code_hash": "7d4f6ab58359147b0a077c43f8c60641",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/html": "<pre class='text-xs'>41276</pre>"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "aLJB",
+      "code_hash": "2fc26a526d6f2af4c1a521fa4d06b6f9",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "application/json": "{\"matched rights\": 55825, \"of which in WaDE\": 41164}"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "nHfw",
+      "code_hash": "3d5670496c8c75cfe3e860df10ad4d4c",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/html": "<marimo-ui-element object-id='nHfw-0' random-id='b5160304-1b67-f247-bfea-4bc859fea2d9'><marimo-table data-initial-value='[]' data-label='null' data-data='&quot;[{&#92;&quot;field&#92;&quot;:&#92;&quot;status&#92;&quot;,&#92;&quot;same word, no lookup&#92;&quot;:0.466,&#92;&quot;WaDE lookup, rights in WaDE (in-sample)&#92;&quot;:0.929,&#92;&quot;WaDE lookup, rights not in WaDE (out-of-sample)&#92;&quot;:0.105,&#92;&quot;WaDE lookup, not in WaDE, key WaDE never saw&#92;&quot;:0.378,&#92;&quot;WaDE lookup else CalWATRS word, not in WaDE&#92;&quot;:0.38},{&#92;&quot;field&#92;&quot;:&#92;&quot;type&#92;&quot;,&#92;&quot;same word, no lookup&#92;&quot;:0.295,&#92;&quot;WaDE lookup, rights in WaDE (in-sample)&#92;&quot;:0.962,&#92;&quot;WaDE lookup, rights not in WaDE (out-of-sample)&#92;&quot;:0.96,&#92;&quot;WaDE lookup, not in WaDE, key WaDE never saw&#92;&quot;:0.025,&#92;&quot;WaDE lookup else CalWATRS word, not in WaDE&#92;&quot;:0.948}]&quot;' data-total-rows='2' data-total-columns='6' data-max-columns='50' data-banner-text='&quot;&quot;' data-pagination='false' data-page-size='10' data-field-types='[[&quot;field&quot;,[&quot;string&quot;,&quot;str&quot;]],[&quot;same word, no lookup&quot;,[&quot;number&quot;,&quot;float64&quot;]],[&quot;WaDE lookup, rights in WaDE (in-sample)&quot;,[&quot;number&quot;,&quot;float64&quot;]],[&quot;WaDE lookup, rights not in WaDE (out-of-sample)&quot;,[&quot;number&quot;,&quot;float64&quot;]],[&quot;WaDE lookup, not in WaDE, key WaDE never saw&quot;,[&quot;number&quot;,&quot;float64&quot;]],[&quot;WaDE lookup else CalWATRS word, not in WaDE&quot;,[&quot;number&quot;,&quot;float64&quot;]]]' data-show-filters='true' data-show-download='true' data-show-search='true' data-show-column-summaries='false' data-show-data-types='true' data-show-page-size-selector='false' data-show-column-explorer='true' data-show-chart-builder='true' data-row-headers='[]' data-hidden-columns='[]' data-has-stable-row-id='false' data-lazy='false' data-preload='false'></marimo-table></marimo-ui-element>"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "xXTn",
+      "code_hash": "1f42189bddb89eb3d7f2795a302ee8be",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/html": "<marimo-ui-element object-id='xXTn-0' random-id='73043e9f-bfb8-1888-5290-da10ee479c31'><marimo-table data-initial-value='[]' data-label='null' data-data='&quot;[{&#92;&quot;field&#92;&quot;:&#92;&quot;status&#92;&quot;,&#92;&quot;lookup rows&#92;&quot;:64,&#92;&quot;agree (in-sample)&#92;&quot;:0.926},{&#92;&quot;field&#92;&quot;:&#92;&quot;type&#92;&quot;,&#92;&quot;lookup rows&#92;&quot;:44,&#92;&quot;agree (in-sample)&#92;&quot;:0.968}]&quot;' data-total-rows='2' data-total-columns='3' data-max-columns='50' data-banner-text='&quot;&quot;' data-pagination='false' data-page-size='10' data-field-types='[[&quot;field&quot;,[&quot;string&quot;,&quot;str&quot;]],[&quot;lookup rows&quot;,[&quot;integer&quot;,&quot;int64&quot;]],[&quot;agree (in-sample)&quot;,[&quot;number&quot;,&quot;float64&quot;]]]' data-show-filters='true' data-show-download='true' data-show-search='true' data-show-column-summaries='false' data-show-data-types='true' data-show-page-size-selector='false' data-show-column-explorer='true' data-show-chart-builder='true' data-row-headers='[]' data-hidden-columns='[]' data-has-stable-row-id='false' data-lazy='false' data-preload='false'></marimo-table></marimo-ui-element>"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "AjVT",
+      "code_hash": "7d6312a77319e186613da549f998634b",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/markdown": "<span class=\"markdown prose dark:prose-invert contents\"><span class=\"paragraph\">Without a lookup, the same word appears in both systems for\n47% of statuses and\n30% of types. WaDE's lookup restores\n93% of statuses and\n96% of types on the rights\nit learned from. On eWRIMS rights WaDE never carried, the type lookup still holds\n(96%) but the status\nlookup gets only\n10% right. Those\nrights are mostly inactive, revoked, cancelled or rejected, which WSWC's filter kept out\nof WaDE, so the lookup has no entry for\n38% of them. For those\nstatuses CalWATRS kept the eWRIMS word, so falling back to the CalWATRS word when the\nlookup has no entry lifts it to\n38%.\nLearned on the whole eWRIMS file, the same method reaches\n93% for status and\n97% for type: an in-sample ceiling, not a\nforecast. The rest can't be told apart from CalWATRS's columns.</span></span>"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "pHFh",
+      "code_hash": "de0a5d369eebf96b8d13ad23b8d029cf",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/markdown": "<span class=\"markdown prose dark:prose-invert contents\"><h2 id=\"6-how-stale-is-last-updated\">6. How stale is \"last updated\"?</h2>\n<span class=\"paragraph\">data.ca.gov shows a dataset's <em>metadata</em> modified date as \"Last Updated\". Compare it\nwith the date of the file itself and with the newest dates inside the data.</span></span>"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "NCOB",
+      "code_hash": "779bb4b10a02816ee626f8089eee8956",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/html": "<marimo-ui-element object-id='NCOB-0' random-id='9128b0c6-c6b1-58bc-54f6-fe8354b472a4'><marimo-table data-initial-value='[]' data-label='null' data-data='&quot;[{&#92;&quot;dataset&#92;&quot;:&#92;&quot;eWRIMS Water Rights LIST&#92;&quot;,&#92;&quot;portal &#x27;last updated&#x27; (metadata)&#92;&quot;:&#92;&quot;2026-11-12&#92;&quot;,&#92;&quot;file uploaded&#92;&quot;:&#92;&quot;2026-10-01&#92;&quot;,&#92;&quot;date in file name&#92;&quot;:&#92;&quot;2025-08-05&#92;&quot;,&#92;&quot;newest record update in data&#92;&quot;:&#92;&quot;2025-06-06&#92;&quot;,&#92;&quot;newest status date in data&#92;&quot;:&#92;&quot;2025-06-04&#92;&quot;},{&#92;&quot;dataset&#92;&quot;:&#92;&quot;CalWATRS Participants&#92;&quot;,&#92;&quot;portal &#x27;last updated&#x27; (metadata)&#92;&quot;:&#92;&quot;2026-11-23&#92;&quot;,&#92;&quot;file uploaded&#92;&quot;:&#92;&quot;2026-11-23&#92;&quot;,&#92;&quot;date in file name&#92;&quot;:&#92;&quot;&#92;&quot;,&#92;&quot;newest record update in data&#92;&quot;:&#92;&quot;2026-11-20&#92;&quot;,&#92;&quot;newest status date in data&#92;&quot;:&#92;&quot;2026-11-20&#92;&quot;},{&#92;&quot;dataset&#92;&quot;:&#92;&quot;CalWATRS Geospatial&#92;&quot;,&#92;&quot;portal &#x27;last updated&#x27; (metadata)&#92;&quot;:&#92;&quot;2026-11-23&#92;&quot;,&#92;&quot;file uploaded&#92;&quot;:&#92;&quot;2026-11-23&#92;&quot;,&#92;&quot;date in file name&#92;&quot;:&#92;&quot;&#92;&quot;,&#92;&quot;newest record update in data&#92;&quot;:&#92;&quot;2026-11-19&#92;&quot;,&#92;&quot;newest status date in data&#92;&quot;:&#92;&quot;2026-11-19&#92;&quot;}]&quot;' data-total-rows='3' data-total-columns='5' data-max-columns='50' data-banner-text='&quot;&quot;' data-pagination='false' data-page-size='10' data-field-types='[[&quot;portal &#x27;last updated&#x27; (metadata)&quot;,[&quot;string&quot;,&quot;str&quot;]],[&quot;file uploaded&quot;,[&quot;string&quot;,&quot;str&quot;]],[&quot;date in file name&quot;,[&quot;string&quot;,&quot;str&quot;]],[&quot;newest record update in data&quot;,[&quot;string&quot;,&quot;str&quot;]],[&quot;newest status date in data&quot;,[&quot;string&quot;,&quot;str&quot;]]]' data-show-filters='true' data-show-download='true' data-show-search='true' data-show-column-summaries='false' data-show-data-types='true' data-show-page-size-selector='false' data-show-column-explorer='true' data-show-chart-builder='true' data-row-headers='[[&quot;dataset&quot;,[&quot;string&quot;,&quot;str&quot;]]]' data-hidden-columns='[]' data-has-stable-row-id='false' data-lazy='false' data-preload='false'></marimo-table></marimo-ui-element>"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "aqbW",
+      "code_hash": "20bde8d36fe560f28c963d2f7d42af7f",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/markdown": "<span class=\"markdown prose dark:prose-invert contents\"><span class=\"paragraph\">The eWRIMS list's portal date, <strong>2026-11-12</strong>, is the last edit to the dataset's\nmetadata; its description now says it is discontinued and \"hasn't been updated since\nJuly 2025\". The CSV was re-uploaded 2026-10-01, its file name says\n2025-08-05, and the newest change inside it is <strong>2025-06-06</strong>. So \"last updated\"\noverstates its freshness by <strong>524 days</strong>. The CalWATRS tables are what\nthey say: uploaded this week, with records added within days of the download.</span></span>"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "TRpd",
+      "code_hash": "aa3d6f77eb5835a7520e95751820a69e",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/markdown": "<span class=\"markdown prose dark:prose-invert contents\"><h2 id=\"result\">Result</h2>\n<ul>\n<li><strong>Holder:</strong> kept, but moved. Participants names an active primary owner for\n  96.6% of the\n  rights eWRIMS named one for, and carries the same eWRIMS party for\n  97.8%.</li>\n<li><strong>Fields:</strong> 61 of 160 eWRIMS\n  columns have a CalWATRS equivalent; 99 don't.</li>\n<li><strong>Vocabulary:</strong> status and type need a lookup; the WaDE one doesn't transfer to\n  rights it never saw.</li>\n<li><strong>Freshness:</strong> the old file's \"last updated\" is 524 days newer than its\n  data.</li>\n</ul>\n<span class=\"paragraph\">Run time 65.2 s for this notebook, plus\n19.0 s for the archive. Cost $0. Outputs are in\n<code>outputs/</code>; every CSV carries the license note.</span></span>"
+          }
+        }
+      ],
+      "console": [
+        {
+          "type": "stream",
+          "name": "stdout",
+          "text": "{\n  \"ewrims_fetched_at\": \"2026-11-23T18:13:28+00:00\",\n  \"ewrims_rights\": 69910,\n  \"match\": {\n    \"in Participants\": 0.7985,\n    \"in Geospatial\": 0.7919,\n    \"in either\": 0.8,\n    \"in both\": 0.7905,\n    \"eWRIMS point of diversion found in Geospatial\": 0.9951\n  },\n  \"holder\": {\n    \"all rights\": {\n      \"eWRIMS holder\": 0.803,\n      \"in Participants\": 0.799,\n      \"CalWATRS holder\": 0.776,\n      \"same party\": 0.785,\n      \"same name\": 0.499,\n      \"owner changed since freeze\": 0.022\n    },\n    \"without Not Determined\": {\n      \"eWRIMS holder\": 0.97,\n      \"in Participants\": 0.984,\n      \"CalWATRS holder\": 0.956,\n      \"same party\": 0.968,\n      \"same name\": 0.615,\n      \"owner changed since freeze\": 0.027\n    },\n    \"where eWRIMS named a holder\": {\n      \"eWRIMS holder\": 1.0,\n      \"in Participants\": 0.978,\n      \"CalWATRS holder\": 0.966,\n      \"same party\": 0.978,\n      \"same name\": 0.621,\n      \"owner changed since freeze\": 0.027\n    }\n  },\n  \"named_holder_without_active_calwatrs_owner_by_status\": {\n    \"Closed\": 658,\n    \"Inactive\": 612,\n    \"Active\": 319,\n    \"(blank)\": 133,\n    \"Completed\": 87,\n    \"Claimed - Local Oversight\": 68,\n    \"Pending\": 14,\n    \"Withdrawn\": 6,\n    \"Rejected\": 6,\n    \"Cancelled\": 4,\n    \"Licensed\": 3,\n    \"Certified\": 3,\n    \"Claimed\": 2,\n    \"Revoked\": 1,\n    \"Registered\": 1\n  },\n  \"ewrims_columns\": 160,\n  \"fields_with_equivalent\": 61,\n  \"fields_without_equivalent\": 99,\n  \"field_verdicts\": {\n    \"carries over\": 36,\n    \"partly\": 23,\n    \"not testable\": 1\n  },\n  \"location\": {\n    \"points compared\": 52300,\n    \"within 10 m\": 0.999,\n    \"within 100 m\": 0.999,\n    \"median metres\": 0.0\n  },\n  \"wade_lookup\": [\n    {\n      \"field\": \"status\",\n      \"same word, no lookup\": 0.466,\n      \"WaDE lookup, rights in WaDE (in-sample)\": 0.929,\n      \"WaDE lookup, rights not in WaDE (out-of-sample)\": 0.105,\n      \"WaDE lookup, not in WaDE, key WaDE never saw\": 0.378,\n      \"WaDE lookup else CalWATRS word, not in WaDE\": 0.38\n    },\n    {\n      \"field\": \"type\",\n      \"same word, no lookup\": 0.295,\n      \"WaDE lookup, rights in WaDE (in-sample)\": 0.962,\n      \"WaDE lookup, rights not in WaDE (out-of-sample)\": 0.96,\n      \"WaDE lookup, not in WaDE, key WaDE never saw\": 0.025,\n      \"WaDE lookup else CalWATRS word, not in WaDE\": 0.948\n    }\n  ],\n  \"ewrims_lookup_in_sample\": [\n    {\n      \"field\": \"status\",\n      \"lookup rows\": 64,\n      \"agree (in-sample)\": 0.926\n    },\n    {\n      \"field\": \"type\",\n      \"lookup rows\": 44,\n      \"agree (in-sample)\": 0.968\n    }\n  ],\n  \"staleness\": [\n    {\n      \"dataset\": \"eWRIMS Water Rights LIST\",\n      \"portal 'last updated' (metadata)\": \"2026-11-12\",\n      \"file uploaded\": \"2026-10-01\",\n      \"date in file name\": \"2025-08-05\",\n      \"newest record update in data\": \"2025-06-06\",\n      \"newest status date in data\": \"2025-06-04\"\n    },\n    {\n      \"dataset\": \"CalWATRS Participants\",\n      \"portal 'last updated' (metadata)\": \"2026-11-23\",\n      \"file uploaded\": \"2026-11-23\",\n      \"date in file name\": \"\",\n      \"newest record update in data\": \"2026-11-20\",\n      \"newest status date in data\": \"2026-11-20\"\n    },\n    {\n      \"dataset\": \"CalWATRS Geospatial\",\n      \"portal 'last updated' (metadata)\": \"2026-11-23\",\n      \"file uploaded\": \"2026-11-23\",\n      \"date in file name\": \"\",\n      \"newest record update in data\": \"2026-11-19\",\n      \"newest status date in data\": \"2026-11-19\"\n    }\n  ],\n  \"staleness_days\": 524,\n  \"cost_usd\": 0,\n  \"notebook_seconds\": 65.2,\n  \"archive_seconds\": 19.0\n}\n",
+          "mimetype": "text/plain"
+        }
+      ]
+    }
+  ]
+}
