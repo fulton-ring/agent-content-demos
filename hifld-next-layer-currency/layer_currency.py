@@ -21,7 +21,7 @@ def _():
     1. the source's last-updated date that HIFLD Next recorded for it;
     2. the record dates inside the data (`SOURCEDATE`, `VAL_DATE` and the like), read column by column from the
        GeoParquet files without downloading whole layers;
-    3. for the layers that matter for hazard and climate risk, plus a seeded random sample of 40 others, the date
+    3. for the layers that matter for hazard and climate risk, plus a fixed sample of 40 others, the date
        of the source agency's current publication, read live from a URL we found from the layer's own metadata.
 
     It writes `outputs/layer_currency.csv` (one row per layer) and `outputs/summary.json`.
@@ -36,7 +36,6 @@ def _():
     import html
     import json
     import os
-    import random
     import re
     import statistics
     import time
@@ -52,8 +51,6 @@ def _():
     OUT.mkdir(parents=True, exist_ok=True)
     HIFLD = os.environ.get("HIFLD_BASE_URL", "https://hifld.publicenvirodata.org")
     AS_OF = dt.date.fromisoformat(os.environ.get("AS_OF", dt.date.today().isoformat()))
-    SEED = 171
-    SAMPLE_SIZE = 40
     MAX_PAGES = 100
     STARTED = time.time()
     return (
@@ -62,8 +59,6 @@ def _():
         HIFLD,
         MAX_PAGES,
         OUT,
-        SAMPLE_SIZE,
-        SEED,
         STARTED,
         ThreadPoolExecutor,
         csv,
@@ -72,7 +67,6 @@ def _():
         html,
         json,
         pd,
-        random,
         re,
         requests,
         statistics,
@@ -463,8 +457,8 @@ def _(mo):
     ## Has the source published something newer?
 
     For the layers that matter for hazard and climate risk (hospitals, fire and EMS, shelters, schools, power
-    plants, transmission, dams, the flood map, fire perimeters and the like, 33 in all) and a seeded random sample
-    of 40 of the rest, we looked for the agency's current publication, starting only from the layer's own
+    plants, transmission, dams, the flood map, fire perimeters and the like, 33 in all) and a fixed sample of 40
+    of the rest, we looked for the agency's current publication, starting only from the layer's own
     metadata: its agency, office, title and any URL in its description. Each find is a row in
     `source_checks.csv` with a URL and a regular expression for the date, the same approach as
     `rescued-data-currency/`. Here the notebook re-reads every URL and takes the newest date the pattern matches,
@@ -479,7 +473,7 @@ def _(mo):
 
 
 @app.cell
-def _(SAMPLE_SIZE, SEED, layers, random):
+def _(layers):
     CLIMATE_RISK = [
         "hospitals-3", "trauma-levels", "fire-and-emergency-medical-service-ems-stations",
         "local-emergency-operations-center-eoc", "state-emergency-operations-centers-eoc",
@@ -493,11 +487,33 @@ def _(SAMPLE_SIZE, SEED, layers, random):
         "cellular-towers", "national-bridge-inventory-nbi", "nfhl", "wfigs-interagency-fire-perimeters",
         "us-landslide-regions", "quaternary-fault-lines", "uniform-hazard-ground-motion",
     ]  # fmt: skip
-    _all = sorted(layers["layer"])
-    assert set(CLIMATE_RISK) <= set(_all), set(CLIMATE_RISK) - set(_all)
-    sample = random.Random(SEED).sample([x for x in _all if x not in CLIMATE_RISK], SAMPLE_SIZE)
-    print(f"{len(CLIMATE_RISK)} climate-risk layers + {len(sample)} sampled with seed {SEED}")
-    return CLIMATE_RISK, sample
+    # The 40 other layers we checked, drawn once on 2026-10-31 with random.Random(171).sample() from the 297
+    # non-climate-risk layers then in the catalog, and fixed here so layers added later don't shift the sample.
+    SAMPLE = [
+        "24nm-contiguous-zone", "alternative-fueling-stations", "canada-and-us-border",
+        "combined-statistical-areas-3", "data-quality-assessment-areas-usace-ienc",
+        "dumping-ground-areas-usace-ienc", "elementary-school-districts", "epa-facilities",
+        "epa-frs-eia-860-power-generation-facilities-by-source",
+        "epa-frs-eia-860-power-generation-facilities-sic-codes", "epa-regions-large-scale-15000000",
+        "ferrous-metal-processing-plants", "ferry-routes-1", "floating-docks-usace-ienc",
+        "formerly-used-defense-sites-division-boundaries", "formerly-used-defense-sites-public-properties",
+        "historical-tsunami-event-locations-", "hulke-areas-usace-ienc-1",
+        "intermodal-freight-facilities-pipeline-terminals", "miscellaneous-industrial-mineral-operations",
+        "mooring-facility-locations-usace-ienc-2", "national-transit-map-agencies",
+        "natural-gas-service-territories", "north-america-political-divisions-polygons",
+        "northeast-petroleum-reserves", "oil-and-natural-gas-platforms",
+        "outer-continental-shelf-ocs-oil-and-natural-gas-wells", "pad-us-protection-mechanism-category",
+        "pontoon-areas-usace-ienc", "pylon-areas-usace-ienc", "railways-usace-ienc",
+        "school-district-administrative-areas", "shoreline-construction-lines-usace-ienc-1",
+        "shoreline-construction-locations-usace-ienc", "state-capitols-2", "truck-driving-schools",
+        "us-international-boundaries", "us-state-boundaries-1", "uscg-districts", "wrecks-usace-ienc",
+    ]  # fmt: skip
+    _all = set(layers["layer"])
+    assert set(CLIMATE_RISK) <= _all, set(CLIMATE_RISK) - _all
+    assert set(SAMPLE) <= _all, set(SAMPLE) - _all
+    assert len(set(SAMPLE)) == 40 and not set(SAMPLE) & set(CLIMATE_RISK)
+    print(f"{len(CLIMATE_RISK)} climate-risk layers + {len(SAMPLE)} sampled; {len(_all)} layers in the catalog today")
+    return CLIMATE_RISK, SAMPLE
 
 
 @app.cell(hide_code=True)
@@ -560,8 +576,8 @@ def _(HERE, ThreadPoolExecutor, dt, get, html, pd, re):
 
 
 @app.cell
-def _(CLIMATE_RISK, layers, pd, sample, source_checks, source_live):
-    checked = layers[layers["layer"].isin(CLIMATE_RISK + sample)].merge(
+def _(CLIMATE_RISK, layers, pd, SAMPLE, source_checks, source_live):
+    checked = layers[layers["layer"].isin(CLIMATE_RISK + SAMPLE)].merge(
         source_checks[["layer", "current_source", "check_url", "source_date", "status", "date_meaning", "notes"]],
         on="layer",
         how="left",
