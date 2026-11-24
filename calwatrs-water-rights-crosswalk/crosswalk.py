@@ -423,7 +423,7 @@ def _(crosswalk_spec, ewrims, norm, pd, sources):
         _has = _ew_raw.notna() & _key.isin(_table[_key_col])
         _has_both = _has & _key.isin(_cw[_key_col])
         _same = None
-        if _r.kind in ("text", "date", "number", "year", "id", "member"):
+        if _r.kind in ("text", "date", "number", "year", "id", "member") and _has_both.any():
             if _r.kind == "member":
                 _cw = _cw.assign(value=_cw["value"].str.split(",")).explode("value")
                 _cw = _cw.assign(value=_cw["value"].str.strip())
