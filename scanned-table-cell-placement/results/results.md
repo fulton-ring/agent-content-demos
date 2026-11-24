@@ -9,14 +9,14 @@
 | 5777799     | Table II Summary of results                  |     10 |                5 |              51 |                   0 |
 | 5533698     | Table C.2 Properties of absorbents           |     19 |                0 |              32 |                   0 |
 | 1083928     | Table A.4 Pellet data for rod 4              |     15 |                2 |             150 |                   0 |
-| 510218V000  | FIS Summary of Discharges                    |      1 |                0 |               0 |                   0 |
-| 060724V000  | FIS Summary of Discharges                    |      6 |                0 |               0 |                   0 |
-| 45061CV000A | FIS Summary of Discharges                    |      6 |                0 |               0 |                   0 |
-| 35053CV000A | FIS Summary of Discharges                    |      9 |                0 |               0 |                   0 |
-| 39151CV001C | FIS Summary of Discharges                    |     16 |                0 |               0 |                   0 |
-| 35049CV000A | FIS Summary of Discharges                    |     17 |                0 |               0 |                   0 |
-| 51005CV000A | FIS Summary of Discharges                    |     11 |                0 |               0 |                   0 |
-| 080290V000  | FIS Summary of Discharges                    |     22 |                0 |               0 |                   0 |
+| 510218V000  | FIS Summary of Discharges                    |      1 |                0 |               5 |                   0 |
+| 060724V000  | FIS Summary of Discharges                    |      6 |                0 |              12 |                   0 |
+| 45061CV000A | FIS Summary of Discharges                    |      6 |                0 |              30 |                   0 |
+| 35053CV000A | FIS Summary of Discharges                    |      9 |                0 |              45 |                   0 |
+| 39151CV001C | FIS Summary of Discharges                    |     16 |                0 |              65 |                   0 |
+| 35049CV000A | FIS Summary of Discharges                    |     17 |                0 |              82 |                   0 |
+| 51005CV000A | FIS Summary of Discharges                    |     11 |                0 |              55 |                   0 |
+| 080290V000  | FIS Summary of Discharges                    |     22 |                0 |             110 |                   0 |
 
 ## NRC tables: found vs right row vs right cell (Wilson 95% interval)
 
@@ -40,6 +40,17 @@
 | poor   | Gemini 3.8 Flash | Page image             |     229 | 65.5% (59-71)   | 65.5% (59-71)   | 65.5% (59-71)   |             0 |
 | poor   | Gemini 3.8 Flash | Tesseract, then model  |     229 | 82.5% (77-87)   | 78.6% (73-83)   | 69.0% (63-75)   |            31 |
 | poor   | Gemini 3.8 Flash | Text layer, then model |     229 | 71.6% (65-77)   | 60.7% (54-67)   | 36.2% (30-43)   |            81 |
+
+### One row of 5777799 Table II: total fuel mass remaining when bubble release starts (Kg)
+
+|                                                |   Case 1 |   Case 3 |   Case 4 |   Case 5 |   Case 6 |
+|:-----------------------------------------------|---------:|---------:|---------:|---------:|---------:|
+| ('Claude Haiku 5.5', 'Page image')             |    224.1 |    198.6 |    279.5 |    331   |    322.7 |
+| ('Claude Haiku 5.5', 'Tesseract, then model')  |    224.1 |    279.5 |    331   |    201.8 |     90   |
+| ('Claude Haiku 5.5', 'Text layer, then model') |    224.1 |    198.6 |    279.5 |    331   |    322.7 |
+| ('Gemini 3.8 Flash', 'Tesseract, then model')  |    224.1 |    279.5 |    331   |    201.8 |    163.2 |
+| ('Gemini 3.8 Flash', 'Text layer, then model') |    224.1 |    198.6 |    279.5 |    331   |    322.7 |
+| ('key', 'printed')                             |    224.1 |    198.6 |    279.5 |    331   |    322.7 |
 
 ## FIS tables: found vs right cell (Wilson 95% interval)
 
@@ -121,4 +132,4 @@
 | Gemini 3.8 Flash | Page image             | 1083928 | Total UO2 weight                        |      61 |       704.091  |     704.091  | False     |        0 |            0 |             0 |         0 |
 | Gemini 3.8 Flash | Page image             | 1083928 | Total fuel length (mean of L-1 and L-2) |     121 |        30.0435 |      30.0435 | False     |        0 |            0 |             0 |         0 |
 
-This run: 0.6 s, $0 (no model calls). The saved answers it rescores cost $1.15 when the source spike made them (NRC $0.09, FIS $1.06).
+This run: 0.7 s, $0 (no model calls). The saved answers it rescores cost $1.15 when the source spike made them (NRC $0.09, FIS $1.06).

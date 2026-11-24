@@ -128,8 +128,17 @@ def _(CELL_KEY, FIS_KEY, NRC_NUMBERS):
             )
     for _doc, _entry in FIS_KEY.items():
         if _doc != "_about":
-            _rows.append({"page": _doc, "table": "FIS Summary of Discharges", "rows": len(_entry["rows"])})
-    tables = pd.DataFrame(_rows).fillna(0)
+            _rows.append(
+                {
+                    "page": _doc,
+                    "table": "FIS Summary of Discharges",
+                    "rows": len(_entry["rows"]),
+                    "printed totals": 0,
+                    "numbers keyed": sum(bool(v) for r in _entry["rows"] for v in r[2:]),
+                    "not in source key": 0,
+                }
+            )
+    tables = pd.DataFrame(_rows)
     assert tables["not in source key"].sum() == 0, "the cell key has a number the source key doesn't"
     print(tables.to_string(index=False))
     return NUMBER, tables
@@ -344,7 +353,7 @@ def _(nrc_table):
     the gap opens up: Haiku found {_tess["found %"]} but placed {_tess["right cell %"]}. Most of the
     gap is values that landed in the right row but the wrong column, or in a different row, as OCR text loses
     the table's layout. Gemini's image read has no answer for 5777799: Gemini refused that page four times
-    in the source spike (HTTP 502, "blocked the response: OTHER"), so its 99 values there count as missing.
+    in the source spike (HTTP 502, "blocked the response: OTHER"), so its 79 values there count as missing.
 
     The intervals are Wilson 95% intervals that treat every cell as independent. They aren't: cells on one page
     share a scan and a layout, and there are only 4 pages, so the real uncertainty is wider than shown.
@@ -372,7 +381,7 @@ def _(slots):
     example.columns = [f"Case {c + 1}" for c in example.columns]
     print("Total fuel mass remaining in bubble when bubble release starts (Kg)")
     print(example.fillna("").to_string())
-    return
+    return (example,)
 
 
 @app.cell(hide_code=True)
@@ -624,7 +633,7 @@ def _():
 
 
 @app.cell
-def _(RESULTS, checks, fis_table, fis_usd, nrc_table, nrc_usd, slots, tables, totals_summary):
+def _(RESULTS, checks, example, fis_table, fis_usd, nrc_table, nrc_usd, slots, tables, totals_summary):
     _seconds = time.perf_counter() - STARTED
     slots.to_csv(RESULTS / "nrc_cells.csv", index=False)
     checks.to_csv(RESULTS / "totals_checks.csv", index=False)
@@ -634,6 +643,8 @@ def _(RESULTS, checks, fis_table, fis_usd, nrc_table, nrc_usd, slots, tables, to
         + tables.to_markdown(index=False)
         + "\n\n## NRC tables: found vs right row vs right cell (Wilson 95% interval)\n\n"
         + nrc_table.to_markdown(index=False)
+        + "\n\n### One row of 5777799 Table II: total fuel mass remaining when bubble release starts (Kg)\n\n"
+        + example.fillna("").to_markdown()
         + "\n\n## FIS tables: found vs right cell (Wilson 95% interval)\n\n"
         + fis_table.to_markdown(index=False)
         + "\n\n## Totals check\n\n"
