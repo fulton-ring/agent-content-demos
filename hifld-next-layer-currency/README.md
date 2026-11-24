@@ -18,10 +18,10 @@ the source checks, the stalest climate-risk layers, and what it can't show.
 It needs [uv](https://docs.astral.sh/uv/) and internet access, and no key or account. It runs the notebook as
 a script (about one to two minutes) and writes:
 
-- `outputs/layer_currency.csv`: one row per layer (330): category, agency, metadata date, the record-date
-  column used with its 10th percentile, median and newest value, the best date and how it was found, a flag
-  where it couldn't be, and for the 73 checked layers the current source, its date read this run, the gap in
-  years and both verdicts;
+- `outputs/layer_currency.csv`: one row per layer (330 on 2026-10-31): category, agency, metadata date, the
+  record-date column used with its 10th percentile, median and newest value, the best date and how it was
+  found, a flag where it couldn't be, and for the 73 checked layers the current source, its date read this
+  run, the gap in years and both verdicts;
 - `outputs/summary.json`: every number below;
 - `outputs/last-run.txt`: the run's printed output.
 
@@ -43,12 +43,21 @@ All public, read at run time:
   (agency, office, title, URLs in its description). The notebook re-reads every URL each run; all 59 read in
   our final run. This copies the approach of `rescued-data-currency/`.
 
-We checked the 33 layers that matter most for hazard and climate risk, plus 40 of the other 297 drawn with
-seed 171.
+We checked the 33 layers that matter most for hazard and climate risk, plus 40 of the other 297, drawn once
+on 2026-10-31 with `random.Random(171).sample()`. The 40 are listed in the notebook as `SAMPLE`, so the
+sample stays the same as the catalog grows: **layers HIFLD Next adds later are measured for age but never
+sampled for a source check**. The run stops if a checked layer leaves the catalog.
 
 ## Results
 
 From the run of 2026-10-31 (`./run.sh` from a clean checkout; numbers from `outputs/summary.json`). Cost $0.
+
+**Rerun on 2026-11-24** (clean checkout, 331 layers after HIFLD Next added `nfip-community-boundaries`; output
+in [`outputs/rerun-2026-11-24/`](outputs/rerun-2026-11-24/)): every source-check count below is unchanged (41
+and 43 of 59 newer, 14 with no current source, 11 of 33 climate-risk). The age shares move by 0.1 to 0.4
+points and median ages by 0.1 year, from the extra layer and the later date. The median gap where newer grows
+from 1.31 to 1.41 years (climate risk 1.41 to 1.45) because 19 sources have published again since we recorded
+them (`moved_since_recorded`). The tables below stay dated 2026-10-31.
 
 **How old the newest data is.** Every layer is over a year old by now, because the copies stopped at the
 shutdown. The sharper measure is how old the data already was on the day HIFLD Open went dark:
