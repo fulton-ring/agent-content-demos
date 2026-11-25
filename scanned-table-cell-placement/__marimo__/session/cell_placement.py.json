@@ -1,0 +1,403 @@
+{
+  "version": "1",
+  "metadata": {
+    "marimo_version": "0.25.1",
+    "script_metadata_hash": null
+  },
+  "cells": [
+    {
+      "id": "setup",
+      "code_hash": "9eaf2b0d54962b517512f4c0568dc6c0",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "Hbol",
+      "code_hash": "aae79998dbfba1a5df59ca8660a3a8a3",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/markdown": "<span class=\"markdown prose dark:prose-invert contents\"><h1 id=\"when-ai-reads-an-old-scanned-table-does-each-number-land-in-the-right-cell\">When AI reads an old scanned table, does each number land in the right cell?</h1>\n<span class=\"paragraph\">The <code>fema-nrc-extraction-accuracy</code> spike (issue #175) found that a vision model reading the page image finds\n99.3% of the numbers printed on old NRC scans. \"Found\" there means the number appears somewhere in the\ntranscript. A table is only useful if each number sits in its own row and column, so this notebook asks two\nthings of the same saved answers:</span>\n<ol>\n<li><strong>How far does \"found\" overstate \"in the right cell\"?</strong> Each pipeline is scored both ways, side by side.</li>\n<li><strong>Can the totals printed on the page catch the misplaced and misread numbers without an answer key?</strong>\n   Where a table prints a total, we add up the extracted column and compare.</li>\n</ol>\n<span class=\"paragraph\">Everything here rescores answers that spike saved. No model is called and nothing is downloaded.</span></span>"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "MJUe",
+      "code_hash": "3a0237cb3885ae02ecfcb0b2159abd70",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "vblA",
+      "code_hash": "eda215dc1ce974e1706028fee6871587",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/markdown": "<span class=\"markdown prose dark:prose-invert contents\"><h2 id=\"how-the-source-spike-scored\">How the source spike scored</h2>\n<span class=\"paragraph\">The issue asked us to check this first, because if the spike already graded by cell, there's nothing to\nre-score.</span>\n<ul>\n<li><strong>FIS tables: already by cell.</strong> <code>2_long_vs_short.py</code> pairs each key row with the answer row that agrees\n  with it most (the location counts double), then compares column by column. A number in the wrong row or\n  column counts as wrong. Below we add a \"found anywhere\" score next to it to show the gap.</li>\n<li><strong>NRC pages: not by cell.</strong> <code>nrc_key.json</code> is a flat list of the numbers on each page, and an answer was\n  scored by how many of those numbers appear anywhere in its transcript. That's the 99.3%. A number in the\n  wrong row still counted. The spike's README says so: \"A number found in the wrong place still counts as\n  found.\"</li>\n</ul>\n<span class=\"paragraph\">So the NRC side needs a key that says where each number goes.</span></span>"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "bkHC",
+      "code_hash": "55388237221f25e1f80400f432d3ca27",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/markdown": "<span class=\"markdown prose dark:prose-invert contents\"><h2 id=\"the-data-which-keyed-pages-hold-a-table-and-which-print-a-total\">The data: which keyed pages hold a table, and which print a total</h2>\n<span class=\"paragraph\">The NRC key covers one page drawn at random from each of 10 reports. Only 4 of those pages are tables. The\nother 6 are two reference lists, a table of contents, a page of prose, a page of figures and a references\npage set in two columns. We keyed rows and columns for the 4 tables (5 tables in all, since one page holds\ntwo) in <code>nrc_cell_key.json</code>: each row is a pattern that finds its label in a transcript, and the values\nprinted in it, left to right.</span>\n<span class=\"paragraph\">The FIS key is already rows and columns: one <em>Summary of Discharges</em> table from each of 8 studies.</span>\n<span class=\"paragraph\">The cell below checks the new key against the source key's numbers: every value we keyed should be among\nthe numbers the source spike keyed for that page.</span></span>"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "lEQa",
+      "code_hash": "68564278ae556debad010d9660390969",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": [
+        {
+          "type": "stream",
+          "name": "stdout",
+          "text": "       page                                        table  rows  printed totals  numbers keyed  not in source key\n    5507271 Table 4-2 Fragility descriptions (continued)     5             0.0           31.0                0.0\n    5777799                Table I Analytical conditions     4             0.0           38.0                0.0\n    5777799                  Table II Summary of results    10             5.0           51.0                0.0\n    5533698           Table C.2 Properties of absorbents    19             0.0           32.0                0.0\n    1083928              Table A.4 Pellet data for rod 4    15             2.0          150.0                0.0\n 510218V000                    FIS Summary of Discharges     1             0.0            0.0                0.0\n 060724V000                    FIS Summary of Discharges     6             0.0            0.0                0.0\n45061CV000A                    FIS Summary of Discharges     6             0.0            0.0                0.0\n35053CV000A                    FIS Summary of Discharges     9             0.0            0.0                0.0\n39151CV001C                    FIS Summary of Discharges    16             0.0            0.0                0.0\n35049CV000A                    FIS Summary of Discharges    17             0.0            0.0                0.0\n51005CV000A                    FIS Summary of Discharges    11             0.0            0.0                0.0\n 080290V000                    FIS Summary of Discharges    22             0.0            0.0                0.0\n",
+          "mimetype": "text/plain"
+        }
+      ]
+    },
+    {
+      "id": "PKri",
+      "code_hash": "b69b91a2cbdb991c4cbb625a660ac760",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/markdown": "<span class=\"markdown prose dark:prose-invert contents\"><span class=\"paragraph\"><strong>2 of 13 keyed tables print a total</strong>, both on NRC\npages: Table II on 5777799 (fuel leakage for 10 \u00b5 and 30 \u00b5 particles, and their total, for each case) and the\n1981 dot-matrix pellet table on 1083928 (total UO2 weight and total fuel length under the table). FIS\ndischarge tables print none: peak flows at different points on a river don't add up. That leaves\n7 checkable columns, so the totals check below rests on very few columns.</span>\n<span class=\"paragraph\">The pellet table has 60 rows and the source key covers rows 1-15. To score the totals we need the whole\nweight and length columns. Both image reads agree on all 600 values in rows 1-60, and their weight and\nlength columns add up exactly to the printed totals, so we take that transcription as the truth for rows\n16-60. We use those rows only for the totals check and leave them out of the accuracy scores, since scoring\nthe image pipelines against their own reading would be circular.</span></span>"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "Xref",
+      "code_hash": "2622de993e0bb08570a33e341aaaee90",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/markdown": "<span class=\"markdown prose dark:prose-invert contents\"><h2 id=\"reading-cells-out-of-a-transcript\">Reading cells out of a transcript</h2>\n<span class=\"paragraph\">The NRC answers are transcripts, not tables. The image pipeline was asked for \"tables row by row\" and mostly\nwrote Markdown tables. The two OCR-text pipelines were asked for \"a clean transcription\" and wrote lines of\ntext. For each table we:</span>\n<ol>\n<li>cut the transcript down to the table (from its title to the note under it),</li>\n<li>find each row's label, and take the text from there up to the next row's label,</li>\n<li>read the values in that stretch left to right: numbers, ranges like 10-30, powers like 4.133x10-4, and\n   printed placeholders such as <code>-</code>, <code>---</code>, <code>NA</code> and <code>*</code>, which hold a column but aren't scored.</li>\n</ol>\n<span class=\"paragraph\">A value is <strong>in the right cell</strong> if it's the n-th value in its row, as printed. It is <strong>in the right row</strong>\nif it's anywhere in that row's stretch, and <strong>found</strong> if it's anywhere in the transcript, which is what the\nsource spike measured. A wrong value is a <strong>wrong cell</strong> if its value is somewhere else in the transcript,\na <strong>wrong digit</strong> if a different value sits in its place, and <strong>missing</strong> if nothing does.</span></span>"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "SFPL",
+      "code_hash": "fd522e089a12fe0da8f305d7ab00cd2e",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "BYtC",
+      "code_hash": "5975b52b6b96fd9e00e3313f6ddb4c03",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/markdown": "<span class=\"markdown prose dark:prose-invert contents\"><h2 id=\"scoring-the-nrc-tables\">Scoring the NRC tables</h2>\n<span class=\"paragraph\">Six model pipelines from the source spike: the PDF's text layer, Tesseract's text or the page image, each\nread by Claude Haiku 5.5 and by Gemini 3.8 Flash. (The two no-model pipelines aren't saved as answers; they\nwould need Tesseract and the PDFs, and they aren't AI reads.)</span></span>"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "RGSE",
+      "code_hash": "2e23cf7a3ef05decbeb2e5b0d37c5175",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": [
+        {
+          "type": "stream",
+          "name": "stdout",
+          "text": "1716 scored cells, 2700 more for the totals check\noutcome                                  missing  right  wrong cell  \\\nmodel            pipeline                                             \nClaude Haiku 5.5 Page image                    0    286           0   \n                 Tesseract, then model        54     98          31   \n                 Text layer, then model      150     99          25   \nGemini 3.8 Flash Page image                   79    207           0   \n                 Tesseract, then model        52    185          38   \n                 Text layer, then model        0    139          82   \n\noutcome                                  wrong digit  \nmodel            pipeline                             \nClaude Haiku 5.5 Page image                        0  \n                 Tesseract, then model           103  \n                 Text layer, then model           12  \nGemini 3.8 Flash Page image                        0  \n                 Tesseract, then model            11  \n                 Text layer, then model           65  \n",
+          "mimetype": "text/plain"
+        }
+      ]
+    },
+    {
+      "id": "Kclp",
+      "code_hash": "ba89a66cac5199a84ed210fb2ad5d6b7",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "emfo",
+      "code_hash": "24906f3efe7df23438a7746ca4cfb112",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": [
+        {
+          "type": "stream",
+          "name": "stdout",
+          "text": "scan            model               pipeline  cells         found %     right row %    right cell %  gap (cells)\n all Claude Haiku 5.5             Page image    286 100.0% (99-100) 100.0% (99-100) 100.0% (99-100)            0\n all Claude Haiku 5.5  Tesseract, then model    286   45.1% (39-51)   40.6% (35-46)   34.3% (29-40)           31\n all Claude Haiku 5.5 Text layer, then model    286   43.0% (37-49)   37.1% (32-43)   34.6% (29-40)           24\n all Gemini 3.8 Flash             Page image    286   72.4% (67-77)   72.4% (67-77)   72.4% (67-77)            0\n all Gemini 3.8 Flash  Tesseract, then model    286   78.0% (73-82)   73.4% (68-78)   64.7% (59-70)           38\n all Gemini 3.8 Flash Text layer, then model    286   77.3% (72-82)   68.5% (63-74)   48.6% (43-54)           82\nfair Claude Haiku 5.5             Page image     57 100.0% (94-100) 100.0% (94-100) 100.0% (94-100)            0\nfair Claude Haiku 5.5  Tesseract, then model     57   56.1% (43-68)   47.4% (35-60)   45.6% (33-58)            6\nfair Claude Haiku 5.5 Text layer, then model     57 100.0% (94-100)   84.2% (73-91)   73.7% (61-83)           15\nfair Gemini 3.8 Flash             Page image     57 100.0% (94-100) 100.0% (94-100) 100.0% (94-100)            0\nfair Gemini 3.8 Flash  Tesseract, then model     57   59.6% (47-71)   52.6% (40-65)   47.4% (35-60)            7\nfair Gemini 3.8 Flash Text layer, then model     57 100.0% (94-100) 100.0% (94-100)  98.2% (91-100)            1\npoor Claude Haiku 5.5             Page image    229 100.0% (98-100) 100.0% (98-100) 100.0% (98-100)            0\npoor Claude Haiku 5.5  Tesseract, then model    229   42.4% (36-49)   38.9% (33-45)   31.4% (26-38)           25\npoor Claude Haiku 5.5 Text layer, then model    229   28.8% (23-35)   25.3% (20-31)   24.9% (20-31)            9\npoor Gemini 3.8 Flash             Page image    229   65.5% (59-71)   65.5% (59-71)   65.5% (59-71)            0\npoor Gemini 3.8 Flash  Tesseract, then model    229   82.5% (77-87)   78.6% (73-83)   69.0% (63-75)           31\npoor Gemini 3.8 Flash Text layer, then model    229   71.6% (65-77)   60.7% (54-67)   36.2% (30-43)           81\n        quality  cells\nosti                  \n1083928    poor    900\n5507271    fair    174\n5533698    fair    168\n5777799    poor    474\n",
+          "mimetype": "text/plain"
+        }
+      ]
+    },
+    {
+      "id": "Hstk",
+      "code_hash": "638c691bc34632de5936bb56f45a98d7",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/markdown": "<span class=\"markdown prose dark:prose-invert contents\"><span class=\"paragraph\"><strong>What this shows.</strong> Reading the image, Haiku put 100.0% (99-100) of the NRC table values in the right\ncell, against 100.0% (99-100) found. The gap is 0 cells. Through Tesseract's text\nthe gap opens up: Haiku found 45.1% (39-51) but placed 34.3% (29-40). Most of the\ngap is values that landed in the right row but the wrong column, or in a different row, as OCR text loses\nthe table's layout. Gemini's image read has no answer for 5777799: Gemini refused that page four times\nin the source spike (HTTP 502, \"blocked the response: OTHER\"), so its 99 values there count as missing.</span>\n<span class=\"paragraph\">The intervals are Wilson 95% intervals that treat every cell as independent. They aren't: cells on one page\nshare a scan and a layout, and there are only 4 pages, so the real uncertainty is wider than shown.</span></span>"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "nWHF",
+      "code_hash": "0fc3f63f19ebb957f2ea3559133b9ecc",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/markdown": "<span class=\"markdown prose dark:prose-invert contents\"><h3 id=\"what-a-misplaced-row-looks-like\">What a misplaced row looks like</h3>\n<span class=\"paragraph\">One row of 5777799 Table II, as each pipeline left it. Every number below was \"found\" by the source\nspike's measure.</span></span>"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "iLit",
+      "code_hash": "2ee421f194e231fb52f911f3e3abc2d7",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": [
+        {
+          "type": "stream",
+          "name": "stdout",
+          "text": "Total fuel mass remaining in bubble when bubble release starts (Kg)\n                                        Case 1 Case 3 Case 4 Case 5 Case 6\nmodel            pipeline                                                 \nClaude Haiku 5.5 Page image              224.1  198.6  279.5  331.0  322.7\n                 Tesseract, then model   224.1  279.5  331.0  201.8   90.0\n                 Text layer, then model  224.1  198.6  279.5  331.0  322.7\nGemini 3.8 Flash Tesseract, then model   224.1  279.5  331.0  201.8  163.2\n                 Text layer, then model  224.1  198.6  279.5  331.0  322.7\nkey              printed                 224.1  198.6  279.5  331.0  322.7\n",
+          "mimetype": "text/plain"
+        }
+      ]
+    },
+    {
+      "id": "ZHCJ",
+      "code_hash": "b3b44cd9fdf9945b8e4882dc6b9944f6",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/markdown": "<span class=\"markdown prose dark:prose-invert contents\"><h2 id=\"scoring-the-fis-tables\">Scoring the FIS tables</h2>\n<span class=\"paragraph\">The FIS answers are typed rows (location, drainage area, four discharges), so the cell score is the source\nspike's own method: pair each key row with the answer row that agrees most, then compare column by column.\nWe compare numbers exactly, as the source did. The found score asks only whether the value appears in any\nrow or column of the answer.</span></span>"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "ROlb",
+      "code_hash": "c81a3597db4da4952e408c92d94689e9",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "qnkX",
+      "code_hash": "76ee7440b2ca9db941ef75c08a1f5de3",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": [
+        {
+          "type": "stream",
+          "name": "stdout",
+          "text": "   scan            model               pipeline  cells         found %    right cell %  gap (cells)\ndigital Claude Haiku 5.5             Image page    222 100.0% (98-100) 100.0% (98-100)            0\ndigital Claude Haiku 5.5        PDF whole study    222 100.0% (98-100) 100.0% (98-100)            0\ndigital Claude Haiku 5.5         Tesseract page    222   74.3% (68-80)   73.9% (68-79)            1\ndigital Claude Haiku 5.5        Text layer page    222 100.0% (98-100) 100.0% (98-100)            0\ndigital Claude Haiku 5.5 Text layer whole study    222 100.0% (98-100) 100.0% (98-100)            0\ndigital Gemini 3.8 Flash             Image page    222 100.0% (98-100) 100.0% (98-100)            0\ndigital Gemini 3.8 Flash        PDF whole study    222 100.0% (98-100) 100.0% (98-100)            0\ndigital Gemini 3.8 Flash         Tesseract page    222   74.3% (68-80)   73.9% (68-79)            1\ndigital Gemini 3.8 Flash        Text layer page    222 100.0% (98-100) 100.0% (98-100)            0\ndigital Gemini 3.8 Flash Text layer whole study    222 100.0% (98-100) 100.0% (98-100)            0\n   scan Claude Haiku 5.5             Image page    182 100.0% (98-100) 100.0% (98-100)            0\n   scan Claude Haiku 5.5        PDF whole study    182   39.6% (33-47)   36.3% (30-43)            6\n   scan Claude Haiku 5.5         Tesseract page    182   29.7% (24-37)   29.7% (24-37)            0\n   scan Gemini 3.8 Flash             Image page    182 100.0% (98-100) 100.0% (98-100)            0\n   scan Gemini 3.8 Flash        PDF whole study    182   97.3% (94-99)   97.3% (94-99)            0\n   scan Gemini 3.8 Flash         Tesseract page    182   80.2% (74-85)   74.7% (68-80)           10\n",
+          "mimetype": "text/plain"
+        }
+      ]
+    },
+    {
+      "id": "TqIu",
+      "code_hash": "70ec601a563029d5914e11c6d402eda5",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/markdown": "<span class=\"markdown prose dark:prose-invert contents\"><span class=\"paragraph\"><strong>What this shows.</strong> On the scanned FIS tables the gap between found and right cell is\n0 to 10 cells per pipeline. The page image put\nevery value in its cell with both models. The text pipelines lose values outright (wrong digits and missing\nrows) more than they misplace them, because each FIS row is typed by the model into named fields, which\nkeeps a value and its column together. The whole-study runs aren't given the page, so a few of their\nnumbers come from elsewhere in the study.</span></span>"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "Vxnm",
+      "code_hash": "f81af84b265667c49ad3f777d7303419",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/markdown": "<span class=\"markdown prose dark:prose-invert contents\"><h2 id=\"the-totals-check\">The totals check</h2>\n<span class=\"paragraph\">For each column with a printed total, add up the extracted values and compare with the extracted total. It\npasses if they agree to the last printed decimal. A column that can't be added up (a value is missing or\nisn't a number) fails too, since a reviewer would have to look at it. For the pellet table the length\ntotal is the sum of the mean of the two length readings (L-1 and L-2), which is how the printed 30.0435 adds\nup.</span>\n<span class=\"paragraph\">Then we compare with the key: a column with any wrong value (a part or the total) should fail, and a column\nwith every value right should pass.</span></span>"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "DnEU",
+      "code_hash": "dda43e56a9f727a8d34e8dc0b12216ea",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": [
+        {
+          "type": "stream",
+          "name": "stdout",
+          "text": "           model               pipeline    osti                                  column  cells parts add to total read  flagged  errors  wrong cell  wrong digit  missing\nClaude Haiku 5.5 Text layer, then model 5777799                         Leakage, Case 1      3          NaN      197.0     True       2           2            0        0\nClaude Haiku 5.5 Text layer, then model 5777799                         Leakage, Case 3      2          NaN      163.2     True       1           1            0        0\nClaude Haiku 5.5 Text layer, then model 5777799                         Leakage, Case 4      3          NaN      247.8     True       2           2            0        0\nClaude Haiku 5.5 Text layer, then model 5777799                         Leakage, Case 5      3          NaN      291.8     True       2           2            0        0\nClaude Haiku 5.5 Text layer, then model 5777799                         Leakage, Case 6      3          NaN      291.1     True       2           2            0        0\nClaude Haiku 5.5 Text layer, then model 1083928                        Total UO2 weight     61          NaN        NaN     True      61           0            0       61\nClaude Haiku 5.5 Text layer, then model 1083928 Total fuel length (mean of L-1 and L-2)    121          NaN        NaN     True     121           0            0      121\nClaude Haiku 5.5  Tesseract, then model 5777799                         Leakage, Case 1      3          NaN        NaN     True       3           2            0        1\nClaude Haiku 5.5  Tesseract, then model 5777799                         Leakage, Case 3      2          NaN        NaN     True       2           1            0        1\nClaude Haiku 5.5  Tesseract, then model 5777799                         Leakage, Case 4      3          NaN        NaN     True       3           3            0        0\nClaude Haiku 5.5  Tesseract, then model 5777799                         Leakage, Case 5      3          NaN        NaN     True       3           2            0        1\nClaude Haiku 5.5  Tesseract, then model 5777799                         Leakage, Case 6      3          NaN        NaN     True       3           0            0        3\nClaude Haiku 5.5  Tesseract, then model 1083928                        Total UO2 weight     61      702.865    704.091     True      16           1           15        0\nClaude Haiku 5.5  Tesseract, then model 1083928 Total fuel length (mean of L-1 and L-2)    121     15.00350    30.0833     True     121           0          121        0\nClaude Haiku 5.5             Page image 5777799                         Leakage, Case 1      3        197.0      197.0    False       0           0            0        0\nClaude Haiku 5.5             Page image 5777799                         Leakage, Case 3      2        163.2      163.2    False       0           0            0        0\nClaude Haiku 5.5             Page image 5777799                         Leakage, Case 4      3        247.8      247.8    False       0           0            0        0\nClaude Haiku 5.5             Page image 5777799                         Leakage, Case 5      3        291.8      291.8    False       0           0            0        0\nClaude Haiku 5.5             Page image 5777799                         Leakage, Case 6      3        291.1      291.1    False       0           0            0        0\nClaude Haiku 5.5             Page image 1083928                        Total UO2 weight     61      704.091    704.091    False       0           0            0        0\nClaude Haiku 5.5             Page image 1083928 Total fuel length (mean of L-1 and L-2)    121      30.0435    30.0435    False       0           0            0        0\nGemini 3.8 Flash Text layer, then model 5777799                         Leakage, Case 1      3          NaN      197.0     True       2           2            0        0\nGemini 3.8 Flash Text layer, then model 5777799                         Leakage, Case 3      2          NaN      163.2     True       1           1            0        0\nGemini 3.8 Flash Text layer, then model 5777799                         Leakage, Case 4      3          NaN      247.8     True       2           2            0        0\nGemini 3.8 Flash Text layer, then model 5777799                         Leakage, Case 5      3          NaN      291.8     True       2           2            0        0\nGemini 3.8 Flash Text layer, then model 5777799                         Leakage, Case 6      3          NaN      291.1     True       2           2            0        0\nGemini 3.8 Flash Text layer, then model 1083928                        Total UO2 weight     61      30.0180    704.087     True      61          15           46        0\nGemini 3.8 Flash Text layer, then model 1083928 Total fuel length (mean of L-1 and L-2)    121      25.2427     30.045     True     121         110           11        0\nGemini 3.8 Flash  Tesseract, then model 5777799                         Leakage, Case 1      3          NaN        NaN     True       3           2            0        1\nGemini 3.8 Flash  Tesseract, then model 5777799                         Leakage, Case 3      2          NaN        NaN     True       2           2            0        0\nGemini 3.8 Flash  Tesseract, then model 5777799                         Leakage, Case 4      3          NaN        NaN     True       3           3            0        0\nGemini 3.8 Flash  Tesseract, then model 5777799                         Leakage, Case 5      3          NaN        NaN     True       3           2            0        1\nGemini 3.8 Flash  Tesseract, then model 5777799                         Leakage, Case 6      3          NaN        NaN     True       3           0            0        3\nGemini 3.8 Flash  Tesseract, then model 1083928                        Total UO2 weight     61      704.333    704.091     True       8           0            8        0\nGemini 3.8 Flash  Tesseract, then model 1083928 Total fuel length (mean of L-1 and L-2)    121      30.0390    30.0833     True       5           1            4        0\nGemini 3.8 Flash             Page image 5777799                         Leakage, Case 1      3          NaN        NaN     True       3           0            0        3\nGemini 3.8 Flash             Page image 5777799                         Leakage, Case 3      2          NaN        NaN     True       2           0            0        2\nGemini 3.8 Flash             Page image 5777799                         Leakage, Case 4      3          NaN        NaN     True       3           0            0        3\nGemini 3.8 Flash             Page image 5777799                         Leakage, Case 5      3          NaN        NaN     True       3           0            0        3\nGemini 3.8 Flash             Page image 5777799                         Leakage, Case 6      3          NaN        NaN     True       3           0            0        3\nGemini 3.8 Flash             Page image 1083928                        Total UO2 weight     61      704.091    704.091    False       0           0            0        0\nGemini 3.8 Flash             Page image 1083928 Total fuel length (mean of L-1 and L-2)    121      30.0435    30.0435    False       0           0            0        0\n",
+          "mimetype": "text/plain"
+        }
+      ]
+    },
+    {
+      "id": "ulZA",
+      "code_hash": "7648cbe65be87f268aac115276c86a4b",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": [
+        {
+          "type": "stream",
+          "name": "stdout",
+          "text": "                                      count\n                    columns checked      42\n              columns with an error      33\n      flagged by the check (caught)      33\n          passed the check (missed)       0\n     columns with every value right       9\n       flagged anyway (false alarm)       0\n wrong cell errors: caught / missed 162 / 0\nwrong digit errors: caught / missed 205 / 0\n    missing errors: caught / missed 207 / 0\n",
+          "mimetype": "text/plain"
+        }
+      ]
+    },
+    {
+      "id": "ecfG",
+      "code_hash": "82cc9c08beb0505fc1924755287c7912",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/markdown": "<span class=\"markdown prose dark:prose-invert contents\"><span class=\"paragraph\"><strong>What this shows.</strong> Of 42 column checks (7 columns times six pipelines), 33 had at\nleast one wrong value, and the check flagged 33 of them. It missed\n0,\nand raised 0 false alarms on the 9 columns that were right.</span>\n<span class=\"paragraph\">Most of what it caught a reviewer would see anyway: whole rows missing, or a column where OCR turned every\n<code>.4204</code> into <code>.24204</code>. The case it's for is the quiet one, and the pellet table has it twice. Reading\nTesseract's text, Haiku misread 15 of the 60 weights by a digit or\ntwo (11.595 for 11.505), and the column added up to 702.865 g instead\nof the printed 704.091. Flash misread\n8 and added up to 704.333.\nEvery value there looks plausible on its own; only the sum gives them away.</span>\n<span class=\"paragraph\">The check says a column is wrong, not which cell, and it rests on 7 columns from 2 tables. It can't see\nerrors that leave the sum unchanged, such as two values swapped within a column.</span></span>"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "Pvdt",
+      "code_hash": "2f68d82a09ebbe13b9c83e4479d0f118",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/markdown": "<span class=\"markdown prose dark:prose-invert contents\"><h2 id=\"what-this-doesnt-show\">What this doesn't show</h2>\n<ul>\n<li><strong>Very few totals.</strong> 2 of 13 keyed tables and 7 columns print a total. The catch rate rests on those 7\n  columns read by six pipelines, which is 42 checks but far fewer independent cases.</li>\n<li><strong>Swaps within a column pass.</strong> If two values in one column trade places, the column still adds up. The\n  check only sees errors that change a column's sum. Two errors that cancel out would also pass.</li>\n<li><strong>Tables with no totals get no check.</strong> None of the FIS discharge tables, the absorbent table or the\n  fragility table print a total.</li>\n<li><strong>A small, AI-built key.</strong> Four NRC pages and eight FIS pages. The NRC number key was built by an AI\n  worker, and the row/column key here was too, by eye from the page images. Rows 16-60 of the pellet table\n  come from the two image reads (checked against the printed totals), not by eye.</li>\n<li><strong>The OCR-text pipelines weren't asked for a table.</strong> They were asked for a clean transcription, so their\n  cell scores measure whether their output can be used as a table, not whether they followed an\n  instruction to make one. Our row finder also only sees a row if its label survived OCR.</li>\n</ul></span>"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "ZBYS",
+      "code_hash": "ee22628c0a6a8abc8c9cb67a37486f09",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": [
+        {
+          "type": "stream",
+          "name": "stdout",
+          "text": "wrote /home/user/agent-content-demos/scanned-table-cell-placement/results, 0.5 s\n",
+          "mimetype": "text/plain"
+        }
+      ]
+    }
+  ]
+}
