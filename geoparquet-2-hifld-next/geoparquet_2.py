@@ -937,6 +937,10 @@ def _(mo):
       `bbox` filter on the published file fetches about what it fetches from a DuckDB-written 2.0 file with no
       hint, because HIFLD Next's files are already in a roughly spatial order. The win for DuckDB users is that
       they no longer need to know about the `bbox` column.
+    - **Fewer bytes isn't always faster.** GeoPandas on a 2.0 file without `bbox` fetches fewer bytes than on
+      the published file, but its box query is slower: it picks row groups from the statistics, converts every
+      row in them to a GeoDataFrame, then drops rows by their bounds. With a `bbox` column, pyarrow filters
+      rows before conversion.
     - **Sorting at the guide's 100,000-row groups didn't help these layers.** With 2 to 4 row groups per
       file, a Hilbert sort spreads each group over a wide area, and the box often lands on a boundary. Only
       10,000-row groups cut bytes sharply, at the cost of more requests and a bigger footer.

@@ -1,0 +1,123 @@
+Using CPython 3.11.18 interpreter at: /usr/local/bin/python3
+Creating virtual environment at: .venv
+Installed 56 packages in 642ms
+330 datasets, 1049 layers, 514 distinct GeoParquet files
+points: 15 candidate layers in 12 datasets
+lines: 52 candidate layers in 5 datasets
+polygons: 7 candidate layers in 2 datasets
+Empty or missing geometries: {'nodes': 8, 'north-american-rail-network-nodes': 0, 'water-lines-1': 0, 'north-american-rail-network-lines': 0, 'tl_2024_42_tabblock20': 0, 'voting-districts': 0}
+File size relative to the published file:
+variant                            published  1.1+bbox   2.0  2.0+bbox  sorted 1.1+bbox  sorted 2.0  sorted 2.0+bbox  sorted 2.0, 10k groups  2.0 DuckDB-written  sorted 2.0, 10k groups, DuckDB-written
+layer                                                                                                                                                                                                   
+nodes                                    1.0       1.0  0.62       1.0             0.99        0.61             0.99                    0.62                0.53                                    0.51
+north-american-rail-network-lines        1.0       1.0  0.88       1.0             1.00        0.88             1.00                    0.88                0.79                                    0.83
+north-american-rail-network-nodes        1.0       1.0  0.33       1.0             1.00        0.33             1.00                    0.33                0.28                                    0.26
+tl_2024_42_tabblock20                    1.0       1.0  0.94       1.0             1.00        0.94             1.00                    0.94                0.79                                    0.80
+voting-districts                         1.0       1.0  0.99       1.0             1.00        0.99             1.00                    0.99                0.97                                    0.97
+water-lines-1                            1.0       1.0  0.95       1.0             1.00        0.95             1.00                    0.95                0.92                                    0.92
+54 of 54 rewritten files identical to the published file
+serving /tmp/claude-0/clean/geoparquet-2-hifld-next/data at http://127.0.0.1:40329
+270 query measurements
+Same answer as the published file: 270 of 270 measurements
+MB fetched, summed over layers:
+variant                                       published  1.1+bbox    2.0  2.0+bbox  sorted 1.1+bbox  sorted 2.0  sorted 2.0+bbox  sorted 2.0, 10k groups  2.0 DuckDB-written  sorted 2.0, 10k groups, DuckDB-written
+query     reader                                                                                                                                                                                                    
+attribute DuckDB                                  445.4     446.5  446.1     446.5            448.2       445.8            446.2                   413.9               497.4                                   450.0
+          GeoPandas filters=                      743.7     728.2  672.8     724.8            691.2       642.3            692.5                   877.8               650.1                                   787.4
+box       DuckDB ST_Intersects                    723.1     723.1  685.4     735.9            700.8       674.0            697.7                   698.5               232.7                                    87.4
+          DuckDB ST_Intersects + bbox filter      231.5     231.4    NaN     231.3            360.3         NaN            360.1                     NaN                 NaN                                     NaN
+          GeoPandas bbox=                         331.5     322.9  294.2     322.6            514.8       469.6            514.4                   124.1               275.4                                   120.6
+
+Median ms, summed over layers:
+variant                                       published  1.1+bbox     2.0  2.0+bbox  sorted 1.1+bbox  sorted 2.0  sorted 2.0+bbox  sorted 2.0, 10k groups  2.0 DuckDB-written  sorted 2.0, 10k groups, DuckDB-written
+query     reader                                                                                                                                                                                                     
+attribute DuckDB                                 1600.0    1337.0  1376.0    1335.0           1242.0      1272.0           1347.0                  5032.0              1499.0                                  2565.0
+          GeoPandas filters=                     4900.0    4477.0  4534.0    4690.0           5397.0      4711.0           4877.0                  4669.0              4165.0                                  4894.0
+box       DuckDB ST_Intersects                   3258.0    3976.0  4799.0    3603.0           3685.0      4844.0           3802.0                  6004.0              3660.0                                  1658.0
+          DuckDB ST_Intersects + bbox filter     2781.0    2760.0     NaN    2753.0           2713.0         NaN           3677.0                     NaN                 NaN                                     NaN
+          GeoPandas bbox=                        2349.0    2402.0  6184.0    2424.0           4354.0     11725.0           4282.0                  2119.0              6341.0                                  1920.0
+variant                                                                                                                                                                  published                                                                              2.0                                                                         2.0+bbox                                                               2.0 DuckDB-written
+reader                                  age                                                                                                                                                                                                                                                                                                                                                                                          
+DuckDB 2.0.1 + spatial                  current                                                                                                                                 ok                    ok (4/6); ok (CRS left as Parquet's default, OGC:CRS84) (2/6)                    ok (4/6); ok (CRS left as Parquet's default, OGC:CRS84) (2/6)                                                                               ok
+DuckDB 1.3.2 + spatial                  a year old                                                                                                     reads, no CRS on the column            fails: Invalid Input Error: Geoparquet version 2.0.0 is not supported            fails: Invalid Input Error: Geoparquet version 2.0.0 is not supported            fails: Invalid Input Error: Geoparquet version 2.0.0 is not supported
+GeoPandas 1.2.0 / pyarrow 26.0.1        current                                                                                                                                 ok                                                                               ok                                                                               ok                                                                               ok
+GeoPandas 1.0.1 / pyarrow 19.0.1        a year old                                                                                                                              ok               fails: Metadata contains Thrift LogicalType that is not recognized               fails: Metadata contains Thrift LogicalType that is not recognized               fails: Metadata contains Thrift LogicalType that is not recognized
+pyarrow 26.0.1 (no geo library)         current                                                                                      reads, geometry as binary tagged geoarrow.wkb                                    reads, geometry as binary tagged geoarrow.wkb                                    reads, geometry as binary tagged geoarrow.wkb                                                        reads, geometry as binary
+polars 2.2.0                            current                                                                                       reads, geometry as Extension('geoarrow.wkb')  fails: parquet: File out of specification: LogicalType union has no variant set  fails: parquet: File out of specification: LogicalType union has no variant set  fails: parquet: File out of specification: LogicalType union has no variant set
+GDAL 3.13.3 (ogrinfo)                   current                                                                                                                                 ok                                                                               ok                                                                               ok                                                                               ok
+GDAL 3.10.3 (ogrinfo)                   a year old                                                                                                                              ok                                 fails: ogrinfo failed - unable to open '<file>'.                                 fails: ogrinfo failed - unable to open '<file>'.                                 fails: ogrinfo failed - unable to open '<file>'.
+geoparquet-validator 0.4.0 (spec check) current     conformant (4/6); not conformant: /conf/covering/bbox-column-repetition (1/6); not conformant: /conf/core/geometry-types (1/6)                                                                       conformant    conformant (5/6); not conformant: /conf/covering/bbox-column-repetition (1/6)                                                                       conformant
+{
+  "layers": 6,
+  "total_MB_by_variant": {
+    "1.1+bbox": 687.3,
+    "2.0": 643.3,
+    "2.0 DuckDB-written": 604.9,
+    "2.0+bbox": 686.6,
+    "published": 687.2,
+    "sorted 1.1+bbox": 685.9,
+    "sorted 2.0": 642.0,
+    "sorted 2.0+bbox": 685.3,
+    "sorted 2.0, 10k groups": 642.9,
+    "sorted 2.0, 10k groups, DuckDB-written": 607.3
+  },
+  "rewritten_files_identical": "54 of 54",
+  "query_answers_same_as_published": "270 of 270",
+  "MB_fetched_summed_over_layers": {
+    "attribute | DuckDB": {
+      "published": 445.4,
+      "1.1+bbox": 446.5,
+      "2.0": 446.1,
+      "2.0+bbox": 446.5,
+      "sorted 1.1+bbox": 448.2,
+      "sorted 2.0": 445.8,
+      "sorted 2.0+bbox": 446.2,
+      "sorted 2.0, 10k groups": 413.9,
+      "2.0 DuckDB-written": 497.4,
+      "sorted 2.0, 10k groups, DuckDB-written": 450.0
+    },
+    "attribute | GeoPandas filters=": {
+      "published": 743.7,
+      "1.1+bbox": 728.2,
+      "2.0": 672.8,
+      "2.0+bbox": 724.8,
+      "sorted 1.1+bbox": 691.2,
+      "sorted 2.0": 642.3,
+      "sorted 2.0+bbox": 692.5,
+      "sorted 2.0, 10k groups": 877.8,
+      "2.0 DuckDB-written": 650.1,
+      "sorted 2.0, 10k groups, DuckDB-written": 787.4
+    },
+    "box | DuckDB ST_Intersects": {
+      "published": 723.1,
+      "1.1+bbox": 723.1,
+      "2.0": 685.4,
+      "2.0+bbox": 735.9,
+      "sorted 1.1+bbox": 700.8,
+      "sorted 2.0": 674.0,
+      "sorted 2.0+bbox": 697.7,
+      "sorted 2.0, 10k groups": 698.5,
+      "2.0 DuckDB-written": 232.7,
+      "sorted 2.0, 10k groups, DuckDB-written": 87.4
+    },
+    "box | DuckDB ST_Intersects + bbox filter": {
+      "published": 231.5,
+      "1.1+bbox": 231.4,
+      "2.0+bbox": 231.3,
+      "sorted 1.1+bbox": 360.3,
+      "sorted 2.0+bbox": 360.1
+    },
+    "box | GeoPandas bbox=": {
+      "published": 331.5,
+      "1.1+bbox": 322.9,
+      "2.0": 294.2,
+      "2.0+bbox": 322.6,
+      "sorted 1.1+bbox": 514.8,
+      "sorted 2.0": 469.6,
+      "sorted 2.0+bbox": 514.4,
+      "sorted 2.0, 10k groups": 124.1,
+      "2.0 DuckDB-written": 275.4,
+      "sorted 2.0, 10k groups, DuckDB-written": 120.6
+    }
+  }
+}
