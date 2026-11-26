@@ -291,7 +291,7 @@ def _(REUSE, SEED, duckdb, gpd, np, pd, pq, published_paths, time):
         _missing = (_gdf.geometry.isna() | _gdf.geometry.is_empty).to_numpy()
         _key = np.full(len(_gdf), np.iinfo(np.int64).max)
         _key[~_missing] = _gdf.geometry[~_missing].hilbert_distance().to_numpy()
-        _sorted = _gdf.iloc[np.argsort(_key, kind="stable")]
+        _sorted = _gdf.iloc[np.argsort(_key, kind="stable")].reset_index(drop=True)
         empty_geometries[_layer] = int(_missing.sum())
         for _name, _spec in VARIANTS.items():
             if _spec is None:
@@ -407,7 +407,10 @@ def _(OUT, hashlib, pd, pq, variant_paths):
         _names = [n for n in _table.column_names if n != "bbox"]
         _geom = _table.column("geometry")
         _wkb = (_geom.storage if hasattr(_geom, "storage") else _geom.cast("binary")).to_pylist()
-        _attrs = _table.select([n for n in _names if n != "geometry"]).to_pandas()
+        # Arrow types, not the pandas metadata some writers add, so an int column reads as int from every file.
+        _attrs = _table.select([n for n in _names if n != "geometry"]).to_pandas(
+            types_mapper=pd.ArrowDtype, ignore_metadata=True
+        )
         _attr_hash = pd.util.hash_pandas_object(_attrs, index=False).to_numpy()
         return sorted(
             hashlib.sha1((w or b"") + int(a).to_bytes(8, "little")).hexdigest()
@@ -862,6 +865,8 @@ for f in sys.argv[1:]:
             return f"wrong row count {r['rows']}"
         if not r["geometry"]:
             return f"reads, geometry as {r['type']}"
+        if r["crs"] == "" and r["variant"] != "published" and _expected_crs[r["layer"]] == "EPSG:4326":
+            return "ok (CRS left as Parquet's default, OGC:CRS84)"
         if r["crs"] == "":
             return "reads, no CRS on the column"
         if r["crs"] not in (None, _expected_crs[r["layer"]]):
@@ -920,9 +925,30 @@ def _(OUT, answers_check, json, results, sizes, totals):
 @app.cell
 def _(mo):
     mo.md(r"""
-    ## What didn't work
+    ## What it shows, and what didn't work
 
-    See the README for the write-up; it is filled in from the printed tables above after the run.
+    - **Answers don't change.** Every rewritten file holds the same rows, attributes and WKB bytes as the
+      published file, and every query returns the same features from every variant.
+    - **Bytes depend on the writer and the reader more than on the spec version.** DuckDB skips row groups
+      using 2.0 statistics only in files DuckDB wrote. pyarrow (and so GeoPandas) writes the geospatial
+      statistics without the column's ordinary statistics block, and DuckDB 2.0.1 then reads every row group.
+      GeoPandas reads the statistics from either writer.
+    - **Where `bbox` is already there, a 2.0 conversion saves little on reads.** DuckDB with the explicit
+      `bbox` filter on the published file fetches about what it fetches from a DuckDB-written 2.0 file with no
+      hint, because HIFLD Next's files are already in a roughly spatial order. The win for DuckDB users is that
+      they no longer need to know about the `bbox` column.
+    - **Sorting at the guide's 100,000-row groups didn't help these layers.** With 2 to 4 row groups per
+      file, a Hilbert sort spreads each group over a wide area, and the box often lands on a boundary. Only
+      10,000-row groups cut bytes sharply, at the cost of more requests and a bigger footer.
+    - **File size:** dropping `bbox` is the real saving for point layers; for lines and polygons, geometry
+      dominates.
+    - **Readers a year old can't open 2.0 at all,** and polars 2.2 can't open any 2.0 file today.
+    - **Sampling:** the catalog's `hifld:feature_count` for NFHL water lines says 6.1 million features; the
+      file has 84,431. It entered the sample on the wrong count and stays in, as a single-row-group case.
+    - **Measurement caveats:** GeoPandas reads an `https://` URL through fsspec, which first opens one GET
+      without a range (to check whether the path is a directory) and abandons it. Those requests are counted
+      separately (`unranged GETs` in `queries.csv`) and their bytes left out. The server is local, so times
+      show reader work, not network latency.
     """)
     return
 
