@@ -35,6 +35,8 @@ def _():
     OUT.mkdir(parents=True, exist_ok=True)
     SEED = int(os.environ.get("SEED", "331"))
     REPEATS = int(os.environ.get("REPEATS", "3"))
+    # REUSE=1 keeps rewritten files from an earlier run (for development; write times are then not measured).
+    REUSE = os.environ.get("REUSE") == "1"
     API = "https://hifld.publicenvirodata.org/api/collections/hifld/datasets"
     http = httpx.Client(timeout=300, follow_redirects=True)
     return (
@@ -42,6 +44,7 @@ def _():
         DATA,
         OUT,
         REPEATS,
+        REUSE,
         RangeRequestHandler,
         SEED,
         ThreadPoolExecutor,
@@ -238,19 +241,23 @@ def _(mo):
 
     GeoPandas 1.2 writes GeoParquet 2.0 (`to_parquet(schema_version="2.0.0")`) through pyarrow 26, which writes
     the native `GEOMETRY` logical type with per-row-group bounding boxes, and adds the `bbox` covering column
-    when asked (`write_covering_bbox=True`). Every rewrite uses the publishing guide's settings: ZSTD level 15
-    and 100,000-row row groups. Eight files per layer:
+    when asked (`write_covering_bbox=True`). DuckDB 2.0 writes 2.0 with `COPY ... (GEOPARQUET_VERSION 'V2')`
+    and no `bbox` column. Every rewrite uses ZSTD level 15, as the publishing guide recommends. Unsorted
+    rewrites keep the published file's rows per row group, so the only change is the format; sorted ones use
+    the guide's 100,000 rows, or 10,000. Ten files per layer:
 
-    | Variant | Format | Rows | Why |
-    |---|---|---|---|
-    | `published` | 1.1 + bbox | as served | the baseline |
-    | `1.1+bbox` | 1.1 + bbox | same order | our writer's control: differences from `published` are the writer, not the format |
-    | `2.0` | 2.0 native, no bbox | same order | the plain conversion |
-    | `2.0+bbox` | 2.0 native + bbox | same order | the conversion keeping the covering column |
-    | `sorted 1.1+bbox` | 1.1 + bbox | Hilbert-sorted | is it the sort or the format? |
-    | `sorted 2.0` | 2.0 native | Hilbert-sorted | the 2.0 file the guide recommends |
-    | `sorted 2.0+bbox` | 2.0 native + bbox | Hilbert-sorted | |
-    | `sorted 2.0, 10k groups` | 2.0 native | Hilbert-sorted, 10,000-row groups | what smaller row groups buy |
+    | Variant | Writer | Format | Rows | Why |
+    |---|---|---|---|---|
+    | `published` | HIFLD Next | 1.1 + bbox | as served | the baseline |
+    | `1.1+bbox` | GeoPandas | 1.1 + bbox | same order | control: a difference from `published` is our writer |
+    | `2.0` | GeoPandas | 2.0, no bbox | same order | the plain conversion |
+    | `2.0+bbox` | GeoPandas | 2.0 + bbox | same order | the conversion keeping the covering column |
+    | `sorted 1.1+bbox` | GeoPandas | 1.1 + bbox | Hilbert-sorted | is it the sort or the format? |
+    | `sorted 2.0` | GeoPandas | 2.0 | Hilbert-sorted | the 2.0 file the guide recommends |
+    | `sorted 2.0+bbox` | GeoPandas | 2.0 + bbox | Hilbert-sorted | |
+    | `sorted 2.0, 10k groups` | GeoPandas | 2.0 | sorted, 10,000-row groups | what smaller row groups buy |
+    | `2.0 DuckDB-written` | DuckDB | 2.0 | same order | does the writer matter? |
+    | `sorted 2.0, 10k groups, DuckDB-written` | DuckDB | 2.0 | sorted, 10,000-row groups | |
 
     While each layer is in memory we also pick its two queries: a box 2% of the layer's extent on a side,
     centred on a seeded random feature, and an attribute filter on the first text column whose most common
@@ -260,49 +267,70 @@ def _(mo):
 
 
 @app.cell
-def _(SEED, gpd, np, published_paths, time):
+def _(REUSE, SEED, duckdb, gpd, np, pd, pq, published_paths, time):
+    # name: (writer, GeoParquet version, bbox column, Hilbert-sorted, rows per row group; None = as published)
     VARIANTS = {
         "published": None,
-        "1.1+bbox": ("1.1.0", True, False, 100_000),
-        "2.0": ("2.0.0", False, False, 100_000),
-        "2.0+bbox": ("2.0.0", True, False, 100_000),
-        "sorted 1.1+bbox": ("1.1.0", True, True, 100_000),
-        "sorted 2.0": ("2.0.0", False, True, 100_000),
-        "sorted 2.0+bbox": ("2.0.0", True, True, 100_000),
-        "sorted 2.0, 10k groups": ("2.0.0", False, True, 10_000),
+        "1.1+bbox": ("geopandas", "1.1.0", True, False, None),
+        "2.0": ("geopandas", "2.0.0", False, False, None),
+        "2.0+bbox": ("geopandas", "2.0.0", True, False, None),
+        "sorted 1.1+bbox": ("geopandas", "1.1.0", True, True, 100_000),
+        "sorted 2.0": ("geopandas", "2.0.0", False, True, 100_000),
+        "sorted 2.0+bbox": ("geopandas", "2.0.0", True, True, 100_000),
+        "sorted 2.0, 10k groups": ("geopandas", "2.0.0", False, True, 10_000),
+        "2.0 DuckDB-written": ("duckdb", "2.0.0", False, False, None),
+        "sorted 2.0, 10k groups, DuckDB-written": ("duckdb", "2.0.0", False, True, 10_000),
     }
     variant_paths = {}
     queries = {}
+    empty_geometries = {}
     _rows = []
     for _layer, _published in published_paths.items():
         _gdf = gpd.read_parquet(_published)
-        _sorted = _gdf.iloc[np.argsort(_gdf.hilbert_distance(), kind="stable")]
+        # Hilbert distance can't be computed for empty or missing geometries; they go last.
+        _missing = (_gdf.geometry.isna() | _gdf.geometry.is_empty).to_numpy()
+        _key = np.full(len(_gdf), np.iinfo(np.int64).max)
+        _key[~_missing] = _gdf.geometry[~_missing].hilbert_distance().to_numpy()
+        _sorted = _gdf.iloc[np.argsort(_key, kind="stable")]
+        empty_geometries[_layer] = int(_missing.sum())
         for _name, _spec in VARIANTS.items():
             if _spec is None:
                 variant_paths[(_layer, _name)] = _published
                 continue
-            _version, _bbox, _is_sorted, _rg = _spec
+            _writer, _version, _bbox, _is_sorted, _rg = _spec
+            _rg = _rg or pq.ParquetFile(_published).metadata.row_group(0).num_rows
             _path = _published.with_name(_name.replace(" ", "_").replace(",", "").replace("+", "_") + ".parquet")
-            _start = time.perf_counter()
-            (_sorted if _is_sorted else _gdf).to_parquet(
-                _path,
-                schema_version=_version,
-                write_covering_bbox=_bbox,
-                row_group_size=_rg,
-                compression="zstd",
-                compression_level=15,
-            )
-            _rows.append((_layer, _name, round(time.perf_counter() - _start, 2)))
             variant_paths[(_layer, _name)] = _path
+            if REUSE and _path.exists() and _path.stat().st_mtime > _published.stat().st_mtime:
+                continue
+            _start = time.perf_counter()
+            if _writer == "geopandas":
+                (_sorted if _is_sorted else _gdf).to_parquet(
+                    _path,
+                    schema_version=_version,
+                    write_covering_bbox=_bbox,
+                    row_group_size=_rg,
+                    compression="zstd",
+                    compression_level=15,
+                )
+            else:  # DuckDB copies the rows in the order of the matching GeoPandas file, without its bbox column
+                _source = variant_paths[(_layer, "sorted 2.0, 10k groups")] if _is_sorted else _published
+                _cols = "* exclude (bbox)" if "bbox" in pq.read_schema(_source).names else "*"
+                duckdb.sql("install spatial; load spatial")
+                duckdb.sql(
+                    f"copy (select {_cols} from '{_source}') to '{_path}' (format parquet, "
+                    f"geoparquet_version 'V2', compression zstd, compression_level 15, row_group_size {_rg})"
+                )
+            _rows.append((_layer, _name, round(time.perf_counter() - _start, 2)))
 
         _rng = np.random.default_rng(SEED)
         _minx, _miny, _maxx, _maxy = _gdf.total_bounds
-        _b = _gdf.geometry.iloc[int(_rng.integers(len(_gdf)))].bounds
+        _b = _gdf.geometry[~_missing].iloc[int(_rng.integers(int((~_missing).sum())))].bounds
         _cx, _cy = (_b[0] + _b[2]) / 2, (_b[1] + _b[3]) / 2
         _hw, _hh = (_maxx - _minx) * 0.01, (_maxy - _miny) * 0.01
         _attr = None
         for _col in _gdf.columns:
-            if _col != "geometry" and _gdf[_col].dtype == object:
+            if _col != "geometry" and pd.api.types.is_string_dtype(_gdf[_col]):
                 _counts = _gdf[_col].value_counts(normalize=True)
                 if len(_counts) and 0.01 <= _counts.iloc[0] <= 0.30:
                     _attr = (_col, str(_counts.index[0]), round(float(_counts.iloc[0]), 3))
@@ -311,8 +339,9 @@ def _(SEED, gpd, np, published_paths, time):
         queries[_layer] = {"box": (_cx - _hw, _cy - _hh, _cx + _hw, _cy + _hh), "attribute": _attr}
         del _gdf, _sorted
     write_seconds = {(_l, _n): _s for _l, _n, _s in _rows}
-    {_l: {"box": [round(v, 4) for v in q["box"]], "attribute": q["attribute"]} for _l, q in queries.items()}
-    return VARIANTS, queries, variant_paths, write_seconds
+    print("Empty or missing geometries:", empty_geometries)
+    {_l: {"box": [round(float(v), 4) for v in q["box"]], "attribute": q["attribute"]} for _l, q in queries.items()}
+    return VARIANTS, empty_geometries, queries, variant_paths, write_seconds
 
 
 @app.cell
@@ -381,7 +410,8 @@ def _(OUT, hashlib, pd, pq, variant_paths):
         _attrs = _table.select([n for n in _names if n != "geometry"]).to_pandas()
         _attr_hash = pd.util.hash_pandas_object(_attrs, index=False).to_numpy()
         return sorted(
-            hashlib.sha1(w + int(a).to_bytes(8, "little")).hexdigest() for w, a in zip(_wkb, _attr_hash, strict=True)
+            hashlib.sha1((w or b"") + int(a).to_bytes(8, "little")).hexdigest()
+            for w, a in zip(_wkb, _attr_hash, strict=True)
         )
 
     _rows = []
@@ -517,7 +547,7 @@ def _(
                 {"columns": ["geometry", _col], "filters": [(_col, "==", _val)]},
             ),
         }
-        if VARIANTS[_name] is None or VARIANTS[_name][1]:
+        if VARIANTS[_name] is None or VARIANTS[_name][2]:
             _runs[("box", "DuckDB ST_Intersects + bbox filter")] = (_box_sql + _hint, {})
         for (_query, _reader), (_sql, _kwargs) in _runs.items():
             _answer, _bytes, _requests, _unranged, _ms = measure(_con, _sql, _url, _kwargs)
@@ -631,11 +661,11 @@ def _(mo):
     mo.md(r"""
     ## 6. Which readers open the files
 
-    Each reader opens the published 1.1 file, the `2.0` file and the `2.0+bbox` file of every layer, in its
-    own environment (`uv run --with` for Python packages, the official GDAL Docker images for GDAL). A reader
-    passes a file if it returns every row and recognises the geometry column as geometry (not bytes) with the
-    right CRS. "Current" is the latest release; "a year old" is what someone who hasn't upgraded since late
-    2025 has: DuckDB 1.3.2, GeoPandas 1.0.1 with pyarrow 19, GDAL 3.10.3.
+    Each reader opens the published 1.1 file and the `2.0`, `2.0+bbox` and DuckDB-written 2.0 files of every
+    layer, in its own environment (`uv run --with` for Python packages, the official GDAL Docker images for
+    GDAL). A reader passes a file if it returns every row and recognises the geometry column as geometry (not
+    bytes) with the right CRS. "Current" is the latest release; "a year old" is what someone who hasn't
+    upgraded since late 2025 has: DuckDB 1.3.2, GeoPandas 1.0.1 with pyarrow 19, GDAL 3.10.3.
     """)
     return
 
@@ -652,7 +682,7 @@ for f in sys.argv[1:]:
         n = con.sql(f"select count(*) from read_parquet('{f}')").fetchall()[0][0]
         t = con.sql(f"select typeof(geometry) from read_parquet('{f}') limit 1").fetchall()[0][0]
         geom = t.upper().startswith("GEOMETRY")
-        crs = t[t.find("(") + 1 : t.rfind(")")].strip("'") if "(" in t else None
+        crs = t[t.find("(") + 1 : t.rfind(")")].strip("'") if "(" in t else ""
         print(json.dumps({"file": f, "rows": n, "type": t, "geometry": geom, "crs": crs}))
     except Exception as e:
         print(json.dumps({"file": f, "error": str(e).splitlines()[0][:200]}))
@@ -673,10 +703,11 @@ import pyarrow.parquet as pq, json, sys
 for f in sys.argv[1:]:
     try:
         t = pq.read_table(f)
-        typ = t.schema.field("geometry").type
-        name = getattr(typ, "extension_name", None)
-        print(json.dumps({"file": f, "rows": t.num_rows, "type": name or str(typ), "geometry": name is not None,
-                          "crs": None}))
+        field = t.schema.field("geometry")
+        tag = (field.metadata or {}).get(b"ARROW:extension:name", b"").decode()
+        typ = getattr(field.type, "extension_name", None) or str(field.type)
+        print(json.dumps({"file": f, "rows": t.num_rows, "type": typ + (f" tagged {tag}" if tag else ""),
+                          "geometry": False, "crs": None}))
     except Exception as e:
         print(json.dumps({"file": f, "error": str(e).splitlines()[0][:200]}))
 """,
@@ -685,7 +716,8 @@ import polars as pl, json, sys
 for f in sys.argv[1:]:
     try:
         d = pl.read_parquet(f)
-        print(json.dumps({"file": f, "rows": d.height, "type": str(d.schema["geometry"]), "geometry": False,
+        print(json.dumps({"file": f, "rows": d.height, "type": str(d.schema["geometry"]).split(",")[0] + ")",
+                          "geometry": False,
                           "crs": None}))
     except Exception as e:
         print(json.dumps({"file": f, "error": str(e).splitlines()[0][:200]}))
@@ -699,7 +731,8 @@ for f in sys.argv[1:]:
         ("pyarrow 26.0.1 (no geo library)", "current", "pyarrow", ["pyarrow==26.0.1"]),
         ("polars 2.2.0", "current", "polars", ["polars==2.2.0"]),
     ]
-    _files = {(_l, _v): str(_p) for (_l, _v), _p in variant_paths.items() if _v in ("published", "2.0", "2.0+bbox")}
+    _COMPAT_VARIANTS = ["published", "2.0", "2.0+bbox", "2.0 DuckDB-written"]
+    _files = {(_l, _v): str(_p) for (_l, _v), _p in variant_paths.items() if _v in _COMPAT_VARIANTS}
     _by_file = {_f: _k for _k, _f in _files.items()}
     _results = []
 
@@ -747,7 +780,10 @@ for f in sys.argv[1:]:
                 record(
                     f"GDAL {_tag} (ogrinfo)",
                     _age,
-                    {"file": _f, "error": (_p.stderr.strip().splitlines() or ["?"])[-1][:200]},
+                    {
+                        "file": _f,
+                        "error": (_p.stderr.strip().splitlines() or ["?"])[-1].replace(_inside, "<file>")[:200],
+                    },
                 )
                 continue
             _lyr = json.loads(_p.stdout)["layers"][0]
@@ -797,14 +833,16 @@ for f in sys.argv[1:]:
             timeout=600,
         )
         _verdicts = [line.strip() for line in _p.stdout.splitlines() if line.strip().startswith("=>")]
-        _fails = [v for v in _verdicts if not v.endswith(": conformant")]
+        _fails = [
+            line.strip()[6:].split("  --")[0] for line in _p.stdout.splitlines() if line.strip().startswith("FAIL")
+        ]
         record(
             f"{_validator} (spec check)",
             "current",
             {
                 "file": _f,
                 "rows": None,
-                "type": "; ".join(_verdicts)[:300],
+                "type": ", ".join(_fails),
                 "geometry": not _fails and bool(_verdicts),
                 "crs": None,
                 "validator": True,
@@ -824,6 +862,8 @@ for f in sys.argv[1:]:
             return f"wrong row count {r['rows']}"
         if not r["geometry"]:
             return f"reads, geometry as {r['type']}"
+        if r["crs"] == "":
+            return "reads, no CRS on the column"
         if r["crs"] not in (None, _expected_crs[r["layer"]]):
             return f"reads, CRS {r['crs']} (expected {_expected_crs[r['layer']]})"
         return "ok"
@@ -844,7 +884,7 @@ def _(OUT, pd, readers):
     compat = (
         readers.groupby(["reader", "age", "variant"], sort=False)["verdict"]
         .apply(summarise)
-        .unstack("variant")[["published", "2.0", "2.0+bbox"]]
+        .unstack("variant")[["published", "2.0", "2.0+bbox", "2.0 DuckDB-written"]]
     )
     compat.to_csv(OUT / "reader_compatibility.csv")
     print(compat.to_string())
